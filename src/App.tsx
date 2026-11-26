@@ -61,6 +61,7 @@ export function App() {
 	const [schemaLoading, setSchemaLoading] = createSignal(false)
 	const [schemaError, setSchemaError] = createSignal<string | null>(null)
 	const [scratchpads, setScratchpads] = createSignal<Scratchpad[]>([])
+	const [consoleFocusTick, setConsoleFocusTick] = createSignal(0)
 
 	const [sidebarOpen, setSidebarOpen] = createSignal(true)
 	const [tableFilter, setTableFilter] = createSignal('')
@@ -183,7 +184,7 @@ export function App() {
 				if (pRes.scratchpads.length === 0) {
 					const created = await api.createScratchpad(
 						connId,
-						'Scratchpad 1',
+						'Console 1',
 						'-- Press Cmd+Enter to run the highlighted statement\n',
 					)
 					setScratchpads([created.scratchpad])
@@ -204,7 +205,7 @@ export function App() {
 	async function openOrCreateScratchpad(connId: string, initialSql?: string) {
 		try {
 			if (initialSql !== undefined) {
-				const res = await api.createScratchpad(connId, `Query ${scratchpads().length + 1}`, initialSql)
+				const res = await api.createScratchpad(connId, `Console ${scratchpads().length + 1}`, initialSql)
 				setScratchpads((prev) => [res.scratchpad, ...prev])
 				navigate({ kind: 'sql', connId, padId: res.scratchpad.id })
 				return
@@ -214,7 +215,7 @@ export function App() {
 				navigate({ kind: 'sql', connId, padId: existing[0]!.id })
 				return
 			}
-			const res = await api.createScratchpad(connId, 'Scratchpad 1', '-- Press Cmd+Enter to run statement\n')
+			const res = await api.createScratchpad(connId, 'Console 1', '-- Press Cmd+Enter to run statement\n')
 			setScratchpads([res.scratchpad])
 			navigate({ kind: 'sql', connId, padId: res.scratchpad.id })
 		} catch (err) {
@@ -279,17 +280,21 @@ export function App() {
 		}
 		window.addEventListener('popstate', onPop)
 
+		const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+
 		const onKey = (e: KeyboardEvent) => {
-			if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'r') {
+			const key = e.key.toLowerCase()
+			const primaryMod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+			if (e.ctrlKey && !e.metaKey && !e.altKey && key === 'r') {
 				e.preventDefault()
 				setOmnibarOpen(false)
 				setRecentModalOpen((v) => !v)
 				void refreshConnections()
-			} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'k') {
 				e.preventDefault()
 				setRecentModalOpen(false)
 				setOmnibarOpen((v) => !v)
-			} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'b') {
 				e.preventDefault()
 				setSidebarOpen((v) => !v)
 			} else if (e.metaKey && e.key === '[') {
@@ -298,7 +303,21 @@ export function App() {
 			} else if (e.metaKey && e.key === ']') {
 				e.preventDefault()
 				window.history.forward()
-			} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+			} else if (primaryMod && !e.altKey && ((e.shiftKey && key === 'l') || (!e.shiftKey && key === 'e'))) {
+				e.preventDefault()
+				setOmnibarOpen(false)
+				setRecentModalOpen(false)
+				const id = activeConnId()
+				if (!id) {
+					notify('Select a database first', 'info')
+					return
+				}
+				if (route().kind === 'sql') {
+					setConsoleFocusTick((n) => n + 1)
+				} else {
+					void openOrCreateScratchpad(id).then(() => setConsoleFocusTick((n) => n + 1))
+				}
+			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'l') {
 				e.preventDefault()
 				void copyToClipboard(window.location.href).then((ok) => {
 					if (ok) notify('Copied current URL', 'ok')
@@ -414,7 +433,7 @@ export function App() {
 		([connName, r]) => {
 			const prodPrefix = activeConn()?.isProduction ? '[PROD] ' : ''
 			if (r.kind === 'table') document.title = `${prodPrefix}${r.table} · ${connName ?? 'DataDip'}`
-			else if (r.kind === 'sql') document.title = `${prodPrefix}SQL · ${connName ?? 'DataDip'}`
+			else if (r.kind === 'sql') document.title = `${prodPrefix}Console · ${connName ?? 'DataDip'}`
 			else document.title = 'DataDip'
 		},
 	)
@@ -704,21 +723,27 @@ export function App() {
 						</div>
 
 						<div class="sidebar-scroll">
-							{/* Scratchpads section */}
+							{/* Consoles section */}
 							<div class="sidebar-section-head">
-								<span>SQL Scratchpads</span>
-								<button
-									type="button"
-									class="icon-btn ghost"
-									style="width:20px;height:20px"
-									aria-label="New scratchpad"
-									onClick={() => {
-										const id = activeConnId()
-										if (id) void openOrCreateScratchpad(id, '-- Write SQL and press Cmd+Enter\n')
-									}}
-								>
-									<IconPlus />
-								</button>
+								<span>Consoles</span>
+								<span style="display:inline-flex;align-items:center;gap:4px">
+									<span class="kbd" style="text-transform:none" title="Open Console (Cmd+E or Cmd+Shift+L)">
+										⌘E
+									</span>
+									<button
+										type="button"
+										class="icon-btn ghost"
+										style="width:20px;height:20px"
+										aria-label="New console"
+										title="New Console"
+										onClick={() => {
+											const id = activeConnId()
+											if (id) void openOrCreateScratchpad(id, '-- Write SQL and press Cmd+Enter\n')
+										}}
+									>
+										<IconPlus />
+									</button>
+								</span>
 							</div>
 
 							<Show when={scratchpads().length === 0}>
@@ -732,7 +757,7 @@ export function App() {
 									}}
 								>
 									<IconSql />
-									<span>+ Open SQL Scratchpad</span>
+									<span>+ Open Console</span>
 								</button>
 							</Show>
 
@@ -922,6 +947,7 @@ export function App() {
 							scratchpad={activePad()}
 							schema={schema()}
 							dark={dark()}
+							focusTick={consoleFocusTick()}
 							onScratchpadUpdated={(pad) => setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))}
 							onScratchpadDeleted={(padId) => {
 								const rest = scratchpads().filter((p) => p.id !== padId)
@@ -1037,7 +1063,7 @@ export function App() {
 				onSelectScratchpad={(connId, padId) => navigate({ kind: 'sql', connId, padId })}
 				onNewScratchpad={() => {
 					const id = activeConnId()
-					if (id) void openOrCreateScratchpad(id, '-- New scratchpad\n')
+					if (id) void openOrCreateScratchpad(id, '-- New console\n')
 				}}
 				onToggleTheme={toggleTheme}
 				onToggleRw={() => void setRw(!rwArmed())}

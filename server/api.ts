@@ -243,7 +243,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			}
 			if (rest === 'scratchpads' && method === 'POST') {
 				const body = await readBody<{ title?: string; sql?: string }>(req)
-				const pad = manager.store.createScratchpad(connId, body.title || 'Untitled scratchpad', body.sql ?? '')
+				const pad = manager.store.createScratchpad(connId, body.title || 'Untitled console', body.sql ?? '')
 				return asonResponse({ scratchpad: pad }, 201)
 			}
 
@@ -265,12 +265,12 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			if (method === 'PUT') {
 				const body = await readBody<{ title?: string; sql?: string; pinned?: boolean }>(req)
 				const updated = manager.store.updateScratchpad(padId, body)
-				if (!updated) throw new HttpError(404, 'Scratchpad not found')
+				if (!updated) throw new HttpError(404, 'Console not found')
 				return asonResponse({ scratchpad: updated })
 			}
 			if (method === 'DELETE') {
 				const ok = manager.store.deleteScratchpad(padId)
-				if (!ok) throw new HttpError(404, 'Scratchpad not found')
+				if (!ok) throw new HttpError(404, 'Console not found')
 				return asonResponse({ ok: true })
 			}
 		}

@@ -174,7 +174,7 @@ export function SqlEditor(props: {
 				},
 			},
 			{
-				key: 'Mod-e',
+				key: 'Mod-Shift-e',
 				run: (v) => {
 					const sel = v.state.selection.main
 					const selected = sel.empty ? '' : v.state.doc.sliceString(sel.from, sel.to)

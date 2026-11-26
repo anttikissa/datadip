@@ -114,12 +114,12 @@ export function Omnibar(props: {
 				}
 			}
 
-			// Scratchpads
+			// Consoles
 			for (const pad of props.scratchpads) {
 				if (!q || pad.title.toLowerCase().includes(q) || pad.sql.toLowerCase().includes(q)) {
 					list.push({
 						id: `pad:${pad.id}`,
-						kind: 'SQL',
+						kind: 'CONSOLE',
 						label: pad.title,
 						detail: pad.sql.trim().slice(0, 50),
 						run: () => {
@@ -154,8 +154,8 @@ export function Omnibar(props: {
 						{
 							id: 'act:new-sql',
 							kind: 'ACTION',
-							label: 'New SQL Scratchpad',
-							detail: 'Open fresh scratchpad',
+							label: 'New SQL Console',
+							detail: 'Open fresh query console',
 							run: () => {
 								props.onNewScratchpad()
 								props.onClose()
@@ -250,7 +250,7 @@ export function Omnibar(props: {
 				<input
 					ref={(el) => (inputEl = el)}
 					class="omnibar-input"
-					placeholder="Jump to table, column, scratchpad, connection, or paste an ID…"
+					placeholder="Jump to table, column, console, connection, or paste an ID…"
 					value={query()}
 					onInput={(e) => {
 						setQuery(e.currentTarget.value)

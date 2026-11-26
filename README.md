@@ -1,7 +1,7 @@
 # DataDip
 
 A fast, utilitarian database browser, foreign-key navigator, and SQL
-scratchpad IDE for local and SSH-remote databases.
+console IDE for local and SSH-remote databases.
 
 ## Features
 
@@ -14,12 +14,12 @@ scratchpad IDE for local and SSH-remote databases.
   target row without leaving your grid. Open the Row Inspector (`Space`)
   to see formatted JSON/ASON, timestamps, outgoing FKs, and incoming
   ("Referenced by") counts across other tables.
-- **SQL Scratchpad**: Auto-saved multi-statement documents with
-  CodeMirror 6, SQLite syntax highlighting, live schema autocomplete,
-  custom SQL linter, SQL formatter (`Cmd+Shift+F`), active-statement
-  highlighting (`Cmd+Enter` runs the statement under cursor;
-  `Cmd+Shift+Enter` runs all), `EXPLAIN QUERY PLAN` (`Cmd+E`), and
-  clickable FK cells directly inside query results.
+- **SQL Console (`Cmd+Shift+L` / `Cmd+E`)**: Auto-saved multi-statement
+  documents with CodeMirror 6, SQLite syntax highlighting, live schema
+  autocomplete, custom SQL linter, SQL formatter (`Cmd+Shift+F`),
+  active-statement highlighting (`Cmd+Enter` runs the statement under
+  cursor; `Cmd+Shift+Enter` runs all), `EXPLAIN QUERY PLAN`
+  (`Cmd+Shift+E`), and clickable FK cells directly inside query results.
 - **Production Safety**: Mark connections as Production for a persistent
   crimson header bar and `PROD` alert badge. Every connection opens
   Read-Only by default (enforced both in SQLite handle flags and server
@@ -29,7 +29,7 @@ scratchpad IDE for local and SSH-remote databases.
   remote Bun worker so concurrent queries execute in milliseconds without
   spawning a new SSH process per query. Includes an Auto-Discover wizard
   for local and SSH hosts.
-- **Omnibar (`Cmd+K`)**: Jump to tables, columns, scratchpads, or
+- **Omnibar (`Cmd+K`)**: Jump to tables, columns, consoles, or
   connections — or paste an ID to locate matching rows across tables.
 
 ## Install & Run

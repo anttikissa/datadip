@@ -94,6 +94,12 @@ obvious.
 - `Ctrl+R` opens the Recent Databases & Tables modal (WebStorm/IDEA
   style, distinct from `Cmd+R` page reload) with MRU switching and
   instant filtering.
+- SQL documents are labeled "Console" in the UI (matching DataGrip/DBeaver
+  terminology while keeping the `scratchpads` SQLite table and API paths
+  unchanged). `Cmd+Shift+L` (DataGrip) and `Cmd+E` (TablePlus) open or
+  focus the active connection's Console (`Ctrl+E` stays unbound on macOS
+  so Emacs end-of-line still works in inputs); `EXPLAIN QUERY PLAN` uses
+  `Cmd+Shift+E`.
 - CLI probe/control commands (`url`, `status`, `open`, `stop`, and the
   duplicate server check) read only `server.ason` without opening
   `state.db`.

@@ -366,7 +366,7 @@ export class DataStore {
 		}
 	}
 
-	createScratchpad(connectionId: string, title = 'Untitled scratchpad', sql = ''): Scratchpad {
+	createScratchpad(connectionId: string, title = 'Untitled console', sql = ''): Scratchpad {
 		const now = new Date().toISOString()
 		const pad: Scratchpad = {
 			id: tid('s'),

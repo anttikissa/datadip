@@ -20,6 +20,7 @@ export function ScratchpadView(props: {
 	scratchpad: Scratchpad | null
 	schema: DatabaseSchema | null
 	dark: boolean
+	focusTick?: number
 	onScratchpadUpdated: (pad: Scratchpad) => void
 	onScratchpadDeleted: (padId: string) => void
 	onFollowFk: (targetTable: string, targetColumn: string, value: unknown) => void
@@ -52,13 +53,20 @@ export function ScratchpadView(props: {
 		() => {
 			const pad = props.scratchpad
 			if (saveTimer) clearTimeout(saveTimer)
-			setTitle(pad?.title ?? 'Untitled scratchpad')
+			setTitle(pad?.title ?? 'Untitled console')
 			setSql(pad?.sql ?? '')
 			setSaveState('saved')
 			setRunError(null)
 			setResults([])
 			setActiveTab(0)
 			setTotalMs(null)
+		},
+	)
+
+	createEffect(
+		() => props.focusTick,
+		(tick) => {
+			if (tick) queueMicrotask(() => editorHandle?.focus())
 		},
 	)
 
@@ -214,7 +222,7 @@ export function ScratchpadView(props: {
 						setTitle(v)
 						scheduleSave(v, sql())
 					}}
-					aria-label="Scratchpad title"
+					aria-label="Console title"
 				/>
 				<span style="font-size:11px;color:var(--ink-muted)">{saveState() === 'saving' ? 'Saving…' : 'Saved'}</span>
 
@@ -235,7 +243,7 @@ export function ScratchpadView(props: {
 
 				<button type="button" class="btn sm" disabled={running()} onClick={() => runExplain()}>
 					Explain
-					<span class="kbd">⌘E</span>
+					<span class="kbd">⇧⌘E</span>
 				</button>
 
 				<button type="button" class="btn sm" onClick={handleFormat}>
@@ -263,12 +271,12 @@ export function ScratchpadView(props: {
 							type="button"
 							class="icon-btn ghost"
 							style="height:26px;width:26px"
-							aria-label="Delete scratchpad"
+							aria-label="Delete console"
 							onClick={() =>
 								props.onRequestConfirm({
 									title: `Delete "${pad().title}"?`,
-									message: 'This permanently deletes this saved scratchpad.',
-									confirmLabel: 'Delete Scratchpad',
+									message: 'This permanently deletes this saved console.',
+									confirmLabel: 'Delete Console',
 									danger: true,
 									onConfirm: async () => {
 										await api.deleteScratchpad(pad().id)
@@ -299,7 +307,10 @@ export function ScratchpadView(props: {
 							onRunAll={runAll}
 							onExplain={(cur, sel) => runExplain(cur, sel)}
 							onFormat={handleFormat}
-							onReady={(h) => (editorHandle = h)}
+							onReady={(h) => {
+								editorHandle = h
+								queueMicrotask(() => h.focus())
+							}}
 						/>
 					</div>
 

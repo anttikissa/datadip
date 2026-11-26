@@ -746,7 +746,7 @@ export function TableView(props: {
 					}}
 				>
 					<IconSql />
-					Open in Scratchpad
+					Open in Console
 				</button>
 
 				<div style="flex:1" />
