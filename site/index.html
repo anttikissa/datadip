@@ -83,12 +83,11 @@
 							<span class="release-arrow" aria-hidden="true">&rarr;</span>
 						</a>
 
-						<h1>Browse your database<br />like the web.</h1>
+						<h1>Browse &amp; edit databases<br />like the web.</h1>
 						<p class="lead">
-							A fast, keyboard-first <strong>SQLite &amp; PostgreSQL</strong> browser, foreign-key navigator, visual ER
-							diagram, and parallel SQL console for local files and SSH servers. Click foreign keys to jump across
-							tables, hit Back without losing filters, and paste any ID into <kbd>&#8984;K</kbd> to find matching rows
-							everywhere.
+							A fast, keyboard-first <strong>SQLite &amp; PostgreSQL</strong> browser, staged inline table editor,
+							foreign-key navigator, visual ER diagram, and parallel SQL console for local files, SSH servers, Turso,
+							and Cloudflare D1. Read-only by default, with exact SQL preview before every commit.
 						</p>
 
 						<div class="hero-ctas">
@@ -322,7 +321,7 @@
 						<h2>Ten big upgrades, zero extra bloat</h2>
 						<p>
 							Visual schema exploration, one-keystroke column statistics, multi-client workspaces, permanently locked
-							read-only replicas, transactional CSV/JSON import, and deep SQLite internals — still 46 MB, still zero
+							read-only replicas, transactional CSV/JSON import, and deep SQLite internals — just 42 MB, still zero
 							Electron.
 						</p>
 					</div>
@@ -466,15 +465,25 @@
 							<div class="card-kicker mono">01 / NAVIGATION &amp; ER</div>
 							<h3>Web-native FKs &amp; interactive ER diagram</h3>
 							<p>
-								Every foreign key is a real link. Hover to peek, click to jump, press <kbd>Space</kbd> for incoming
-								<strong>Referenced by</strong> counts, or open the pan/zoom <strong>ER Diagram</strong>. Share filtered
-								views with teammates by database name (<strong>Share</strong>) and use <kbd>&#8984;[</kbd> /
-								<kbd>&#8984;]</kbd> for instant history.
+								Every foreign key (declared, inferred, or virtual) is a real link. Hover to peek, click to jump, press
+								<kbd>Space</kbd> for incoming <strong>Referenced by</strong> counts, or open the pan/zoom
+								<strong>ER Diagram</strong>. Share filtered views by database name and use <kbd>&#8984;[</kbd> /
+								<kbd>&#8984;]</kbd> for history.
 							</p>
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">02 / SAFETY</div>
+							<div class="card-kicker mono">02 / STAGED INLINE EDITING</div>
+							<h3>Edit cells inline, preview exact SQL, commit atomically</h3>
+							<p>
+								Switch to Read-Write to double-click cells, insert or duplicate rows, mark rows for deletion, or import
+								CSV/JSON with column mapping. Pending changes highlight in amber until you review the parameterized SQL
+								preview and commit in one atomic transaction (<kbd>&#8984;S</kbd>) — or Discard in one click.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">03 / PRODUCTION SAFETY</div>
 							<h3>Read-only by default, locked in prod</h3>
 							<p>
 								Every database opens Read-Only at the driver and SQL-transaction layer, or lock replicas permanently
@@ -484,7 +493,7 @@
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">03 / SQL &amp; PROFILING</div>
+							<div class="card-kicker mono">04 / SQL &amp; PROFILING</div>
 							<h3>Parallel consoles &amp; 1-key column profiles</h3>
 							<p>
 								Run tabbed or split CodeMirror 6 consoles (<kbd>&#8984;E</kbd>) with autocomplete, formatting,
@@ -495,7 +504,7 @@
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">04 / OMNIBAR &amp; WORKSPACES</div>
+							<div class="card-kicker mono">05 / OMNIBAR &amp; WORKSPACES</div>
 							<h3>Paste a ticket ID, organize by client</h3>
 							<p>
 								Group connections into color-coded workspace folders and tags, pick hosts straight from
@@ -505,22 +514,12 @@
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">05 / IMPORT, EXPORT &amp; SCALE</div>
-							<h3>Large-table guards, CSV/JSON import &amp; export</h3>
+							<div class="card-kicker mono">06 / EVERY SQLITE + EXPORT</div>
+							<h3>Local, SSH (Bun / Python / sqlite3), Turso, &amp; D1</h3>
 							<p>
-								Keyset pagination skips full-table <code>COUNT(*)</code> scans on large databases. Export up to 100k rows
-								as CSV, TSV, JSON, Markdown, or SQL <code>INSERT</code>, duplicate rows in one click, or import CSV/JSON
-								files in a single transaction with column mapping.
-							</p>
-						</article>
-
-						<article class="card">
-							<div class="card-kicker mono">06 / LOCAL &amp; APPLE INTERNALS</div>
-							<h3>Live WAL refresh, Simulators &amp; PRAGMA inspector</h3>
-							<p>
-								Watch local <code>.db</code> / <code>-wal</code> files live, auto-discover iOS Simulator &amp; macOS App
-								Container databases, group FTS5 shadow tables cleanly, inspect triggers and PRAGMAs, and run WAL
-								checkpoints or <code>VACUUM</code> from the DB Info panel.
+								Watch local <code>.db</code>/<code>-wal</code> files live, discover iOS Simulator DBs, inspect PRAGMAs,
+								connect over SSH using whatever runtime is on the server, query Turso &amp; Cloudflare D1, and export up
+								to 100k rows as CSV, TSV, JSON, Markdown, or SQL.
 							</p>
 						</article>
 					</div>
@@ -1131,7 +1130,7 @@
 			</section>
 
 			<!-- Security & Trust Model -->
-			<section id="security" class="section">
+			<section id="security" class="section alt-bg">
 				<div class="container">
 					<div class="section-head">
 						<h2>Security &amp; Trust Model</h2>
@@ -1197,7 +1196,7 @@
 			</section>
 
 			<!-- Download & Install -->
-			<section id="install" class="section alt-bg">
+			<section id="install" class="section">
 				<div class="container">
 					<div class="section-head">
 						<h2>Get DataDip v0.3.0</h2>
@@ -1304,6 +1303,7 @@ datadip stop         # stop background server</code></pre>
 					<span>Zero cookies, zero analytics</span>
 				</div>
 				<div class="footer-right">
+					<a href="#security">Security</a>
 					<a href="#changelog">Changelog</a>
 					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
 					<a href="https://github.com/anttikissa/datadip/releases" target="_blank" rel="noreferrer">Releases</a>

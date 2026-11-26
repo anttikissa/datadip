@@ -118,6 +118,13 @@ Never assign non-ASCII characters (such as `'••••'`) directly to
 serializer percent-encodes them (e.g. `%E2%80%A2`). Assign an ASCII
 sentinel to `u.password` and replace it after `u.toString()`.
 
+Never embed raw POSIX shell or Python scripts containing `${...}` or
+backticks inside a `String.raw` template literal (template literals
+still parse `${` and `` ` ``); build shell scripts as joined string
+arrays (`[...].join('\n')`), avoid backticks/nested quotes/backslashes
+inside Python f-string `{...}` expressions so Python 3.8-3.11 stay
+compatible, and verify embedded scripts with `python3` / `sh -n`.
+
 Never display raw `pg_class.reltuples` as an unqualified table row count
 in PostgreSQL: autovacuum leaves small tables stale or `-1` until
 `ANALYZE` runs. Probe small readable regular tables (`<= 512 KB`) in one
