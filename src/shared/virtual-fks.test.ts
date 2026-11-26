@@ -95,14 +95,24 @@ describe('virtual-fks automatic inference and schema merging', () => {
 		])
 	})
 
-	test('rejects incompatible SQL type families (e.g. TEXT column vs INTEGER PK or UUID PK)', () => {
+	test('rejects incompatible SQL type families, self-table <own>_id columns, and cross-schema shadowing', () => {
 		const raw = makeSchema([
-			makeTable('users', [{ name: 'id', type: 'INTEGER', primaryKey: 1 }]),
-			makeTable('auth.accounts', [{ name: 'id', type: 'uuid', primaryKey: 1 }]),
+			makeTable('users', [{ name: 'id', type: 'TEXT', primaryKey: 1 }]),
+			makeTable('auth.users', [{ name: 'id', type: 'uuid', primaryKey: 1 }]),
+			makeTable('auth.refresh_tokens', [
+				{ name: 'id', type: 'INTEGER', primaryKey: 1 },
+				// varchar vs auth.users.id(uuid): must NOT fall back across schemas to public.users(text)
+				{ name: 'user_id', type: 'character varying(255)' },
+			]),
+			makeTable('stripe_events', [
+				{ name: 'id', type: 'TEXT', primaryKey: 1 },
+				// own-table external id must NOT self-infer
+				{ name: 'stripe_event_id', type: 'TEXT' },
+			]),
+			makeTable('orders', [{ name: 'id', type: 'INTEGER', primaryKey: 1 }]),
 			makeTable('logs', [
 				{ name: 'id', type: 'INTEGER', primaryKey: 1 },
-				{ name: 'user_id', type: 'TEXT' },
-				{ name: 'account_id', type: 'TEXT' },
+				{ name: 'order_id', type: 'TEXT' },
 			]),
 		])
 		expect(inferForeignKeys(raw)).toEqual([])

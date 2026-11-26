@@ -166,21 +166,30 @@ export function inferForeignKeys(
 			if (variants.length === 0) continue
 
 			// Prefer matching in the same schema (e.g. `public` over `auth`) and prefer plural/exact order in `variants`.
+			// Never auto-infer self-referencing `<own_table>_id` columns (often external IDs like `stripe_events.stripe_event_id`),
+			// and never fall back across schemas if a same-schema table with the matching name already exists.
 			let matched: (typeof targetMeta)[number] | null = null
+			let sameSchemaNameExists = false
 			for (const variant of variants) {
-				const sameSchemaMatches = targetMeta.filter(
-					(t) => t.prefix === fromPrefix && t.bareLower === variant && areTypesCompatible(col.type, t.pkType),
+				const sameSchemaByName = targetMeta.filter(
+					(t) => t.name !== summary.name && t.prefix === fromPrefix && t.bareLower === variant,
 				)
+				if (sameSchemaByName.length > 0) sameSchemaNameExists = true
+				const sameSchemaMatches = sameSchemaByName.filter((t) => areTypesCompatible(col.type, t.pkType))
 				if (sameSchemaMatches.length === 1) {
 					matched = sameSchemaMatches[0]!
 					break
 				}
 			}
 
-			if (!matched) {
+			if (!matched && !sameSchemaNameExists) {
 				for (const variant of variants) {
 					const crossSchemaMatches = targetMeta.filter(
-						(t) => t.prefix !== fromPrefix && t.bareLower === variant && areTypesCompatible(col.type, t.pkType),
+						(t) =>
+							t.name !== summary.name &&
+							t.prefix !== fromPrefix &&
+							t.bareLower === variant &&
+							areTypesCompatible(col.type, t.pkType),
 					)
 					if (crossSchemaMatches.length === 1) {
 						matched = crossSchemaMatches[0]!
