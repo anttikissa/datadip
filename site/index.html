@@ -39,7 +39,7 @@
 				<a class="brand" href="#top" aria-label="DataDip home">
 					<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
 					<span class="brand-name">DataDip</span>
-					<span class="version-pill">v0.1.0</span>
+					<span class="version-pill">v0.2.0</span>
 				</a>
 
 				<nav class="nav-links" aria-label="Primary">
@@ -62,7 +62,7 @@
 						<span class="theme-icon-sun" aria-hidden="true">&#9788;</span>
 						<span class="theme-icon-moon" aria-hidden="true">&#9790;</span>
 					</button>
-					<a class="btn primary sm" href="./downloads/DataDip-0.1.0-arm64.dmg" download>Download DMG</a>
+					<a class="btn primary sm" href="./downloads/DataDip-0.2.0-arm64.dmg" download>Download DMG</a>
 				</div>
 			</div>
 		</header>
@@ -84,7 +84,7 @@
 						</p>
 
 						<div class="hero-ctas">
-							<a class="btn primary lg" href="./downloads/DataDip-0.1.0-arm64.dmg" download>
+							<a class="btn primary lg" href="./downloads/DataDip-0.2.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
 								Download for macOS (Apple Silicon)
 							</a>
@@ -255,66 +255,64 @@
 
 					<div class="bento-grid">
 						<article class="card">
-							<div class="card-kicker mono">01 / NAVIGATION</div>
-							<h3>Web-native foreign-key traversal</h3>
+							<div class="card-kicker mono">01 / NAVIGATION &amp; ER</div>
+							<h3>Web-native FKs &amp; interactive ER diagram</h3>
 							<p>
-								Every foreign key is a real link. Hover to peek the target row, click to jump straight to it, and press
-								<kbd>Space</kbd> on any row to see incoming <strong>Referenced by</strong> counts across every table.
-								Every view lives in browser history, so <kbd>&#8984;[</kbd> / <kbd>&#8984;]</kbd> and trackpad swipes
-								return to your exact filters and scroll position.
+								Every foreign key is a real link. Hover to peek, click to jump, press <kbd>Space</kbd> for incoming
+								<strong>Referenced by</strong> counts, or open the pan/zoom <strong>ER Diagram</strong>. Share filtered
+								views with teammates by database name (<kbd>Share</kbd>) and use <kbd>&#8984;[</kbd> / <kbd>&#8984;]</kbd>
+								for instant history.
 							</p>
 						</article>
 
 						<article class="card">
 							<div class="card-kicker mono">02 / SAFETY</div>
-							<h3>Read-only by default, crimson in prod</h3>
+							<h3>Read-only by default, locked in prod</h3>
 							<p>
-								Every database opens Read-Only at the driver and SQL-transaction layer. Production databases display a
-								persistent crimson bar and auto-relock Read-Write after 10 minutes idle. Inline edits are staged with a
-								parameterized SQL preview before committing, and destructive SQL (<code>DROP</code>, <code>ALTER</code>,
-								<code>DELETE</code>/<code>UPDATE</code> without <code>WHERE</code>) always requires confirmation.
+								Every database opens Read-Only at the driver and SQL-transaction layer, or lock replicas permanently
+								Read-Only (<code>LOCKED RO</code>). Production DBs show a crimson bar, require typing the exact DB name
+								to arm writes, and auto-relock after 10 minutes idle or when switching databases.
 							</p>
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">03 / SQL CONSOLE</div>
-							<h3>Parallel, cancellable SQL consoles</h3>
+							<div class="card-kicker mono">03 / SQL &amp; PROFILING</div>
+							<h3>Parallel consoles &amp; 1-key column profiles</h3>
 							<p>
-								Open tabbed or side-by-side split consoles (<kbd>&#8984;E</kbd>) powered by CodeMirror 6 with live schema
-								autocomplete, SQL linting, formatting (<kbd>&#8984;&#8679;F</kbd>), active-statement execution
-								(<kbd>&#8984;&#8629;</kbd>), and <code>EXPLAIN</code>. Queries run on dedicated workers and cancel
-								cleanly mid-flight with <kbd>&#8984;.</kbd>.
+								Run tabbed or split CodeMirror 6 consoles (<kbd>&#8984;E</kbd>) with autocomplete, formatting,
+								<code>EXPLAIN</code>, real query cancellation (<kbd>&#8984;.</kbd>), and cross-DB searchable history.
+								Press <kbd>p</kbd> on any column for instant null %, distinct count, min/max, and clickable top-value
+								filters.
 							</p>
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">04 / OMNIBAR</div>
-							<h3>Paste a ticket ID, find it everywhere</h3>
+							<div class="card-kicker mono">04 / OMNIBAR &amp; WORKSPACES</div>
+							<h3>Paste a ticket ID, organize by client</h3>
 							<p>
-								Hit <kbd>&#8984;K</kbd> to jump to any table, column, saved console, or connection — or paste an ID from
-								a support ticket or Sentry trace and run <strong>Find ID in DB</strong> to locate matching primary and
-								foreign keys across every table in one shot.
+								Group connections into color-coded workspace folders and tags, pick hosts straight from
+								<code>~/.ssh/config</code>, and hit <kbd>&#8984;K</kbd> to jump across tables, columns, tags, or paste
+								any ticket ID to locate matching primary and foreign keys everywhere.
 							</p>
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">05 / EXPORTS &amp; SCALE</div>
-							<h3>Large-table guards &amp; full exports</h3>
+							<div class="card-kicker mono">05 / IMPORT, EXPORT &amp; SCALE</div>
+							<h3>Large-table guards, CSV/JSON import &amp; export</h3>
 							<p>
-								Keyset cursor pagination stays fast deep into tables, and automatic full-table <code>COUNT(*)</code> is
-								skipped on large databases (using <code>pg_class.reltuples</code> / <code>sqlite_stat1</code>). Export
-								full table views or query results up to 100k rows as CSV, TSV, JSON, Markdown, or SQL
-								<code>INSERT</code>.
+								Keyset pagination skips full-table <code>COUNT(*)</code> scans on large databases. Export up to 100k rows
+								as CSV, TSV, JSON, Markdown, or SQL <code>INSERT</code>, duplicate rows in one click, or import CSV/JSON
+								files in a single transaction with column mapping.
 							</p>
 						</article>
 
 						<article class="card">
-							<div class="card-kicker mono">06 / LOCAL-FIRST</div>
-							<h3>Live <code>.db</code> auto-refresh &amp; SSH askpass</h3>
+							<div class="card-kicker mono">06 / LOCAL &amp; APPLE INTERNALS</div>
+							<h3>Live WAL refresh, Simulators &amp; PRAGMA inspector</h3>
 							<p>
-								Local SQLite tables watch <code>.db</code> / <code>-wal</code> files and refresh automatically as your
-								app writes (pausing whenever you have unsaved edits). Over SSH, encrypted key passphrases, 2FA prompts,
-								and unknown host-key checks open in a native in-app dialog and are never logged or saved.
+								Watch local <code>.db</code> / <code>-wal</code> files live, auto-discover iOS Simulator &amp; macOS App
+								Container databases, group FTS5 shadow tables cleanly, inspect triggers and PRAGMAs, and run WAL
+								checkpoints or <code>VACUUM</code> from the DB Info panel.
 							</p>
 						</article>
 					</div>
@@ -560,6 +558,7 @@
 						<div class="kbd-item"><kbd>&#8984;&#8629;</kbd><span>Run active SQL statement (or follow focused FK cell)</span></div>
 						<div class="kbd-item"><kbd>&#8984;.</kbd><span>Cancel running query immediately</span></div>
 						<div class="kbd-item"><kbd>Space</kbd><span>Toggle Row Inspector with incoming FK counts</span></div>
+						<div class="kbd-item"><kbd>p</kbd><span>Profile focused column (null %, distinct, top values)</span></div>
 						<div class="kbd-item"><kbd>&#8984;[</kbd> <kbd>&#8984;]</kbd><span>Navigate Back / Forward across FK jumps</span></div>
 						<div class="kbd-item"><kbd>&#8984;&#8679;C</kbd><span>Copy focused row with column headers as TSV</span></div>
 						<div class="kbd-item"><kbd>&#8984;S</kbd><span>Commit staged inline edits (with SQL preview)</span></div>
@@ -588,9 +587,9 @@
 								by Apple.
 							</p>
 
-							<a class="btn primary lg full" href="./downloads/DataDip-0.1.0-arm64.dmg" download>
+							<a class="btn primary lg full" href="./downloads/DataDip-0.2.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download DataDip-0.1.0-arm64.dmg (46 MB)
+								Download DataDip-0.2.0-arm64.dmg (46 MB)
 							</a>
 
 							<div class="checksum-box">
@@ -599,12 +598,12 @@
 									<button
 										type="button"
 										class="copy-btn"
-										data-copy="f75252d8dd4748dd0c54e0d955fe138e918d1154425cca705fd06fbdda0466b5"
+										data-copy="beb129a695bd6846e8283e5457deb8bcc29b90f70f6626ee2ae99af6337c7c35"
 									>
 										Copy
 									</button>
 								</div>
-								<code class="mono checksum-val">f75252d8dd4748dd0c54e0d955fe138e918d1154425cca705fd06fbdda0466b5</code>
+								<code class="mono checksum-val">beb129a695bd6846e8283e5457deb8bcc29b90f70f6626ee2ae99af6337c7c35</code>
 							</div>
 
 							<p class="install-foot">
