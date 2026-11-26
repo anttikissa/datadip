@@ -144,6 +144,18 @@ export function App() {
 				} else {
 					await openOrCreateScratchpad(connId)
 				}
+			} else if (cur.kind === 'sql' && cur.connId === connId) {
+				if (pRes.scratchpads.length === 0) {
+					const created = await api.createScratchpad(
+						connId,
+						'Scratchpad 1',
+						'-- Press Cmd+Enter to run the highlighted statement\n',
+					)
+					setScratchpads([created.scratchpad])
+					navigate({ kind: 'sql', connId, padId: created.scratchpad.id }, { replace: true })
+				} else if (!cur.padId || !pRes.scratchpads.some((p) => p.id === cur.padId)) {
+					navigate({ kind: 'sql', connId, padId: pRes.scratchpads[0]!.id }, { replace: true })
+				}
 			}
 		} catch (err) {
 			if (activeConnId() !== connId) return
