@@ -57,5 +57,24 @@ obvious.
 ## Local Data
 
 - Gitignored `data/` directory holds `connections.ason`, `state.db`
-  (opened with `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`),
-  and `server.ason`. Private hostnames and local paths never enter git.
+  (opened with `PRAGMA busy_timeout=5000;` before
+  `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`), and
+  `server.ason`. Private hostnames and local paths never enter git.
+- `connections.ason` is backed by `liveFile` (`src/shared/live-file.ts`)
+  with `keepBroken: true` and directory watching. Hand-written ASON
+  comments survive saves, malformed edits surface a non-fatal warning
+  banner without overwriting the file, and `GET /api/events` (SSE with
+  ASON payloads) pushes live updates to open UI clients.
+- Connection visit timestamps live in `state.db` (`connection_visits`)
+  rather than `connections.ason`, so browsing or querying never dirties
+  a user-edited config file.
+- Removing an active connection from `connections.ason` externally keeps
+  its live adapter snapshot in memory marked `orphaned: true` so active
+  queries/tabs keep working; the UI shows an orphaned banner with
+  Re-save to config (`POST /api/connections/:id/restore`) and Close
+  actions.
+- `Ctrl+R` opens the Recent Databases & Tables modal (WebStorm/IDEA
+  style, distinct from `Cmd+R` page reload) with MRU switching and
+  instant filtering.
+- CLI probe/control commands (`url`, `status`, `open`, and the duplicate
+  server check) read only `server.ason` without opening `state.db`.

@@ -23,6 +23,12 @@ export interface ConnectionWithStatus extends ConnectionConfig {
 	rwArmedUntil: number | null // epoch ms, null if unlimited or not armed
 	connected: boolean
 	latencyMs: number | null
+	orphaned?: boolean
+}
+
+export interface ConnectionsPayload {
+	connections: ConnectionWithStatus[]
+	configError: string | null
 }
 
 export interface TableSummary {

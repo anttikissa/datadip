@@ -611,6 +611,10 @@ textarea {
 .conn-card.is-prod {
 	border-left: 3px solid var(--prod);
 }
+.conn-card.is-orphan {
+	border-style: dashed;
+	border-left: 3px dashed var(--rw);
+}
 
 .conn-card-top {
 	display: flex;
@@ -663,6 +667,40 @@ textarea {
 }
 .tag.ssh {
 	color: var(--accent);
+}
+.tag.orphan {
+	background: var(--rw-bg);
+	border-color: var(--rw-border);
+	color: var(--rw);
+	font-weight: 600;
+}
+
+.status-banner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 6px 12px;
+	font-size: 12px;
+	border-bottom: 1px solid var(--border-strong);
+	flex-shrink: 0;
+}
+.status-banner.orphan {
+	background: var(--rw-bg);
+	border-bottom-color: var(--rw-border);
+}
+.status-banner.error {
+	background: var(--prod-bg);
+	border-bottom-color: var(--prod-border);
+}
+
+.recent-section-head {
+	padding: 6px 10px 4px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--ink-muted);
 }
 
 .recents-list {

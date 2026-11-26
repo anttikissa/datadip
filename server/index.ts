@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleApiRequest } from './api.ts'
 import { ConnectionManager } from './db/manager.ts'
-import { DataStore } from './store.ts'
+import { DataStore, readServerInfo } from './store.ts'
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST_DIR = join(ROOT_DIR, 'dist')
@@ -48,16 +48,14 @@ async function isServerAlive(url: string): Promise<boolean> {
 }
 
 async function runServe(opts: CliArgs) {
-	const store = new DataStore(opts.dataDir)
-
-	// If another DataDip server is already live for this dataDir, print its URL and exit cleanly
-	const existing = store.readServerInfo()
+	// Check server.ason before opening state.db so a second invocation never contends on SQLite.
+	const existing = readServerInfo(opts.dataDir)
 	if (existing && (await isServerAlive(existing.url))) {
 		console.log(`DataDip already running on ${existing.url} (pid ${existing.pid})`)
-		store.close()
 		process.exit(0)
 	}
 
+	const store = new DataStore(opts.dataDir)
 	const manager = new ConnectionManager(store)
 
 	let server: ReturnType<typeof Bun.serve> | null = null
@@ -67,6 +65,7 @@ async function runServe(opts: CliArgs) {
 			server = Bun.serve({
 				hostname: opts.host,
 				port: boundPort,
+				idleTimeout: 0,
 				fetch: async (req) => {
 					const url = new URL(req.url)
 					if (url.pathname.startsWith('/api/')) {
@@ -133,9 +132,7 @@ async function runServe(opts: CliArgs) {
 }
 
 async function runUrl(opts: CliArgs) {
-	const store = new DataStore(opts.dataDir)
-	const info = store.readServerInfo()
-	store.close()
+	const info = readServerInfo(opts.dataDir)
 	if (info && (await isServerAlive(info.url))) {
 		console.log(`Local: ${info.url}`)
 		process.exit(0)
@@ -145,9 +142,7 @@ async function runUrl(opts: CliArgs) {
 }
 
 async function runStatus(opts: CliArgs) {
-	const store = new DataStore(opts.dataDir)
-	const info = store.readServerInfo()
-	store.close()
+	const info = readServerInfo(opts.dataDir)
 	if (info && (await isServerAlive(info.url))) {
 		console.log(`Running: ${info.url} (pid ${info.pid}, started ${info.startedAt})`)
 		process.exit(0)
@@ -157,9 +152,7 @@ async function runStatus(opts: CliArgs) {
 }
 
 async function runOpen(opts: CliArgs) {
-	const store = new DataStore(opts.dataDir)
-	const info = store.readServerInfo()
-	store.close()
+	const info = readServerInfo(opts.dataDir)
 	let url: string | null = null
 	if (info && (await isServerAlive(info.url))) {
 		url = info.url
@@ -180,9 +173,7 @@ async function runOpen(opts: CliArgs) {
 		const deadline = Date.now() + 8000
 		while (Date.now() < deadline) {
 			await Bun.sleep(100)
-			const s2 = new DataStore(opts.dataDir)
-			const i2 = s2.readServerInfo()
-			s2.close()
+			const i2 = readServerInfo(opts.dataDir)
 			if (i2 && (await isServerAlive(i2.url))) {
 				url = i2.url
 				break

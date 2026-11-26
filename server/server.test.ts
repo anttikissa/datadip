@@ -1,13 +1,14 @@
 // Integration tests for DataStore, LocalSqliteAdapter, Read-Only/Read-Write safety gates, and /api/* ASON contract.
 import { Database } from 'bun:sqlite'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
+import type { ConnectionWithStatus } from '../src/shared/types.ts'
 import { handleApiRequest } from './api.ts'
 import { ConnectionManager } from './db/manager.ts'
-import { DataStore } from './store.ts'
+import { DataStore, readServerInfo } from './store.ts'
 
 let workDir = ''
 let sampleDbPath = ''
@@ -188,5 +189,112 @@ describe('DataDip server API & safety boundaries', () => {
 		const hist = await apiCall('GET', `/api/connections/${connId}/history`)
 		expect(hist.status).toBe(200)
 		expect(Array.isArray(hist.data.history)).toBe(true)
+	})
+
+	test('liveFile reloads external edits, keeps active removed connections as orphaned, restores or closes them', async () => {
+		const liveDir = mkdtempSync(join(tmpdir(), 'datadip-live-'))
+		const liveStore = new DataStore(liveDir)
+		const liveMgr = new ConnectionManager(liveStore)
+		try {
+			const c1 = liveStore.addConnection({
+				name: 'Active DB',
+				driver: 'sqlite',
+				location: 'local',
+				path: sampleDbPath,
+				isProduction: false,
+			})
+			const c2 = liveStore.addConnection({
+				name: 'Idle DB',
+				driver: 'sqlite',
+				location: 'local',
+				path: sampleDbPath,
+				isProduction: false,
+			})
+
+			// Open c1 so it is active in manager.adapters; leave c2 idle.
+			await liveMgr.pingConnection(c1.id)
+
+			const waitForChange = () =>
+				new Promise<void>((resolve, reject) => {
+					const timer = setTimeout(() => reject(new Error('timed out waiting for liveFile reload')), 3000)
+					const unsub = liveMgr.subscribe(() => {
+						clearTimeout(timer)
+						unsub()
+						resolve()
+					})
+				})
+
+			// 1. Externally remove both c1 & c2 and add a hand-edited c3 (without an explicit id)
+			const p1 = waitForChange()
+			writeFileSync(
+				liveStore.connectionsPath,
+				`// Hand-edited config\n{\n\tconnections: [\n\t\t{ name: 'Edited DB', driver: 'sqlite', location: 'local', path: '${sampleDbPath.replaceAll("'", "\\'")}', isProduction: false },\n\t],\n}\n`,
+				'utf8',
+			)
+			await p1
+
+			const afterRemove = liveMgr.listConnectionsWithStatus()
+			// Idle DB should be gone; Edited DB should appear; Active DB should remain orphaned
+			expect(afterRemove.some((c) => c.id === c2.id)).toBe(false)
+			expect(afterRemove.some((c) => c.name === 'Edited DB' && !c.orphaned)).toBe(true)
+			const orphan = afterRemove.find((c) => c.id === c1.id) as ConnectionWithStatus | undefined
+			expect(orphan?.orphaned).toBe(true)
+
+			// Orphaned connection must remain queryable!
+			const q = await liveMgr.runQuery(c1.id, 'SELECT COUNT(*) AS n FROM users')
+			expect(q.results[0]?.rows[0]?.n).toBe(3)
+
+			// 2. Malformed edit surfaces configError without overwriting the file
+			const brokenText = '{ connections: [ BROKEN '
+			const p2 = waitForChange()
+			writeFileSync(liveStore.connectionsPath, brokenText, 'utf8')
+			await p2
+			expect(liveMgr.getConnectionsPayload().configError).toBeTruthy()
+			expect(() => liveMgr.restoreOrphanedConnection(c1.id)).toThrow(/syntax error/)
+			expect(readFileSync(liveStore.connectionsPath, 'utf8')).toBe(brokenText)
+
+			// 3. Fix file -> error clears, then restore orphaned connection back to connections.ason
+			const p3 = waitForChange()
+			writeFileSync(liveStore.connectionsPath, '{ connections: [] }\n', 'utf8')
+			await p3
+			expect(liveMgr.getConnectionsPayload().configError).toBeNull()
+
+			const restored = liveMgr.restoreOrphanedConnection(c1.id)
+			expect(restored.id).toBe(c1.id)
+			const afterRestore = liveMgr.listConnectionsWithStatus().find((c) => c.id === c1.id)
+			expect(afterRestore?.orphaned).toBe(false)
+
+			// 4. Remove externally again and close via API DELETE
+			const p4 = waitForChange()
+			writeFileSync(liveStore.connectionsPath, '{ connections: [] }\n', 'utf8')
+			await p4
+			expect(liveMgr.isOrphaned(c1.id)).toBe(true)
+
+			const delReq = new Request(`http://127.0.0.1:4747/api/connections/${c1.id}`, { method: 'DELETE' })
+			const delRes = await handleApiRequest(delReq, liveMgr)
+			expect(delRes.status).toBe(200)
+			expect(liveMgr.listConnectionsWithStatus().some((c) => c.id === c1.id)).toBe(false)
+		} finally {
+			liveMgr.closeAll()
+			liveStore.close()
+			rmSync(liveDir, { recursive: true, force: true })
+		}
+	})
+
+	test('readServerInfo reads server.ason without opening state.db', () => {
+		const probeDir = mkdtempSync(join(tmpdir(), 'datadip-probe-'))
+		try {
+			expect(readServerInfo(probeDir)).toBeNull()
+			writeFileSync(
+				join(probeDir, 'server.ason'),
+				"{ pid: 12345, host: '127.0.0.1', port: 4747, url: 'http://127.0.0.1:4747', startedAt: '2026-11-26T00:00:00Z' }\n",
+				'utf8',
+			)
+			const info = readServerInfo(probeDir)
+			expect(info?.port).toBe(4747)
+			expect(info?.url).toBe('http://127.0.0.1:4747')
+		} finally {
+			rmSync(probeDir, { recursive: true, force: true })
+		}
 	})
 })

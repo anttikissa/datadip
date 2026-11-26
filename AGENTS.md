@@ -53,10 +53,16 @@ system's protocol requires them.
 Stack: Bun, bun:sqlite, TypeScript. Format with `bunx oxfmt`.
 Typecheck with `bun check`.
 
-Open every SQLite database with `PRAGMA journal_mode=WAL;
-PRAGMA synchronous=NORMAL;`. The default mode waits for the disk on
-every write (35 ms per UPDATE measured on a network volume) and
-blocks the thread meanwhile.
+Open every SQLite database with `PRAGMA busy_timeout=5000;` BEFORE
+`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`. Without
+`busy_timeout` set first, concurrent openers crash with
+`SQLITE_BUSY_RECOVERY` during WAL initialization/recovery; without
+WAL+NORMAL, the default mode waits for disk on every write.
+
+CLI probe and control commands (`url`, `status`, `open`, and the
+duplicate-server check in `serve`) must read only `server.ason` via
+`readServerInfo()` and never instantiate `DataStore`, open `state.db`,
+or start file watchers.
 
 ## Tests
 

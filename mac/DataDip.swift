@@ -1,11 +1,17 @@
-// DataDip.app: native macOS WKWebView shell around `datadip serve` with back/forward swipe and shortcut support.
+// DataDip.app: native macOS WKWebView shell around `datadip serve` with fast startup, error reporting, and swipe navigation.
 import Cocoa
 import WebKit
 
 let info = Bundle.main.infoDictionary ?? [:]
 let checkout = info["DataDipCheckout"] as? String ?? "\(NSHomeDirectory())/.datadip"
 let bun = info["DataDipBun"] as? String ?? "\(NSHomeDirectory())/.bun/bin/bun"
-let startWait: TimeInterval = 20
+let startWait: TimeInterval = 15
+
+func dataDir() -> String {
+	let a = CommandLine.arguments
+	if let i = a.firstIndex(of: "--data"), i + 1 < a.count { return a[i + 1] }
+	return "\(NSHomeDirectory())/.datadip/data"
+}
 
 func dataArgs() -> [String] {
 	let a = CommandLine.arguments
@@ -13,18 +19,19 @@ func dataArgs() -> [String] {
 	return []
 }
 
+// Fast non-interactive login shell env lookup (-lc avoids interactive prompt/compinit hangs).
 func shellEnvironment() -> [String: String] {
 	var env = ProcessInfo.processInfo.environment
 	let p = Process()
 	p.executableURL = URL(fileURLWithPath: env["SHELL"] ?? "/bin/zsh")
-	p.arguments = ["-ilc", "/usr/bin/env -0"]
+	p.arguments = ["-lc", "/usr/bin/env -0"]
 	p.standardInput = FileHandle.nullDevice
 	p.standardError = FileHandle.nullDevice
 	let out = Pipe()
 	p.standardOutput = out
 	guard (try? p.run()) != nil else { return env }
 	let killer = DispatchWorkItem { p.terminate() }
-	DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: killer)
+	DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: killer)
 	let data = out.fileHandleForReading.readDataToEndOfFile()
 	p.waitUntilExit()
 	killer.cancel()
@@ -68,6 +75,37 @@ func statusPage(_ body: String) -> String {
 	"<html><body style='background:#f4f5f7;color:#161616;font:13px ui-monospace,monospace;padding:2em'>\(body)</body></html>"
 }
 
+func extractHttpUrl(from text: String) -> URL? {
+	for line in text.split(separator: "\n") {
+		if let range = line.range(of: "http://127.0.0.1:") ?? line.range(of: "http://localhost:") {
+			let tail = String(line[range.lowerBound...])
+			let token = tail.split(whereSeparator: { $0 == " " || $0 == "'" || $0 == "\"" || $0 == "," || $0 == ")" }).first
+			if let token, let u = URL(string: String(token)) { return u }
+		}
+	}
+	return nil
+}
+
+func isHealthy(_ url: URL) -> Bool {
+	guard let health = URL(string: "\(url.absoluteString)/api/health") else { return false }
+	var req = URLRequest(url: health)
+	req.timeoutInterval = 1.0
+	let sem = DispatchSemaphore(value: 0)
+	var ok = false
+	URLSession.shared.dataTask(with: req) { _, resp, _ in
+		if let http = resp as? HTTPURLResponse, http.statusCode == 200 { ok = true }
+		sem.signal()
+	}.resume()
+	_ = sem.wait(timeout: .now() + 1.2)
+	return ok
+}
+
+func readServerAsonUrl() -> URL? {
+	let path = "\(dataDir())/server.ason"
+	guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+	return extractHttpUrl(from: content)
+}
+
 final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
 	var window: NSWindow!
 	var web: WKWebView!
@@ -84,6 +122,11 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		NSApp.activate(ignoringOtherApps: true)
 		DispatchQueue.global().async {
 			self.env = shellEnvironment()
+			// Fast path: join an already-running DataDip server immediately
+			if let existing = readServerAsonUrl(), isHealthy(existing) {
+				self.openUrl(existing)
+				return
+			}
 			DispatchQueue.main.sync { self.startServe() }
 			self.join()
 		}
@@ -120,36 +163,46 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		}
 	}
 
+	func openUrl(_ u: URL) {
+		DispatchQueue.main.async {
+			self.origin = "\(u.scheme ?? "http")://\(u.host ?? ""):\(u.port ?? 80)"
+			self.web.load(URLRequest(url: u))
+		}
+	}
+
+	func showError(_ msg: String) {
+		DispatchQueue.main.async {
+			self.web.loadHTMLString(statusPage("<pre>\(escapeHtml(msg))</pre>"), baseURL: nil)
+		}
+	}
+
+	// Waits for the server URL from serve stdout or server.ason without spawning polling subprocesses.
 	func join() {
 		let deadline = Date().addingTimeInterval(startWait)
-		var lastErr = ""
+		var retried = false
 		while Date() < deadline {
-			let p = datadip(["url"])
-			let out = Pipe(), err = Pipe()
-			p.standardOutput = out
-			p.standardError = err
-			if (try? p.run()) != nil {
-				let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-				lastErr = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-				p.waitUntilExit()
-				let line = text.split(separator: "\n").first { $0.hasPrefix("Local: ") }
-				if p.terminationStatus == 0,
-				   let addr = line?.split(separator: " ", maxSplits: 1).last,
-				   let u = URL(string: String(addr))
-				{
-					DispatchQueue.main.async {
-						self.origin = "\(u.scheme ?? "http")://\(u.host ?? ""):\(u.port ?? 80)"
-						self.web.load(URLRequest(url: u))
-					}
-					return
-				}
-			} else {
-				lastErr = "cannot run \(bun)\n"
+			if let u = extractHttpUrl(from: serveOutput.text) ?? readServerAsonUrl(), isHealthy(u) {
+				openUrl(u)
+				return
 			}
-			Thread.sleep(forTimeInterval: 0.1)
+			if let p = serve, !p.isRunning {
+				// If serve exited 0 ("already running") right as an old server shut down, retry once
+				if p.terminationStatus == 0 && !retried {
+					retried = true
+					Thread.sleep(forTimeInterval: 0.2)
+					if let u = readServerAsonUrl(), isHealthy(u) {
+						openUrl(u)
+						return
+					}
+					DispatchQueue.main.sync { self.startServe() }
+					continue
+				}
+				showError("DataDip server exited with status \(p.terminationStatus).\n\n\(serveOutput.text)")
+				return
+			}
+			Thread.sleep(forTimeInterval: 0.05)
 		}
-		let msg = "DataDip did not start within \(Int(startWait)) s.\n\ndatadip url:\n\(lastErr)\ndatadip serve:\n\(serveOutput.text)"
-		DispatchQueue.main.async { self.web.loadHTMLString(statusPage("<pre>\(escapeHtml(msg))</pre>"), baseURL: nil) }
+		showError("DataDip did not start within \(Int(startWait)) s.\n\ndatadip serve:\n\(serveOutput.text)")
 	}
 
 	func makeWebView(_ config: WKWebViewConfiguration) -> WKWebView {
@@ -183,6 +236,14 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 
 	func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) {
 		if let t = w.title, !t.isEmpty { window.title = t }
+	}
+
+	func webView(_ w: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+		showError("Failed to load DataDip UI:\n\(error.localizedDescription)\n\ndatadip serve:\n\(serveOutput.text)")
+	}
+
+	func webView(_ w: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+		showError("Navigation error:\n\(error.localizedDescription)")
 	}
 
 	func buildMenu() -> NSMenu {

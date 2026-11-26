@@ -1,7 +1,8 @@
-// Connection lifecycle manager, Read-Only / Read-Write safety gatekeeper, and SSH pool coordinator.
+// Connection lifecycle manager, Read-Only / Read-Write safety gatekeeper, orphaned-connection tracker, and SSH pool coordinator.
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import type {
 	ConnectionConfig,
+	ConnectionsPayload,
 	ConnectionWithStatus,
 	DiscoveredDb,
 	MutateRequest,
@@ -23,24 +24,107 @@ interface RwState {
 	until: number | null // null = armed until manually locked (non-prod)
 }
 
+interface AdapterEntry {
+	sig: string
+	adapter: DbAdapter
+	config: ConnectionConfig
+	lastLatencyMs: number | null
+}
+
 export class ConnectionManager {
 	readonly store: DataStore
 	readonly sshPool = new SshMuxPool()
-	private adapters = new Map<string, { sig: string; adapter: DbAdapter; lastLatencyMs: number | null }>()
+	private adapters = new Map<string, AdapterEntry>()
 	private rwStates = new Map<string, RwState>()
+	private subscribers = new Set<(payload: ConnectionsPayload) => void>()
+	private unsubStore: () => void
 
 	constructor(store: DataStore) {
 		this.store = store
+		this.unsubStore = this.store.onConnectionsChange(() => {
+			this.reconcileActiveConnections()
+			this.notifySubscribers()
+		})
 	}
 
 	private signature(c: ConnectionConfig): string {
 		return `${c.driver}|${c.location}|${c.sshUser ?? ''}@${c.sshHost ?? ''}:${c.sshPort ?? 22}|${c.path}`
 	}
 
+	private reconcileActiveConnections() {
+		const savedById = new Map(this.store.listConnections().map((c) => [c.id, c]))
+		for (const [id, entry] of this.adapters.entries()) {
+			const updated = savedById.get(id)
+			if (!updated) {
+				// Removed from connections.ason while active: keep alive in memory as orphaned.
+				continue
+			}
+			const nextSig = this.signature(updated)
+			if (nextSig !== entry.sig) {
+				entry.adapter.close()
+				this.adapters.delete(id)
+				this.rwStates.delete(id)
+				continue
+			}
+			// If connection was newly marked as production while RW was unlimited, lock back to RO.
+			if (updated.isProduction && !entry.config.isProduction) {
+				const st = this.rwStates.get(id)
+				if (st && st.armed && st.until === null) {
+					this.rwStates.delete(id)
+				}
+			}
+			entry.config = updated
+		}
+	}
+
+	subscribe(listener: (payload: ConnectionsPayload) => void): () => void {
+		this.subscribers.add(listener)
+		return () => {
+			this.subscribers.delete(listener)
+		}
+	}
+
+	getConnectionsPayload(): ConnectionsPayload {
+		return {
+			connections: this.listConnectionsWithStatus(),
+			configError: this.store.getConnectionsError(),
+		}
+	}
+
+	notifySubscribers() {
+		if (this.subscribers.size === 0) return
+		const payload = this.getConnectionsPayload()
+		for (const cb of this.subscribers) {
+			try {
+				cb(payload)
+			} catch {}
+		}
+	}
+
+	getConnection(id: string): ConnectionConfig | null {
+		return this.store.getConnection(id) ?? this.adapters.get(id)?.config ?? null
+	}
+
+	isOrphaned(id: string): boolean {
+		return this.adapters.has(id) && !this.store.getConnection(id)
+	}
+
+	getOrphanedConfigs(): ConnectionConfig[] {
+		const savedIds = new Set(this.store.listConnections().map((c) => c.id))
+		const out: ConnectionConfig[] = []
+		for (const [id, entry] of this.adapters.entries()) {
+			if (!savedIds.has(id)) out.push(entry.config)
+		}
+		return out
+	}
+
 	getAdapter(conn: ConnectionConfig): DbAdapter {
 		const sig = this.signature(conn)
 		const cached = this.adapters.get(conn.id)
-		if (cached && cached.sig === sig) return cached.adapter
+		if (cached && cached.sig === sig) {
+			cached.config = conn
+			return cached.adapter
+		}
 		if (cached) cached.adapter.close()
 
 		let adapter: DbAdapter
@@ -57,13 +141,13 @@ export class ConnectionManager {
 			adapter = new LocalSqliteAdapter(conn.path)
 		}
 
-		this.adapters.set(conn.id, { sig, adapter, lastLatencyMs: null })
+		this.adapters.set(conn.id, { sig, adapter, config: conn, lastLatencyMs: null })
 		return adapter
 	}
 
 	getAdapterById(id: string): { conn: ConnectionConfig; adapter: DbAdapter } {
-		const conn = this.store.getConnection(id)
-		if (!conn) throw new Error(`Connection not found: ${id}`)
+		const conn = this.getConnection(id)
+		if (!conn) throw new HttpError(404, `Connection not found: ${id}`)
 		return { conn, adapter: this.getAdapter(conn) }
 	}
 
@@ -78,14 +162,16 @@ export class ConnectionManager {
 	}
 
 	setRwMode(id: string, armed: boolean): { armed: boolean; until: number | null } {
-		const conn = this.store.getConnection(id)
-		if (!conn) throw new Error(`Connection not found: ${id}`)
+		const conn = this.getConnection(id)
+		if (!conn) throw new HttpError(404, `Connection not found: ${id}`)
 		if (!armed) {
 			this.rwStates.delete(id)
+			this.notifySubscribers()
 			return { armed: false, until: null }
 		}
 		const until = conn.isProduction ? Date.now() + PROD_RW_TTL_MS : null
 		this.rwStates.set(id, { armed: true, until })
+		this.notifySubscribers()
 		return { armed: true, until }
 	}
 
@@ -98,7 +184,9 @@ export class ConnectionManager {
 	}
 
 	listConnectionsWithStatus(): ConnectionWithStatus[] {
-		return this.store.listConnections().map((c) => {
+		const saved = this.store.listConnections()
+		const savedIds = new Set(saved.map((c) => c.id))
+		const out: ConnectionWithStatus[] = saved.map((c) => {
 			const rw = this.getRwState(c)
 			const cached = this.adapters.get(c.id)
 			return {
@@ -107,8 +195,33 @@ export class ConnectionManager {
 				rwArmedUntil: rw.until,
 				connected: Boolean(cached),
 				latencyMs: cached?.lastLatencyMs ?? null,
+				orphaned: false,
 			}
 		})
+
+		for (const [id, entry] of this.adapters.entries()) {
+			if (savedIds.has(id)) continue
+			const rw = this.getRwState(entry.config)
+			out.push({
+				...entry.config,
+				rwArmed: rw.armed,
+				rwArmedUntil: rw.until,
+				connected: true,
+				latencyMs: entry.lastLatencyMs,
+				orphaned: true,
+			})
+		}
+
+		return out
+	}
+
+	restoreOrphanedConnection(id: string): ConnectionConfig {
+		const entry = this.adapters.get(id)
+		if (!entry) throw new HttpError(404, `Orphaned connection not found: ${id}`)
+		const restored = this.store.restoreConnection(entry.config)
+		entry.config = restored
+		this.notifySubscribers()
+		return restored
 	}
 
 	async pingConnection(id: string) {
@@ -252,16 +365,21 @@ export class ConnectionManager {
 		}))
 	}
 
-	dropConnection(id: string) {
+	dropConnection(id: string): boolean {
 		const cached = this.adapters.get(id)
+		const had = Boolean(cached)
 		if (cached) {
 			cached.adapter.close()
 			this.adapters.delete(id)
 		}
 		this.rwStates.delete(id)
+		if (had) this.notifySubscribers()
+		return had
 	}
 
 	closeAll() {
+		this.unsubStore()
+		this.subscribers.clear()
 		for (const entry of this.adapters.values()) entry.adapter.close()
 		this.adapters.clear()
 		this.sshPool.closeAll()

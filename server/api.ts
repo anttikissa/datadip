@@ -30,6 +30,56 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			return asonResponse({ ok: true, version: '0.1.0', now: new Date().toISOString() })
 		}
 
+		// Live Server-Sent Events stream for connections.ason hot-reload & orphaned state
+		if (path === '/api/events' && method === 'GET') {
+			const encoder = new TextEncoder()
+			let cleanup: (() => void) | null = null
+			const stream = new ReadableStream<Uint8Array>({
+				start(controller) {
+					const send = (event: string, data: unknown) => {
+						try {
+							const payload = stringifyAson(data, 'short')
+							controller.enqueue(encoder.encode(`event: ${event}\ndata: ${payload}\n\n`))
+						} catch {}
+					}
+					send('connections', manager.getConnectionsPayload())
+					const unsub = manager.subscribe((payload) => send('connections', payload))
+					const ping = setInterval(() => {
+						try {
+							controller.enqueue(encoder.encode(': ping\n\n'))
+						} catch {}
+					}, 25_000)
+					ping.unref?.()
+					cleanup = () => {
+						unsub()
+						clearInterval(ping)
+					}
+					req.signal.addEventListener(
+						'abort',
+						() => {
+							cleanup?.()
+							cleanup = null
+							try {
+								controller.close()
+							} catch {}
+						},
+						{ once: true },
+					)
+				},
+				cancel() {
+					cleanup?.()
+					cleanup = null
+				},
+			})
+			return new Response(stream, {
+				headers: {
+					'content-type': 'text/event-stream; charset=utf-8',
+					'cache-control': 'no-cache, no-transform',
+					connection: 'keep-alive',
+				},
+			})
+		}
+
 		// Preferences
 		if (path === '/api/preferences' && method === 'GET') {
 			return asonResponse({ preferences: manager.store.getPreferences() })
@@ -43,7 +93,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 
 		// Recents
 		if (path === '/api/recents' && method === 'GET') {
-			return asonResponse({ recents: manager.store.listRecentTables(30) })
+			return asonResponse({ recents: manager.store.listRecentTables(30, manager.getOrphanedConfigs()) })
 		}
 		if (path === '/api/recents' && method === 'DELETE') {
 			const body = await readBody<{ connectionId: string; tableName: string }>(req)
@@ -67,7 +117,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 
 		// Connections CRUD
 		if (path === '/api/connections' && method === 'GET') {
-			return asonResponse({ connections: manager.listConnectionsWithStatus() })
+			return asonResponse(manager.getConnectionsPayload())
 		}
 		if (path === '/api/connections' && method === 'POST') {
 			const body = await readBody<Omit<ConnectionConfig, 'id' | 'createdAt'>>(req)
@@ -109,10 +159,16 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ connection: updated })
 			}
 			if (rest === '' && method === 'DELETE') {
-				manager.dropConnection(connId)
-				const ok = manager.store.deleteConnection(connId)
-				if (!ok) throw new HttpError(404, 'Connection not found')
+				const wasOrphaned = manager.isOrphaned(connId)
+				const dropped = manager.dropConnection(connId)
+				const deleted = wasOrphaned ? false : manager.store.deleteConnection(connId)
+				if (!deleted && !dropped) throw new HttpError(404, 'Connection not found')
 				return asonResponse({ ok: true })
+			}
+
+			if (rest === 'restore' && method === 'POST') {
+				const restored = manager.restoreOrphanedConnection(connId)
+				return asonResponse({ connection: restored })
 			}
 
 			if (rest === 'ping' && method === 'POST') {

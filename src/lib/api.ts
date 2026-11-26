@@ -4,7 +4,7 @@ import type {
 	BrowseParams,
 	BrowseResult,
 	ConnectionConfig,
-	ConnectionWithStatus,
+	ConnectionsPayload,
 	DatabaseSchema,
 	DiscoveredDb,
 	IdMatch,
@@ -53,12 +53,14 @@ export const api = {
 	setPreference: (key: string, value: string) =>
 		request<{ ok: true; preferences: Record<string, string> }>('POST', '/api/preferences', { key, value }),
 
-	listConnections: () => request<{ connections: ConnectionWithStatus[] }>('GET', '/api/connections'),
+	listConnections: () => request<ConnectionsPayload>('GET', '/api/connections'),
 	addConnection: (input: Omit<ConnectionConfig, 'id' | 'createdAt'>) =>
 		request<{ connection: ConnectionConfig }>('POST', '/api/connections', input),
 	updateConnection: (id: string, patch: Partial<Omit<ConnectionConfig, 'id' | 'createdAt'>>) =>
 		request<{ connection: ConnectionConfig }>('PUT', `/api/connections/${encodeURIComponent(id)}`, patch),
 	deleteConnection: (id: string) => request<{ ok: true }>('DELETE', `/api/connections/${encodeURIComponent(id)}`),
+	restoreConnection: (id: string) =>
+		request<{ connection: ConnectionConfig }>('POST', `/api/connections/${encodeURIComponent(id)}/restore`),
 	testConnection: (draft: Omit<ConnectionConfig, 'id' | 'createdAt'>) =>
 		request<{ ok: true; latencyMs: number; version?: string; tableCount: number }>(
 			'POST',

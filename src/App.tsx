@@ -5,6 +5,7 @@ import { ConnectionModal } from './components/ConnectionModal.tsx'
 import { DiscoverModal } from './components/DiscoverModal.tsx'
 import { HomeView } from './components/HomeView.tsx'
 import { Omnibar } from './components/Omnibar.tsx'
+import { RecentModal } from './components/RecentModal.tsx'
 import { ScratchpadView } from './components/ScratchpadView.tsx'
 import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
@@ -26,8 +27,16 @@ import {
 	IconUnlock,
 	IconView,
 } from './lib/icons.tsx'
+import { parse as parseAson } from './shared/ason.ts'
 import { tid } from './shared/tid.ts'
-import type { ConnectionConfig, ConnectionWithStatus, DatabaseSchema, RecentTable, Scratchpad } from './shared/types.ts'
+import type {
+	ConnectionConfig,
+	ConnectionsPayload,
+	ConnectionWithStatus,
+	DatabaseSchema,
+	RecentTable,
+	Scratchpad,
+} from './shared/types.ts'
 import { type AppRoute, formatRoute, parseRoute } from './shared/url.ts'
 
 interface TrailStep {
@@ -44,6 +53,7 @@ interface Toast {
 export function App() {
 	const [route, setRoute] = createSignal<AppRoute>(parseRoute(window.location.pathname, window.location.search))
 	const [connections, setConnections] = createSignal<ConnectionWithStatus[]>([])
+	const [configError, setConfigError] = createSignal<string | null>(null)
 	const [recents, setRecents] = createSignal<RecentTable[]>([])
 	const [schema, setSchema] = createSignal<DatabaseSchema | null>(null)
 	const [schemaLoading, setSchemaLoading] = createSignal(false)
@@ -61,6 +71,7 @@ export function App() {
 	const [editingConn, setEditingConn] = createSignal<ConnectionConfig | null>(null)
 	const [discoverOpen, setDiscoverOpen] = createSignal(false)
 	const [omnibarOpen, setOmnibarOpen] = createSignal(false)
+	const [recentModalOpen, setRecentModalOpen] = createSignal(false)
 
 	// FK navigation trail & toasts
 	const [trail, setTrail] = createSignal<TrailStep[]>([])
@@ -105,7 +116,29 @@ export function App() {
 		try {
 			const [cRes, rRes] = await Promise.all([api.listConnections(), api.listRecents()])
 			setConnections(cRes.connections)
+			setConfigError(cRes.configError ?? null)
 			setRecents(rRes.recents)
+		} catch (err) {
+			notify(err instanceof Error ? err.message : String(err), 'error')
+		}
+	}
+
+	async function restoreOrphaned(conn: ConnectionWithStatus) {
+		try {
+			await api.restoreConnection(conn.id)
+			await refreshConnections()
+			notify(`Re-saved "${conn.name}" to connections.ason`, 'ok')
+		} catch (err) {
+			notify(err instanceof Error ? err.message : String(err), 'error')
+		}
+	}
+
+	async function closeOrphaned(conn: ConnectionWithStatus) {
+		try {
+			await api.deleteConnection(conn.id)
+			if (activeConnId() === conn.id) navigate({ kind: 'home' })
+			await refreshConnections()
+			notify(`Closed orphaned connection "${conn.name}"`, 'info')
 		} catch (err) {
 			notify(err instanceof Error ? err.message : String(err), 'error')
 		}
@@ -245,8 +278,14 @@ export function App() {
 		window.addEventListener('popstate', onPop)
 
 		const onKey = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+			if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'r') {
 				e.preventDefault()
+				setOmnibarOpen(false)
+				setRecentModalOpen((v) => !v)
+				void refreshConnections()
+			} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+				e.preventDefault()
+				setRecentModalOpen(false)
 				setOmnibarOpen((v) => !v)
 			} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
 				e.preventDefault()
@@ -264,13 +303,42 @@ export function App() {
 				})
 			}
 		}
-		window.addEventListener('keydown', onKey)
+		window.addEventListener('keydown', onKey, true)
+
+		// Live sync from server liveFile watcher on connections.ason
+		let initialEvent = true
+		const es = new EventSource('/api/events')
+		es.addEventListener('connections', (ev) => {
+			try {
+				const payload = parseAson((ev as MessageEvent).data) as unknown as ConnectionsPayload
+				const prev = connections()
+				const next = payload.connections ?? []
+				setConnections(next)
+				setConfigError(payload.configError ?? null)
+				if (!initialEvent) {
+					const activeId = activeConnId()
+					const wasOrphaned = prev.find((c) => c.id === activeId)?.orphaned
+					const nowOrphaned = next.find((c) => c.id === activeId)?.orphaned
+					if (nowOrphaned && !wasOrphaned) {
+						notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
+					} else if (activeId && !next.some((c) => c.id === activeId) && prev.some((c) => c.id === activeId)) {
+						navigate({ kind: 'home' })
+					}
+					void api
+						.listRecents()
+						.then((r) => setRecents(r.recents))
+						.catch(() => {})
+				}
+				initialEvent = false
+			} catch {}
+		})
 
 		const timer = setInterval(() => setNowMs(Date.now()), 1000)
 
 		return () => {
 			window.removeEventListener('popstate', onPop)
-			window.removeEventListener('keydown', onKey)
+			window.removeEventListener('keydown', onKey, true)
+			es.close()
 			clearInterval(timer)
 		}
 	})
@@ -375,12 +443,17 @@ export function App() {
 					<For each={connections()}>
 						{(c) => (
 							<option value={c.id}>
+								{c.orphaned ? '[ORPHANED] ' : ''}
 								{c.isProduction ? '[PROD] ' : ''}
 								{c.name}
 							</option>
 						)}
 					</For>
 				</select>
+
+				<Show when={activeConn()?.orphaned}>
+					<span class="tag orphan">ORPHANED</span>
+				</Show>
 
 				<Show when={isProd()}>
 					<span class="prod-badge">
@@ -427,6 +500,19 @@ export function App() {
 					</button>
 				</Show>
 
+				<button
+					type="button"
+					class="omnibar-trigger"
+					onClick={() => {
+						setRecentModalOpen(true)
+						void refreshConnections()
+					}}
+					aria-label="Open recent databases and tables (Ctrl+R)"
+				>
+					<span>Recent</span>
+					<span class="kbd">^R</span>
+				</button>
+
 				<button type="button" class="omnibar-trigger" onClick={() => setOmnibarOpen(true)}>
 					<IconSearch />
 					<span>Jump / Find ID</span>
@@ -469,6 +555,40 @@ export function App() {
 					<IconTheme dark={dark()} />
 				</button>
 			</header>
+
+			{/* Malformed connections.ason warning banner */}
+			<Show when={configError()}>
+				{(err) => (
+					<div class="status-banner error">
+						<span class="mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+							<strong>connections.ason parse error:</strong> {err()}
+						</span>
+						<span style="font-size:11.5px;color:var(--ink-secondary);flex-shrink:0">
+							Fix the file in your editor to resume saving
+						</span>
+					</div>
+				)}
+			</Show>
+
+			{/* Orphaned active connection banner */}
+			<Show when={activeConn()?.orphaned ? activeConn() : null}>
+				{(conn) => (
+					<div class="status-banner orphan">
+						<span style="flex:1;min-width:0">
+							<strong>Orphaned connection:</strong> "{conn().name}" was removed from{' '}
+							<span class="mono">connections.ason</span> and is kept active in memory only.
+						</span>
+						<div style="display:flex;gap:6px;flex-shrink:0">
+							<button type="button" class="btn sm primary" onClick={() => void restoreOrphaned(conn())}>
+								Re-save to config
+							</button>
+							<button type="button" class="btn sm" onClick={() => void closeOrphaned(conn())}>
+								Close Connection
+							</button>
+						</div>
+					</div>
+				)}
+			</Show>
 
 			{/* Main workspace */}
 			<div class="workspace">
@@ -643,7 +763,12 @@ export function App() {
 							setEditingConn(c)
 							setConnModalOpen(true)
 						}}
-						onDeleteConnection={(c) =>
+						onDeleteConnection={(c) => {
+							const full = connections().find((x) => x.id === c.id)
+							if (full?.orphaned) {
+								void closeOrphaned(full)
+								return
+							}
 							setConfirmState({
 								title: `Remove "${c.name}"?`,
 								message: 'Removes this connection from DataDip. The database file itself is not touched.',
@@ -655,7 +780,8 @@ export function App() {
 									notify(`Removed ${c.name}`, 'ok')
 								},
 							})
-						}
+						}}
+						onRestoreConnection={(c) => void restoreOrphaned(c)}
 						onOpenDiscover={() => setDiscoverOpen(true)}
 					/>
 				</Show>
@@ -831,6 +957,36 @@ export function App() {
 				onToggleTheme={toggleTheme}
 				onToggleRw={() => void setRw(!rwArmed())}
 				onOpenDiscover={() => setDiscoverOpen(true)}
+			/>
+
+			<RecentModal
+				open={recentModalOpen()}
+				activeConnId={activeConnId()}
+				connections={connections()}
+				recents={recents()}
+				onClose={() => setRecentModalOpen(false)}
+				onOpenConnection={(id) => navigate({ kind: 'connection', connId: id })}
+				onOpenTable={(connId, tableName) =>
+					navigate({
+						kind: 'table',
+						connId,
+						table: tableName,
+						tab: 'data',
+						fields: [],
+						filters: [],
+						order: [],
+						limit: 100,
+						start: null,
+						direction: 'next',
+						offset: null,
+						search: '',
+						selectedRow: null,
+					})
+				}
+				onDeleteRecent={async (connId, tableName) => {
+					await api.deleteRecent(connId, tableName)
+					setRecents((prev) => prev.filter((r) => !(r.connectionId === connId && r.tableName === tableName)))
+				}}
 			/>
 
 			{/* Toasts */}

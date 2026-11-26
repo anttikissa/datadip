@@ -13,6 +13,7 @@ export function HomeView(props: {
 	onAddConnection: () => void
 	onEditConnection: (conn: ConnectionConfig) => void
 	onDeleteConnection: (conn: ConnectionConfig) => void
+	onRestoreConnection: (conn: ConnectionWithStatus) => void
 	onOpenDiscover: () => void
 }) {
 	return (
@@ -64,7 +65,7 @@ export function HomeView(props: {
 					<For each={props.connections}>
 						{(conn) => (
 							<div
-								class={['conn-card', { 'is-prod': conn.isProduction }]}
+								class={['conn-card', { 'is-prod': conn.isProduction, 'is-orphan': conn.orphaned }]}
 								role="button"
 								tabindex={0}
 								onClick={() => props.onOpenConnection(conn.id)}
@@ -78,6 +79,9 @@ export function HomeView(props: {
 								<div class="conn-card-top">
 									<span class="conn-card-name">{conn.name}</span>
 									<div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+										<Show when={conn.orphaned}>
+											<span class="tag orphan">ORPHANED</span>
+										</Show>
 										<Show when={conn.isProduction}>
 											<span class="tag prod">
 												<IconAlert />
@@ -95,33 +99,63 @@ export function HomeView(props: {
 
 								<div class="conn-card-foot">
 									<span class="mono">
-										{conn.lastVisitedAt
-											? `Visited ${formatRelative(conn.lastVisitedAt)} (${formatIsoShort(conn.lastVisitedAt).slice(0, 16)}Z)`
-											: 'Never opened'}
+										{conn.orphaned
+											? 'Removed from connections.ason (active in memory)'
+											: conn.lastVisitedAt
+												? `Visited ${formatRelative(conn.lastVisitedAt)} (${formatIsoShort(conn.lastVisitedAt).slice(0, 16)}Z)`
+												: 'Never opened'}
 									</span>
 									<div style="display:flex;gap:4px">
-										<button
-											type="button"
-											class="btn sm"
-											onClick={(e) => {
-												e.stopPropagation()
-												props.onEditConnection(conn)
-											}}
+										<Show
+											when={!conn.orphaned}
+											fallback={
+												<>
+													<button
+														type="button"
+														class="btn sm primary"
+														onClick={(e) => {
+															e.stopPropagation()
+															props.onRestoreConnection(conn)
+														}}
+													>
+														Re-save
+													</button>
+													<button
+														type="button"
+														class="btn sm"
+														onClick={(e) => {
+															e.stopPropagation()
+															props.onDeleteConnection(conn)
+														}}
+													>
+														Close
+													</button>
+												</>
+											}
 										>
-											Edit
-										</button>
-										<button
-											type="button"
-											class="icon-btn ghost"
-											style="height:24px;width:24px"
-											aria-label={`Delete ${conn.name}`}
-											onClick={(e) => {
-												e.stopPropagation()
-												props.onDeleteConnection(conn)
-											}}
-										>
-											<IconTrash />
-										</button>
+											<button
+												type="button"
+												class="btn sm"
+												onClick={(e) => {
+													e.stopPropagation()
+													props.onEditConnection(conn)
+												}}
+											>
+												Edit
+											</button>
+											<button
+												type="button"
+												class="icon-btn ghost"
+												style="height:24px;width:24px"
+												aria-label={`Delete ${conn.name}`}
+												onClick={(e) => {
+													e.stopPropagation()
+													props.onDeleteConnection(conn)
+												}}
+											>
+												<IconTrash />
+											</button>
+										</Show>
 									</div>
 								</div>
 							</div>
