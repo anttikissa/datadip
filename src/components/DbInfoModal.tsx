@@ -125,6 +125,14 @@ export function DbInfoModal(props: {
 										{d().driver === 'postgres' ? 'PostgreSQL' : 'SQLite'} {d().version}
 									</span>
 								</div>
+								<Show when={d().runtime}>
+									{(rt) => (
+										<div class="info-kv">
+											<span class="field-label">Runtime</span>
+											<span class="mono">{rt()}</span>
+										</div>
+									)}
+								</Show>
 								<Show when={d().driver === 'sqlite'}>
 									<div class="info-kv">
 										<span class="field-label">File Size</span>
@@ -194,7 +202,13 @@ export function DbInfoModal(props: {
 								</Show>
 							</div>
 
-							<Show when={d().driver === 'sqlite'}>
+							<Show
+								when={
+									d().driver === 'sqlite' &&
+									!d().runtime?.toLowerCase().includes('turso') &&
+									!d().runtime?.toLowerCase().includes('d1')
+								}
+							>
 								<div class="info-maint-bar">
 									<div>
 										<div style="font-weight:600;font-size:12.5px">SQLite Maintenance</div>

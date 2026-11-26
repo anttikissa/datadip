@@ -131,6 +131,18 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			return asonResponse({ hosts: listSshConfigHosts() })
 		}
 
+		// Explicit user-confirmed remote Bun installer (never called automatically)
+		if (path === '/api/ssh/install-bun' && method === 'POST') {
+			const body = await readBody<{ sshHost?: string; sshUser?: string; sshPort?: number }>(req)
+			if (!body.sshHost?.trim()) throw new HttpError(400, 'SSH host is required')
+			const res = await manager.installRemoteBun({
+				sshHost: body.sshHost.trim(),
+				sshUser: body.sshUser?.trim() || undefined,
+				sshPort: body.sshPort ? Number(body.sshPort) : undefined,
+			})
+			return asonResponse(res)
+		}
+
 		// Cross-connection searchable query history
 		if (path === '/api/history' && method === 'GET') {
 			const connFilter = url.searchParams.get('connectionId') || 'all'
@@ -188,14 +200,25 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			if (body.location === 'ssh' && !body.sshHost?.trim()) {
 				throw new HttpError(400, 'SSH host is required for remote connections')
 			}
+			const location =
+				body.location === 'ssh' || body.location === 'turso' || body.location === 'd1' ? body.location : 'local'
+			const sshRuntime =
+				body.sshRuntime === 'bun' ||
+				body.sshRuntime === 'python3' ||
+				body.sshRuntime === 'sqlite3' ||
+				body.sshRuntime === 'auto'
+					? body.sshRuntime
+					: undefined
 			const conn = manager.store.addConnection({
 				name: body.name.trim(),
 				driver: body.driver === 'postgres' ? 'postgres' : 'sqlite',
-				location: body.location === 'ssh' ? 'ssh' : 'local',
+				location,
 				path: body.path.trim(),
 				sshHost: body.sshHost?.trim() || undefined,
 				sshUser: body.sshUser?.trim() || undefined,
 				sshPort: body.sshPort ? Number(body.sshPort) : undefined,
+				sshRuntime: location === 'ssh' ? sshRuntime : undefined,
+				authToken: location === 'turso' || location === 'd1' ? body.authToken?.trim() || undefined : undefined,
 				isProduction: Boolean(body.isProduction),
 				alwaysReadOnly: Boolean(body.alwaysReadOnly) || undefined,
 				group: body.group?.trim() || undefined,

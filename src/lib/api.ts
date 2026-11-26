@@ -70,7 +70,7 @@ export const api = {
 	disconnectConnection: (id: string) =>
 		request<{ ok: true; disconnected: boolean }>('POST', `/api/connections/${encodeURIComponent(id)}/disconnect`),
 	testConnection: (draft: Omit<ConnectionConfig, 'id' | 'createdAt'>) =>
-		request<{ ok: true; latencyMs: number; version?: string; tableCount: number }>(
+		request<{ ok: true; latencyMs: number; version?: string; runtime?: string; tableCount: number }>(
 			'POST',
 			'/api/connections/test',
 			draft,
@@ -151,6 +151,8 @@ export const api = {
 		),
 
 	listSshHosts: () => request<{ hosts: SshHostOption[] }>('GET', '/api/ssh/hosts'),
+	installRemoteBun: (payload: { sshHost: string; sshUser?: string; sshPort?: number }) =>
+		request<{ ok: true; version: string; output: string }>('POST', '/api/ssh/install-bun', payload),
 
 	listConsoles: (connId: string) =>
 		request<{ consoles: Console[] }>('GET', `/api/connections/${encodeURIComponent(connId)}/consoles`),

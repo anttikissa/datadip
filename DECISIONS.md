@@ -65,11 +65,28 @@ obvious.
 - Ad-hoc CLI file opening (`datadip ./app.db`, `POST /api/connections/open-file`):
   validates the SQLite header, deduplicates by resolved `realpath`, and
   opens the database directly in the UI.
-- Multiplexed SSH transport (`server/db/ssh-mux.ts`): one persistent SSH
-  process per remote host runs an inline Bun SQLite worker speaking
-  NDJSON-RPC over stdin/stdout. Concurrent queries share one connection
-  without repeated SSH handshakes, and using remote Bun avoids stale
-  system `sqlite3` binaries.
+- Multiplexed SSH transport (`server/db/ssh-mux.ts`, `remote-worker.ts`,
+  `remote-worker-python.ts`, `remote-worker-sqlite3.ts`): one persistent
+  `ssh -T` process per remote host supports user-selectable or
+  auto-detected runtimes (`auto` -> `bun` -> `python3` -> `sqlite3` CLI)
+  via a single-line stdout handshake (`{"select":"..."}`) before
+  streaming the matching worker over stdin with zero files written to
+  the remote host. Both `bun` (Worker threads) and `python3` (stdlib
+  `sqlite3` + `ThreadPoolExecutor` + `conn.interrupt()`) deliver full
+  concurrent multiplexing and real mid-flight cancellation; `sqlite3`
+  CLI (`>= 3.33 -json`) uses a tab-delimited base64-framed POSIX `sh`
+  loop routed through `AsyncSqliteAdapter` for minimal containers. An
+  explicit user-confirmed `POST /api/ssh/install-bun` endpoint offers
+  remote Bun installation when no runtime is present.
+- Serverless SQLite adapters (`server/db/sqlite-async.ts`, `turso.ts`,
+  `d1.ts`): zero-dependency native `fetch()` adapters under `driver:
+  'sqlite'` with `location: 'turso'` (Turso/libSQL Hrana v2
+  `/v2/pipeline` with Bearer auth, `PRAGMA query_only`, atomic batched
+  transactions, and `AbortController` cancel) and `location: 'd1'`
+  (Cloudflare D1 REST API `d1://<accountId>/<databaseId>` with
+  loopback-only custom endpoint guard), sharing one `AsyncSqliteAdapter`
+  engine. `maskConnectionPath` also masks `authToken`/`token` query
+  params on `libsql://` and `https://` URLs.
 - Interactive SSH auth (`server/db/ssh-prompts.ts`, `ssh-askpass.sh`/`.ts`):
   OpenSSH runs with `SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` talking
   back to `/api/internal/ssh-askpass` using a per-process `secretId()`

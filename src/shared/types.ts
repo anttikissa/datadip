@@ -1,7 +1,9 @@
 // Shared data types for DataDip connections, schemas, browsing, queries, and mutations.
 
 export type DriverKind = 'sqlite' | 'postgres'
-export type LocationKind = 'local' | 'ssh'
+export type LocationKind = 'local' | 'ssh' | 'turso' | 'd1'
+export type SshRuntimePreference = 'auto' | 'bun' | 'python3' | 'sqlite3'
+export type SshResolvedRuntime = 'bun' | 'python3' | 'sqlite3'
 export type ConnectionColor = 'blue' | 'green' | 'amber' | 'purple' | 'rose' | 'slate'
 export type DiscoverPreset = 'default' | 'ios-simulators' | 'mac-containers'
 
@@ -35,6 +37,8 @@ export interface ConnectionConfig {
 	sshHost?: string
 	sshUser?: string
 	sshPort?: number
+	sshRuntime?: SshRuntimePreference
+	authToken?: string
 	isProduction: boolean
 	alwaysReadOnly?: boolean
 	group?: string
@@ -52,6 +56,7 @@ export interface ConnectionWithStatus extends ConnectionConfig {
 	rwArmedUntil: number | null // epoch ms, null if unlimited or not armed
 	connected: boolean
 	latencyMs: number | null
+	sshResolvedRuntime?: SshResolvedRuntime
 	orphaned?: boolean
 }
 
@@ -151,6 +156,7 @@ export interface ColumnProfile {
 export interface DatabaseInfo {
 	driver: DriverKind
 	version: string
+	runtime?: string
 	fileSizeBytes?: number | null
 	walSizeBytes?: number | null
 	shmSizeBytes?: number | null

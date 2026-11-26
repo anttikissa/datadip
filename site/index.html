@@ -48,6 +48,7 @@
 					<a href="#whats-new">What&apos;s New</a>
 					<a href="#features">Features</a>
 					<a href="#compare">Compare</a>
+					<a href="#security">Security</a>
 					<a href="#changelog">Changelog</a>
 					<a href="#install">Install</a>
 					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
@@ -105,9 +106,9 @@
 							<span class="sep">&middot;</span>
 							<span>Read-only by default</span>
 							<span class="sep">&middot;</span>
-							<span>MIT Open Source</span>
+							<a href="#security">Security Model</a>
 							<span class="sep">&middot;</span>
-							<a href="#changelog">What&apos;s New in v0.3.0</a>
+							<span>MIT Open Source</span>
 						</div>
 					</div>
 
@@ -272,11 +273,22 @@
 					<div class="engine-item">
 						<div class="engine-head">
 							<span class="badge ok">Ready</span>
-							<strong>SQLite (Local)</strong>
+							<strong>SQLite (Local &amp; Serverless)</strong>
 						</div>
 						<p>
-							Native <code>bun:sqlite</code>, read-only handles by default, live <code>.db</code>/<code>-wal</code>
-							auto-refresh, Finder double-click &amp; <code>datadip ./app.db</code>.
+							Local files (<code>bun:sqlite</code>, live <code>-wal</code> refresh, Finder double-click), plus native
+							zero-dependency <strong>Turso / libSQL</strong> (Hrana HTTP) and <strong>Cloudflare D1</strong>.
+						</p>
+					</div>
+					<div class="engine-item">
+						<div class="engine-head">
+							<span class="badge ok">Ready</span>
+							<strong>SQLite over SSH</strong>
+						</div>
+						<p>
+							One persistent multiplexed SSH pipe auto-detecting remote <code>bun</code>, <code>python3</code>
+							(stdlib <code>sqlite3</code>), or <code>sqlite3</code> CLI &mdash; zero remote files, in-app
+							<code>SSH_ASKPASS</code>.
 						</p>
 					</div>
 					<div class="engine-item">
@@ -285,8 +297,8 @@
 							<strong>PostgreSQL (Direct TLS)</strong>
 						</div>
 						<p>
-							Built-in <code>Bun.SQL</code>, paste any <code>DATABASE_URL</code> (Supabase, Neon, RDS), enforces
-							<code>BEGIN READ ONLY</code>, real <code>CancelRequest</code>.
+							Built-in <code>Bun.SQL</code>, paste any <code>DATABASE_URL</code> (Supabase, Neon, RDS), auto-TLS
+							(<code>sslmode=prefer</code>), <code>BEGIN READ ONLY</code>, real <code>CancelRequest</code>.
 						</p>
 					</div>
 					<div class="engine-item">
@@ -297,16 +309,6 @@
 						<p>
 							Local OpenSSH port forwarding (<code>ssh -N -L</code>) with a built-in <code>~/.ssh/config</code> alias
 							picker &amp; <code>ProxyJump</code>. Zero remote software needed.
-						</p>
-					</div>
-					<div class="engine-item">
-						<div class="engine-head">
-							<span class="badge ok">Ready</span>
-							<strong>SQLite over SSH</strong>
-						</div>
-						<p>
-							One persistent multiplexed SSH session per host with parallel query workers and in-app
-							<code>SSH_ASKPASS</code> prompts for keys &amp; 2FA.
 						</p>
 					</div>
 				</div>
@@ -580,17 +582,18 @@
 
 					<div class="spotlight">
 						<div class="spotlight-copy">
-							<span class="badge prod">Production Guardrails</span>
-							<h3>You should never wonder if you are in prod</h3>
+							<span class="badge prod">Inline Staged Editing &amp; Prod Safety</span>
+							<h3>Edit cells inline. Preview the exact SQL. Commit atomically.</h3>
 							<p>
-								Flag a connection as Production and DataDip paints a crimson top edge and <code>PRODUCTION</code> badge
-								across every screen. Unlocking writes requires typing the exact database name, shows a live 10-minute
-								countdown, auto-relocks when switching databases, and previews exact parameterized SQL before commit.
+								No need to hand-write <code>UPDATE</code> statements for routine fixes. Unlock Read-Write, double-click
+								any cell (or edit multi-line JSON/text in the Cell Viewer), stage multiple edits, inserts, row
+								duplicates, or deletes highlighted in amber, review the exact generated SQL, and commit everything in
+								one atomic transaction &mdash; or discard in one click.
 							</p>
 							<ul class="check-list">
-								<li>Driver-level Read-Only handles + permanent <code>alwaysReadOnly</code> lock for replicas</li>
-								<li>Staged inline edits highlighted in amber with SQL preview &amp; one-click Discard</li>
-								<li>Destructive SQL confirmation dialog on every database, not only prod</li>
+								<li>Amber-highlighted staged inline edits (<kbd>&#8984;S</kbd>) with full SQL preview &amp; one-click Discard</li>
+								<li>Production mode: crimson strip, type-DB-name write unlock, 10m &amp; switch-away auto-relock</li>
+								<li>Driver-level Read-Only default + permanent <code>alwaysReadOnly</code> lock for prod replicas</li>
 							</ul>
 						</div>
 						<figure class="spotlight-media">
@@ -646,7 +649,7 @@
 									<th class="col-datadip">
 										<span class="th-brand">
 											<img src="./assets/icon-32.png" alt="" width="16" height="16" />
-											DataDip v0.2
+											DataDip
 										</span>
 									</th>
 									<th>TablePlus</th>
@@ -666,11 +669,35 @@
 								</tr>
 								<tr>
 									<th>Runtime &amp; Footprint</th>
-									<td class="col-datadip"><strong>Native macOS WKWebView + Bun (~46 MB)</strong></td>
+									<td class="col-datadip"><strong>Native macOS WKWebView + Bun (~42 MB)</strong></td>
 									<td>Native (Swift/C++)</td>
 									<td>JVM (JetBrains IDE)</td>
 									<td>JVM (Eclipse RCP)</td>
 									<td>Electron (Chromium)</td>
+								</tr>
+								<tr>
+									<th>Inline Staged Editing &amp; Atomic SQL Preview</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Staged diffs + exact SQL + 1-tx commit</td>
+									<td>Yes</td>
+									<td>Yes</td>
+									<td>Yes</td>
+									<td>Partial</td>
+								</tr>
+								<tr>
+									<th>SQLite over SSH (Multiplexed)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Auto <code>bun</code> / <code>python3</code> / <code>sqlite3</code></td>
+									<td>No (SFTP copy)</td>
+									<td>No (SFTP copy)</td>
+									<td>No (SFTP copy)</td>
+									<td>No</td>
+								</tr>
+								<tr>
+									<th>Serverless SQLite (Turso / Cloudflare D1)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Native Hrana HTTP &amp; D1 REST</td>
+									<td>Turso (plugin)</td>
+									<td>JDBC driver</td>
+									<td>JDBC driver</td>
+									<td>Turso</td>
 								</tr>
 								<tr>
 									<th>Read-Only Default &amp; Permanent RO Lock</th>
@@ -1103,6 +1130,72 @@
 				</div>
 			</section>
 
+			<!-- Security & Trust Model -->
+			<section id="security" class="section">
+				<div class="container">
+					<div class="section-head">
+						<h2>Security &amp; Trust Model</h2>
+						<p>
+							Pointing a new tool at production SSH and database credentials deserves plain answers, not hand-waving.
+						</p>
+					</div>
+
+					<div class="install-grid">
+						<div class="install-card">
+							<div class="install-head">
+								<span class="badge ok">Local-First</span>
+								<h3>100% Local Server, Zero Telemetry</h3>
+							</div>
+							<p>
+								DataDip runs a local HTTP server bound strictly to <code>127.0.0.1</code>. There are no accounts, no
+								cloud sync, no analytics, no cookies, and zero outbound network calls except the databases you connect
+								to and optional GitHub Releases update checks.
+							</p>
+						</div>
+
+						<div class="install-card">
+							<div class="install-head">
+								<span class="badge accent">SSH Transparency</span>
+								<h3>What Runs on Remote Hosts</h3>
+							</div>
+							<p>
+								Nothing is written to disk on remote servers. PostgreSQL over SSH uses standard OpenSSH TCP forwarding
+								(<code>ssh -N -L</code>). SQLite over SSH streams an ephemeral worker over one <code>ssh -T</code> stdin
+								pipe using remote <code>bun</code>, <code>python3</code> (stdlib <code>sqlite3</code>), or
+								<code>sqlite3</code> CLI. Remote Bun installation never runs unless you explicitly click to confirm.
+							</p>
+						</div>
+
+						<div class="install-card">
+							<div class="install-head">
+								<span class="badge accent">Credentials</span>
+								<h3>In-Memory <code>SSH_ASKPASS</code> &amp; Local Config</h3>
+							</div>
+							<p>
+								SSH key passphrases, passwords, 2FA codes, and unknown host-key confirmations are answered in memory via
+								an authenticated per-process localhost callback and are never logged or persisted. Saved database URLs
+								and tokens stay solely on your machine in <code>~/.datadip/data/connections.ason</code> and are masked
+								across the UI.
+							</p>
+						</div>
+
+						<div class="install-card">
+							<div class="install-head">
+								<span class="badge ok">Signed &amp; Verified</span>
+								<h3>Read-Only Default &amp; Apple-Verified Updates</h3>
+							</div>
+							<p>
+								Every connection opens read-only at the engine level (<code>readonly: true</code>,
+								<code>BEGIN READ ONLY</code>, or <code>PRAGMA query_only = ON</code>). <code>DataDip.app</code> is
+								Developer ID signed, Apple notarized, and verifies every self-update with
+								<code>SecStaticCodeCheckValidity</code> against Apple Developer ID cert OIDs and matching Team ID before
+								replacing the bundle.
+							</p>
+						</div>
+					</div>
+				</div>
+			</section>
+
 			<!-- Download & Install -->
 			<section id="install" class="section alt-bg">
 				<div class="container">
@@ -1146,8 +1239,8 @@
 							<p class="install-foot">
 								Drag <code>DataDip.app</code> into <code>/Applications</code>. Use
 								<strong>DataDip &rarr; Install 'datadip' CLI&hellip;</strong> to enable
-								<code>datadip ./app.db</code> in your terminal, or open <code>.db</code>/<code>.sqlite</code> files
-								straight from Finder.
+								<code>datadip ./app.db</code> in your terminal, or review our
+								<a href="#security">Security &amp; Trust Model</a>.
 							</p>
 						</div>
 

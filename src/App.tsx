@@ -1190,10 +1190,14 @@ export function App() {
 									<div class="sidebar-meta mono">
 										<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
 											{activeConn()?.location === 'ssh'
-												? `ssh://${activeConn()?.sshHost}${activeConn()?.driver === 'postgres' ? ' · pg' : ''}`
-												: activeConn()?.driver === 'postgres'
-													? 'postgresql'
-													: 'local sqlite'}
+												? `ssh://${activeConn()?.sshHost}${activeConn()?.driver === 'postgres' ? ' · pg' : activeConn()?.sshResolvedRuntime ? ` · ${activeConn()?.sshResolvedRuntime}` : ''}`
+												: activeConn()?.location === 'turso'
+													? 'turso · libSQL'
+													: activeConn()?.location === 'd1'
+														? 'cloudflare d1'
+														: activeConn()?.driver === 'postgres'
+															? 'postgresql'
+															: 'local sqlite'}
 										</span>
 										<Show when={schema()}>{(s) => <span>· {s().durationMs}ms</span>}</Show>
 									</div>

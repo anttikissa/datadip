@@ -84,7 +84,7 @@ export function HomeView(props: {
 				<div>
 					<h1 class="home-title">Databases</h1>
 					<p class="home-sub">
-						SQLite and PostgreSQL — local, direct, or over SSH. Every database opens Read-Only by default.
+						SQLite (local, SSH, Turso/libSQL, Cloudflare D1) and PostgreSQL. Every database opens Read-Only by default.
 					</p>
 				</div>
 				<div class="home-actions">
@@ -129,8 +129,22 @@ export function HomeView(props: {
 											</span>
 										</Show>
 										<span class={['tag', { ssh: conn.location === 'ssh' }]}>
-											{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
-											{conn.location === 'ssh' ? conn.sshHost : 'local'}
+											{conn.location === 'ssh' || conn.location === 'turso' || conn.location === 'd1' ? (
+												<IconServer />
+											) : (
+												<IconDisk />
+											)}
+											{conn.location === 'ssh'
+												? conn.sshResolvedRuntime
+													? `${conn.sshHost} · ${conn.sshResolvedRuntime}`
+													: conn.sshHost
+												: conn.location === 'turso'
+													? 'turso'
+													: conn.location === 'd1'
+														? 'cloudflare d1'
+														: conn.driver === 'postgres'
+															? 'direct'
+															: 'local'}
 										</span>
 									</button>
 									<div class="active-row-actions">
@@ -270,8 +284,22 @@ export function HomeView(props: {
 															<span class="tag">PG</span>
 														</Show>
 														<span class={['tag', { ssh: conn.location === 'ssh' }]}>
-															{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
-															{conn.location === 'ssh' ? conn.sshHost : conn.driver === 'postgres' ? 'direct' : 'local'}
+															{conn.location === 'ssh' || conn.location === 'turso' || conn.location === 'd1' ? (
+																<IconServer />
+															) : (
+																<IconDisk />
+															)}
+															{conn.location === 'ssh'
+																? conn.sshResolvedRuntime
+																	? `${conn.sshHost} · ${conn.sshResolvedRuntime}`
+																	: conn.sshHost
+																: conn.location === 'turso'
+																	? 'turso'
+																	: conn.location === 'd1'
+																		? 'd1'
+																		: conn.driver === 'postgres'
+																			? 'direct'
+																			: 'local'}
 														</span>
 													</div>
 												</div>

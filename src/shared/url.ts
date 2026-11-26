@@ -187,15 +187,38 @@ function formatFilterToken(f: FilterSpec): string {
 const PASSWORD_MASK_SENTINEL = '__DATADIP_MASKED_PW__'
 
 export function maskConnectionPath(path: string): string {
-	if (!/^postgres(?:ql)?:\/\//i.test(path.trim())) return path
-	try {
-		const u = new URL(path.trim())
-		if (!u.password) return u.toString()
-		u.password = PASSWORD_MASK_SENTINEL
-		return u.toString().replace(PASSWORD_MASK_SENTINEL, '••••')
-	} catch {
-		return path.replace(/(:\/\/[^:@/\s]+):[^@/\s]+@/, '$1:••••@')
+	const trimmed = path.trim()
+	if (/^postgres(?:ql)?:\/\//i.test(trimmed)) {
+		try {
+			const u = new URL(trimmed)
+			if (!u.password) return u.toString()
+			u.password = PASSWORD_MASK_SENTINEL
+			return u.toString().replace(PASSWORD_MASK_SENTINEL, '••••')
+		} catch {
+			return path.replace(/(:\/\/[^:@/\s]+):[^@/\s]+@/, '$1:••••@')
+		}
 	}
+	if (/^(?:libsql|https?):\/\//i.test(trimmed)) {
+		try {
+			const u = new URL(trimmed)
+			let changed = false
+			if (u.password) {
+				u.password = PASSWORD_MASK_SENTINEL
+				changed = true
+			}
+			for (const key of ['authToken', 'token']) {
+				if (u.searchParams.has(key)) {
+					u.searchParams.set(key, PASSWORD_MASK_SENTINEL)
+					changed = true
+				}
+			}
+			if (!changed) return u.toString()
+			return u.toString().replaceAll(PASSWORD_MASK_SENTINEL, '••••')
+		} catch {
+			return trimmed.replace(/([?&](?:authToken|token)=)[^&]+/gi, '$1••••')
+		}
+	}
+	return path
 }
 
 export function slugifyConnectionName(name: string): string {

@@ -1,8 +1,15 @@
-// Native <dialog> modal for creating or editing a saved database connection with SSH alias picker, workspace grouping, and live testing.
-import { createEffect, createSignal, For, Show } from 'solid-js'
+// Native <dialog> modal for creating or editing a saved database connection (local/SSH SQLite, Turso, Cloudflare D1, PostgreSQL).
+import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { IconAlert, IconClose, IconLock } from '../lib/icons.tsx'
-import type { ConnectionColor, ConnectionConfig, DriverKind, LocationKind, SshHostOption } from '../shared/types.ts'
+import type {
+	ConnectionColor,
+	ConnectionConfig,
+	DriverKind,
+	LocationKind,
+	SshHostOption,
+	SshRuntimePreference,
+} from '../shared/types.ts'
 
 const COLOR_OPTIONS: { value: ConnectionColor; hex: string; label: string }[] = [
 	{ value: 'blue', hex: '#2563eb', label: 'Blue' },
@@ -13,6 +20,12 @@ const COLOR_OPTIONS: { value: ConnectionColor; hex: string; label: string }[] = 
 	{ value: 'slate', hex: '#64748b', label: 'Slate' },
 ]
 
+function parseD1Fields(raw: string): { accountId: string; databaseId: string } {
+	const m = /^d1:\/\/([^/?#]+)\/([^/?#]+)/i.exec(raw.trim())
+	if (!m) return { accountId: '', databaseId: '' }
+	return { accountId: decodeURIComponent(m[1]!), databaseId: decodeURIComponent(m[2]!) }
+}
+
 export function ConnectionModal(props: {
 	open: boolean
 	editing: ConnectionConfig | null
@@ -22,14 +35,19 @@ export function ConnectionModal(props: {
 }) {
 	let dialogEl: HTMLDialogElement | undefined
 	let nameInput: HTMLInputElement | undefined
+	let locationSelectEl: HTMLSelectElement | undefined
 
 	const [name, setName] = createSignal('')
 	const [driver, setDriver] = createSignal<DriverKind>('sqlite')
 	const [location, setLocation] = createSignal<LocationKind>('local')
 	const [path, setPath] = createSignal('')
+	const [d1AccountId, setD1AccountId] = createSignal('')
+	const [d1DatabaseId, setD1DatabaseId] = createSignal('')
+	const [authToken, setAuthToken] = createSignal('')
 	const [sshHost, setSshHost] = createSignal('')
 	const [sshUser, setSshUser] = createSignal('')
 	const [sshPort, setSshPort] = createSignal('22')
+	const [sshRuntime, setSshRuntime] = createSignal<SshRuntimePreference>('auto')
 	const [isProduction, setIsProduction] = createSignal(false)
 	const [alwaysReadOnly, setAlwaysReadOnly] = createSignal(false)
 	const [group, setGroup] = createSignal('')
@@ -38,9 +56,38 @@ export function ConnectionModal(props: {
 	const [sshHosts, setSshHosts] = createSignal<SshHostOption[]>([])
 
 	const [error, setError] = createSignal<string | null>(null)
-	const [testMsg, setTestMsg] = createSignal<{ ok: boolean; text: string } | null>(null)
+	const [testMsg, setTestMsg] = createSignal<{ ok: boolean; text: string; missingRuntime?: boolean } | null>(null)
 	const [testing, setTesting] = createSignal(false)
+	const [installingBun, setInstallingBun] = createSignal(false)
 	const [saving, setSaving] = createSignal(false)
+
+	const locationOptions = createMemo<{ value: LocationKind; label: string }[]>(() =>
+		driver() === 'postgres'
+			? [
+					{ value: 'local', label: 'Direct (TCP / TLS)' },
+					{ value: 'ssh', label: 'SSH tunnel (TCP port forward)' },
+				]
+			: [
+					{ value: 'local', label: 'Local file' },
+					{ value: 'ssh', label: 'Remote over SSH (multiplexed)' },
+					{ value: 'turso', label: 'Turso / libSQL (HTTP)' },
+					{ value: 'd1', label: 'Cloudflare D1 (REST API)' },
+				],
+	)
+
+	// Keep controlled <select> in sync whenever dynamic <option> children change.
+	createEffect(
+		() => [location(), locationOptions()] as const,
+		([loc, opts]) => {
+			if (!opts.some((o) => o.value === loc)) {
+				setLocation('local')
+				return
+			}
+			if (locationSelectEl && locationSelectEl.value !== loc) {
+				locationSelectEl.value = loc
+			}
+		},
+	)
 
 	createEffect(
 		() => [props.open, props.editing] as const,
@@ -51,9 +98,14 @@ export function ConnectionModal(props: {
 				setDriver(editing?.driver ?? 'sqlite')
 				setLocation(editing?.location ?? 'local')
 				setPath(editing?.path ?? '')
+				const d1 = editing?.location === 'd1' ? parseD1Fields(editing.path) : { accountId: '', databaseId: '' }
+				setD1AccountId(d1.accountId)
+				setD1DatabaseId(d1.databaseId)
+				setAuthToken(editing?.authToken ?? '')
 				setSshHost(editing?.sshHost ?? '')
 				setSshUser(editing?.sshUser ?? '')
 				setSshPort(editing?.sshPort ? String(editing.sshPort) : '22')
+				setSshRuntime(editing?.sshRuntime ?? 'auto')
 				setIsProduction(editing?.isProduction ?? false)
 				setAlwaysReadOnly(Boolean(editing?.alwaysReadOnly))
 				setGroup(editing?.group ?? '')
@@ -79,14 +131,23 @@ export function ConnectionModal(props: {
 			.split(',')
 			.map((s) => s.trim())
 			.filter(Boolean)
+		const loc = location()
+		const resolvedPath =
+			loc === 'd1'
+				? d1AccountId().trim() && d1DatabaseId().trim()
+					? `d1://${encodeURIComponent(d1AccountId().trim())}/${encodeURIComponent(d1DatabaseId().trim())}`
+					: path().trim()
+				: path().trim()
 		return {
 			name: name().trim(),
 			driver: driver(),
-			location: location(),
-			path: path().trim(),
-			sshHost: location() === 'ssh' ? sshHost().trim() || undefined : undefined,
-			sshUser: location() === 'ssh' ? sshUser().trim() || undefined : undefined,
-			sshPort: location() === 'ssh' && Number.isFinite(portNum) && portNum > 0 ? portNum : undefined,
+			location: loc,
+			path: resolvedPath,
+			sshHost: loc === 'ssh' ? sshHost().trim() || undefined : undefined,
+			sshUser: loc === 'ssh' ? sshUser().trim() || undefined : undefined,
+			sshPort: loc === 'ssh' && Number.isFinite(portNum) && portNum > 0 ? portNum : undefined,
+			sshRuntime: loc === 'ssh' && driver() === 'sqlite' ? sshRuntime() : undefined,
+			authToken: loc === 'turso' || loc === 'd1' ? authToken().trim() || undefined : undefined,
 			isProduction: isProduction(),
 			alwaysReadOnly: alwaysReadOnly() || undefined,
 			group: group().trim() || undefined,
@@ -99,9 +160,9 @@ export function ConnectionModal(props: {
 	function handlePathInput(val: string) {
 		setPath(val)
 		const trimmed = val.trim()
-		// Auto-detect pasted PostgreSQL DATABASE_URL and suggest a clean name
 		if (/^postgres(?:ql)?:\/\//i.test(trimmed)) {
 			if (driver() !== 'postgres') setDriver('postgres')
+			if (location() === 'turso' || location() === 'd1') setLocation('local')
 			if (!name().trim()) {
 				try {
 					const u = new URL(trimmed)
@@ -110,35 +171,109 @@ export function ConnectionModal(props: {
 					setName(host ? `${db} · ${host}` : db)
 				} catch {}
 			}
+		} else if (/^libsql:\/\//i.test(trimmed) || /\.turso\.io\b/i.test(trimmed)) {
+			if (driver() !== 'sqlite') setDriver('sqlite')
+			if (location() !== 'turso') setLocation('turso')
+			if (!name().trim()) {
+				try {
+					const u = new URL(trimmed.replace(/^libsql:\/\//i, 'https://'))
+					const host = u.hostname.replace(/\.turso\.io$/i, '')
+					if (host) setName(host)
+				} catch {}
+			}
+		} else if (/^d1:\/\//i.test(trimmed)) {
+			if (driver() !== 'sqlite') setDriver('sqlite')
+			if (location() !== 'd1') setLocation('d1')
+			const d1 = parseD1Fields(trimmed)
+			if (d1.accountId) setD1AccountId(d1.accountId)
+			if (d1.databaseId) setD1DatabaseId(d1.databaseId)
 		}
+	}
+
+	function validateDraft(draft: Omit<ConnectionConfig, 'id' | 'createdAt'>, requireName: boolean): string | null {
+		if (requireName && !draft.name) return 'Connection name is required.'
+		if (draft.location === 'd1') {
+			if (!d1AccountId().trim() || !d1DatabaseId().trim()) {
+				return 'Cloudflare Account ID and D1 Database ID are required.'
+			}
+			if (!draft.authToken) return 'Cloudflare API Token is required.'
+			return null
+		}
+		if (!draft.path) {
+			if (draft.driver === 'postgres') return 'Enter a PostgreSQL connection URL first.'
+			if (draft.location === 'turso') return 'Enter a Turso / libSQL URL first.'
+			return 'Enter a database file path first.'
+		}
+		if (draft.location === 'ssh' && !draft.sshHost) return 'Enter an SSH host first.'
+		return null
 	}
 
 	async function handleTest() {
 		setError(null)
 		setTestMsg(null)
 		const draft = buildDraft()
-		if (!draft.path) {
-			setError(
-				draft.driver === 'postgres' ? 'Enter a PostgreSQL connection URL first.' : 'Enter a database file path first.',
-			)
-			return
-		}
-		if (draft.location === 'ssh' && !draft.sshHost) {
-			setError('Enter an SSH host first.')
+		const err = validateDraft(draft, false)
+		if (err) {
+			setError(err)
 			return
 		}
 		setTesting(true)
 		try {
 			const res = await api.testConnection(draft)
-			const engineLabel = draft.driver === 'postgres' ? 'PostgreSQL' : 'SQLite'
+			const engineLabel =
+				draft.driver === 'postgres'
+					? 'PostgreSQL'
+					: draft.location === 'turso'
+						? 'Turso / libSQL'
+						: draft.location === 'd1'
+							? 'Cloudflare D1'
+							: 'SQLite'
+			const rtSuffix = res.runtime && draft.location === 'ssh' ? ` via ${res.runtime}` : ''
 			setTestMsg({
 				ok: true,
-				text: `Connected (${res.latencyMs} ms) — ${engineLabel} ${res.version ?? ''}, ${res.tableCount} tables/views.`,
+				text: `Connected (${res.latencyMs} ms) — ${engineLabel} ${res.version ?? ''}${rtSuffix}, ${res.tableCount} tables/views.`,
 			})
 		} catch (err) {
-			setTestMsg({ ok: false, text: err instanceof Error ? err.message : String(err) })
+			const msg = err instanceof Error ? err.message : String(err)
+			const missingRuntime =
+				draft.location === 'ssh' &&
+				draft.driver === 'sqlite' &&
+				(msg.includes('[DATADIP_MISSING_RUNTIME:') || msg.includes('does not support -json'))
+			setTestMsg({
+				ok: false,
+				text: msg.replace(/\s*\[DATADIP_MISSING_RUNTIME:[^\]]+\]/g, ''),
+				missingRuntime,
+			})
 		} finally {
 			setTesting(false)
+		}
+	}
+
+	async function handleInstallRemoteBun() {
+		const host = sshHost().trim()
+		if (!host) return
+		setInstallingBun(true)
+		setError(null)
+		try {
+			const portNum = Number(sshPort().trim())
+			const res = await api.installRemoteBun({
+				sshHost: host,
+				sshUser: sshUser().trim() || undefined,
+				sshPort: Number.isFinite(portNum) && portNum > 0 ? portNum : undefined,
+			})
+			setTestMsg({
+				ok: true,
+				text: `Installed Bun ${res.version} on ${host}. Re-testing connection…`,
+			})
+			await handleTest()
+		} catch (err) {
+			setTestMsg({
+				ok: false,
+				text: err instanceof Error ? err.message : String(err),
+				missingRuntime: true,
+			})
+		} finally {
+			setInstallingBun(false)
 		}
 	}
 
@@ -146,16 +281,9 @@ export function ConnectionModal(props: {
 		e.preventDefault()
 		setError(null)
 		const draft = buildDraft()
-		if (!draft.name) {
-			setError('Connection name is required.')
-			return
-		}
-		if (!draft.path) {
-			setError(draft.driver === 'postgres' ? 'PostgreSQL connection URL is required.' : 'Database path is required.')
-			return
-		}
-		if (draft.location === 'ssh' && !draft.sshHost) {
-			setError('SSH host is required.')
+		const err = validateDraft(draft, true)
+		if (err) {
+			setError(err)
 			return
 		}
 		setSaving(true)
@@ -195,7 +323,7 @@ export function ConnectionModal(props: {
 							id="conn-name"
 							ref={(el) => (nameInput = el)}
 							class="input"
-							placeholder="e.g. prod-app / local-dev"
+							placeholder="e.g. prod-app / turso-eu / local-dev"
 							value={name()}
 							onInput={(e) => setName(e.currentTarget.value)}
 						/>
@@ -210,7 +338,13 @@ export function ConnectionModal(props: {
 								id="conn-driver"
 								class="select"
 								value={driver()}
-								onChange={(e) => setDriver(e.currentTarget.value as DriverKind)}
+								onChange={(e) => {
+									const next = e.currentTarget.value as DriverKind
+									setDriver(next)
+									if (next === 'postgres' && (location() === 'turso' || location() === 'd1')) {
+										setLocation('local')
+									}
+								}}
 							>
 								<option value="sqlite">SQLite</option>
 								<option value="postgres">PostgreSQL</option>
@@ -222,15 +356,19 @@ export function ConnectionModal(props: {
 								Access Method
 							</label>
 							<select
+								ref={(el) => (locationSelectEl = el)}
 								id="conn-location"
 								class="select"
 								value={location()}
 								onChange={(e) => setLocation(e.currentTarget.value as LocationKind)}
 							>
-								<option value="local">{driver() === 'postgres' ? 'Direct (TCP / TLS)' : 'Local machine'}</option>
-								<option value="ssh">
-									{driver() === 'postgres' ? 'SSH tunnel (TCP port forward)' : 'Remote over SSH (multiplexed)'}
-								</option>
+								<For each={locationOptions()}>
+									{(opt) => (
+										<option value={opt.value} selected={opt.value === location()}>
+											{opt.label}
+										</option>
+									)}
+								</For>
 							</select>
 						</div>
 					</div>
@@ -309,36 +447,117 @@ export function ConnectionModal(props: {
 								</div>
 							</div>
 						</div>
-					</Show>
 
-					<div class="field-group">
-						<label class="field-label" for="conn-path">
-							{driver() === 'postgres'
-								? 'PostgreSQL Connection URL (paste DATABASE_URL)'
-								: 'SQLite File Path (or paste postgres:// URL)'}
-						</label>
-						<input
-							id="conn-path"
-							class="input mono"
-							placeholder={
-								driver() === 'postgres'
-									? location() === 'ssh'
-										? 'postgres://user:pass@127.0.0.1:5432/mydb'
-										: 'postgres://user:pass@db.example.com:5432/mydb?sslmode=require'
-									: location() === 'ssh'
-										? '/srv/app/data/app.sqlite'
-										: '~/projects/app/data/app.sqlite'
-							}
-							value={path()}
-							onInput={(e) => handlePathInput(e.currentTarget.value)}
-						/>
-						<Show when={driver() === 'postgres' && location() === 'ssh'}>
-							<div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px">
-								Forwards a local port via OpenSSH (<span class="mono">ssh -N -L</span>) to the host and port in the URL
-								above — no remote Bun required.
+						<Show when={driver() === 'sqlite'}>
+							<div class="field-group">
+								<label class="field-label" for="conn-ssh-runtime">
+									Remote Runtime
+								</label>
+								<select
+									id="conn-ssh-runtime"
+									class="select"
+									value={sshRuntime()}
+									onChange={(e) => setSshRuntime(e.currentTarget.value as SshRuntimePreference)}
+								>
+									<option value="auto">Auto-detect (Bun → Python 3 → sqlite3 CLI)</option>
+									<option value="bun">Bun (parallel workers + cancel)</option>
+									<option value="python3">Python 3 (stdlib sqlite3, parallel + cancel)</option>
+									<option value="sqlite3">sqlite3 CLI (minimal containers, &gt;= 3.33)</option>
+								</select>
+								<div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px">
+									All three run over one persistent SSH pipe without writing files to the remote host.
+								</div>
 							</div>
 						</Show>
-					</div>
+					</Show>
+
+					<Show
+						when={location() === 'd1'}
+						fallback={
+							<div class="field-group">
+								<label class="field-label" for="conn-path">
+									{driver() === 'postgres'
+										? 'PostgreSQL Connection URL (paste DATABASE_URL)'
+										: location() === 'turso'
+											? 'Turso / libSQL URL (libsql:// or https://)'
+											: 'SQLite File Path (or paste postgres:// / libsql:// URL)'}
+								</label>
+								<input
+									id="conn-path"
+									class="input mono"
+									placeholder={
+										driver() === 'postgres'
+											? location() === 'ssh'
+												? 'postgres://user:pass@127.0.0.1:5432/mydb'
+												: 'postgres://user:pass@db.example.com:5432/mydb?sslmode=require'
+											: location() === 'turso'
+												? 'libsql://my-db-org.turso.io'
+												: location() === 'ssh'
+													? '/srv/app/data/app.sqlite'
+													: '~/projects/app/data/app.sqlite'
+									}
+									value={path()}
+									onInput={(e) => handlePathInput(e.currentTarget.value)}
+								/>
+								<Show when={driver() === 'postgres' && location() === 'ssh'}>
+									<div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px">
+										Forwards a local port via OpenSSH (<span class="mono">ssh -N -L</span>) to the host and port in the
+										URL above — no remote Bun required.
+									</div>
+								</Show>
+							</div>
+						}
+					>
+						<div class="field-row">
+							<div class="field-group">
+								<label class="field-label" for="conn-d1-account">
+									Cloudflare Account ID
+								</label>
+								<input
+									id="conn-d1-account"
+									class="input mono"
+									placeholder="32-char account ID"
+									value={d1AccountId()}
+									onInput={(e) => setD1AccountId(e.currentTarget.value)}
+								/>
+							</div>
+							<div class="field-group">
+								<label class="field-label" for="conn-d1-db">
+									D1 Database ID (UUID)
+								</label>
+								<input
+									id="conn-d1-db"
+									class="input mono"
+									placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+									value={d1DatabaseId()}
+									onInput={(e) => setD1DatabaseId(e.currentTarget.value)}
+								/>
+							</div>
+						</div>
+					</Show>
+
+					<Show when={location() === 'turso' || location() === 'd1'}>
+						<div class="field-group">
+							<label class="field-label" for="conn-auth-token">
+								{location() === 'turso'
+									? 'Auth Token (optional for local sqld)'
+									: 'Cloudflare API Token (D1 Read/Edit)'}
+							</label>
+							<input
+								id="conn-auth-token"
+								type="password"
+								class="input mono"
+								autocomplete="off"
+								placeholder={location() === 'turso' ? 'eyJhbGciOi…' : 'Bearer API token'}
+								value={authToken()}
+								onInput={(e) => setAuthToken(e.currentTarget.value)}
+							/>
+							<div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px">
+								Stored locally in <span class="mono">~/.datadip/data/connections.ason</span> and never sent anywhere
+								except the database endpoint.
+							</div>
+						</div>
+					</Show>
 
 					<div class="field-row">
 						<div class="field-group">
@@ -444,17 +663,35 @@ export function ConnectionModal(props: {
 									border: `1px solid ${res().ok ? 'var(--ok)' : 'var(--prod-border)'}`,
 									background: res().ok ? 'var(--ok-bg)' : 'var(--prod-bg)',
 									'font-size': '12px',
+									display: 'flex',
+									'flex-direction': 'column',
+									gap: '8px',
 								}}
 								class="mono"
 							>
-								{res().text}
+								<div>{res().text}</div>
+								<Show when={res().missingRuntime && sshHost().trim()}>
+									<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+										<span style="font-family:var(--font-sans);font-size:11.5px;color:var(--ink-secondary)">
+											Optional: run <code>curl -fsSL https://bun.sh/install | bash</code> on {sshHost().trim()}
+										</span>
+										<button
+											type="button"
+											class="btn sm primary"
+											disabled={installingBun()}
+											onClick={() => void handleInstallRemoteBun()}
+										>
+											{installingBun() ? 'Installing Bun…' : `Install Bun on ${sshHost().trim()}`}
+										</button>
+									</div>
+								</Show>
 							</div>
 						)}
 					</Show>
 				</div>
 
 				<div class="modal-foot" style="justify-content:space-between">
-					<button class="btn" type="button" disabled={testing()} onClick={handleTest}>
+					<button class="btn" type="button" disabled={testing() || installingBun()} onClick={handleTest}>
 						{testing() ? 'Testing…' : 'Test Connection'}
 					</button>
 					<div style="display:flex;gap:8px">

@@ -476,7 +476,7 @@ function getDbInfo(db, dbPath) {
 	const sNum = Number(pv('synchronous'));
 	const aNum = Number(pv('auto_vacuum'));
 	return {
-		driver: 'sqlite', version: ver,
+		driver: 'sqlite', version: ver, runtime: 'bun',
 		fileSizeBytes: st(resolved), walSizeBytes: st(resolved + '-wal'), shmSizeBytes: st(resolved + '-shm'),
 		journalMode: String(pv('journal_mode') || '').toUpperCase() || undefined,
 		synchronous: Number.isFinite(sNum) ? (syncModes[sNum] || String(sNum)) : undefined,
@@ -576,7 +576,7 @@ function handle(req) {
 		case 'ping': {
 			const t0 = performance.now();
 			const v = db.query('SELECT sqlite_version() AS v').get();
-			return { ok: true, latencyMs: Math.round((performance.now() - t0) * 100) / 100, version: v?.v };
+			return { ok: true, latencyMs: Math.round((performance.now() - t0) * 100) / 100, version: v?.v, runtime: 'bun' };
 		}
 		case 'schema': return getSchema(db);
 		case 'browse': return browseTable(db, params);

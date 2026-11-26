@@ -21,12 +21,14 @@ import type {
 import type { ExportFormat } from '../export.ts'
 import { formatExportRows, sanitizeExportFilename } from '../export.ts'
 import type { DataStore } from '../store.ts'
+import { createD1Adapter } from './d1.ts'
 import { discoverLocalSqliteDbs, suggestDbName } from './discover.ts'
 import { PostgresAdapter } from './postgres.ts'
 import { expandTilde, LocalSqliteAdapter } from './sqlite-local.ts'
 import { SshSqliteAdapter } from './sqlite-ssh.ts'
 import { type SshAskpassConfig, SshMuxPool } from './ssh-mux.ts'
 import { SshPromptBroker } from './ssh-prompts.ts'
+import { createTursoAdapter } from './turso.ts'
 import type { DbAdapter } from './types.ts'
 
 export const PROD_RW_TTL_MS = 10 * 60 * 1000 // 10-minute auto-relock on production databases
@@ -86,7 +88,7 @@ export class ConnectionManager {
 	}
 
 	private signature(c: ConnectionConfig): string {
-		return `${c.driver}|${c.location}|${c.sshUser ?? ''}@${c.sshHost ?? ''}:${c.sshPort ?? 22}|${c.path}`
+		return `${c.driver}|${c.location}|${c.sshUser ?? ''}@${c.sshHost ?? ''}:${c.sshPort ?? 22}:${c.sshRuntime ?? 'auto'}|${c.path}|${c.authToken ?? ''}`
 	}
 
 	private reconcileActiveConnections() {
@@ -231,11 +233,15 @@ export class ConnectionManager {
 					: undefined
 			if (conn.location === 'ssh' && !conn.sshHost) throw new Error('SSH connection is missing sshHost')
 			adapter = new PostgresAdapter(conn.path, ssh)
+		} else if (conn.location === 'turso') {
+			adapter = createTursoAdapter(conn.path, conn.authToken)
+		} else if (conn.location === 'd1') {
+			adapter = createD1Adapter(conn.path, conn.authToken)
 		} else if (conn.location === 'ssh') {
 			if (!conn.sshHost) throw new Error('SSH connection is missing sshHost')
 			adapter = new SshSqliteAdapter(
 				this.sshPool,
-				{ host: conn.sshHost, user: conn.sshUser, port: conn.sshPort },
+				{ host: conn.sshHost, user: conn.sshUser, port: conn.sshPort, runtime: conn.sshRuntime },
 				conn.path,
 			)
 		} else {
@@ -296,12 +302,15 @@ export class ConnectionManager {
 		const out: ConnectionWithStatus[] = saved.map((c) => {
 			const rw = this.getRwState(c)
 			const cached = this.adapters.get(c.id)
+			const sshResolvedRuntime =
+				cached?.adapter instanceof SshSqliteAdapter ? cached.adapter.getResolvedRuntime() : undefined
 			return {
 				...c,
 				rwArmed: rw.armed,
 				rwArmedUntil: rw.until,
 				connected: Boolean(cached),
 				latencyMs: cached?.lastLatencyMs ?? null,
+				sshResolvedRuntime,
 				orphaned: false,
 			}
 		})
@@ -309,12 +318,15 @@ export class ConnectionManager {
 		for (const [id, entry] of this.adapters.entries()) {
 			if (savedIds.has(id)) continue
 			const rw = this.getRwState(entry.config)
+			const sshResolvedRuntime =
+				entry.adapter instanceof SshSqliteAdapter ? entry.adapter.getResolvedRuntime() : undefined
 			out.push({
 				...entry.config,
 				rwArmed: rw.armed,
 				rwArmedUntil: rw.until,
 				connected: true,
 				latencyMs: entry.lastLatencyMs,
+				sshResolvedRuntime,
 				orphaned: true,
 			})
 		}
@@ -352,20 +364,41 @@ export class ConnectionManager {
 								}
 							: undefined,
 					)
-				: temp.location === 'ssh'
-					? new SshSqliteAdapter(
-							this.sshPool,
-							{ host: temp.sshHost || '', user: temp.sshUser, port: temp.sshPort },
-							temp.path,
-						)
-					: new LocalSqliteAdapter(temp.path)
+				: temp.location === 'turso'
+					? createTursoAdapter(temp.path, temp.authToken)
+					: temp.location === 'd1'
+						? createD1Adapter(temp.path, temp.authToken)
+						: temp.location === 'ssh'
+							? new SshSqliteAdapter(
+									this.sshPool,
+									{ host: temp.sshHost || '', user: temp.sshUser, port: temp.sshPort, runtime: temp.sshRuntime },
+									temp.path,
+								)
+							: new LocalSqliteAdapter(temp.path)
 		try {
 			const ping = await adapter.ping()
 			const schema = await adapter.getSchema()
-			return { ...ping, tableCount: schema.tables.length }
+			const runtime =
+				adapter instanceof SshSqliteAdapter
+					? adapter.getResolvedRuntime()
+					: temp.location === 'turso'
+						? 'turso'
+						: temp.location === 'd1'
+							? 'd1'
+							: undefined
+			return { ...ping, runtime, tableCount: schema.tables.length }
 		} finally {
 			adapter.close()
 		}
+	}
+
+	async installRemoteBun(target: { sshHost: string; sshUser?: string; sshPort?: number }) {
+		if (!target.sshHost?.trim()) throw new HttpError(400, 'SSH host is required')
+		return this.sshPool.installBunOnHost({
+			host: target.sshHost.trim(),
+			user: target.sshUser?.trim() || undefined,
+			port: target.sshPort ? Number(target.sshPort) : undefined,
+		})
 	}
 
 	openLocalFile(rawPath: string): ConnectionConfig {
@@ -654,19 +687,37 @@ export class ConnectionManager {
 					(params.location === 'local' || c.sshHost === params.sshHost),
 			)
 
-		const raw =
-			params.location === 'ssh'
-				? await this.sshPool
-						.getChannel({
-							host: params.sshHost || '',
-							user: params.sshUser,
-							port: params.sshPort,
-						})
-						.call<{ path: string; sizeBytes: number; modifiedAt: string }[]>(
-							{ op: 'discover', params: { roots: params.roots, maxDepth: params.maxDepth } },
-							30_000,
-						)
-				: discoverLocalSqliteDbs(params.roots, params.maxDepth, params.preset)
+		let raw: { path: string; sizeBytes: number; modifiedAt: string }[]
+		if (params.location === 'ssh') {
+			const ch = this.sshPool.getChannel({
+				host: params.sshHost || '',
+				user: params.sshUser,
+				port: params.sshPort,
+			})
+			const rt = await ch.ensureConnected()
+			if (rt === 'sqlite3') {
+				const depth = String(Math.max(1, Math.min(6, params.maxDepth ?? 4)))
+				const rootsB64 = Buffer.from((params.roots ?? []).join('\n'), 'utf8').toString('base64')
+				const res = await ch.callCli('discover', [depth, rootsB64], 30_000)
+				const nowIso = new Date().toISOString()
+				raw = res.stdout
+					.split('\n')
+					.map((l) => l.trim())
+					.filter(Boolean)
+					.map((line) => {
+						const [p, sz] = line.split('\t')
+						return { path: p ?? '', sizeBytes: Number(sz ?? 0) || 0, modifiedAt: nowIso }
+					})
+					.filter((item) => Boolean(item.path))
+			} else {
+				raw = await ch.call<{ path: string; sizeBytes: number; modifiedAt: string }[]>(
+					{ op: 'discover', params: { roots: params.roots, maxDepth: params.maxDepth } },
+					30_000,
+				)
+			}
+		} else {
+			raw = discoverLocalSqliteDbs(params.roots, params.maxDepth, params.preset)
+		}
 
 		return raw.map((item) => ({
 			...item,

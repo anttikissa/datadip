@@ -121,6 +121,10 @@ function serializeConnection(c: ConnectionConfig): Record<string, unknown> {
 		if (c.sshHost) out.sshHost = c.sshHost
 		if (c.sshUser) out.sshUser = c.sshUser
 		if (c.sshPort && c.sshPort !== 22) out.sshPort = c.sshPort
+		if (c.sshRuntime && c.sshRuntime !== 'auto') out.sshRuntime = c.sshRuntime
+	}
+	if ((c.location === 'turso' || c.location === 'd1') && c.authToken?.trim()) {
+		out.authToken = c.authToken.trim()
 	}
 	out.isProduction = c.isProduction
 	if (c.alwaysReadOnly) out.alwaysReadOnly = true
@@ -271,15 +275,30 @@ export class DataStore {
 			typeof raw.color === 'string' && VALID_COLORS.has(raw.color as ConnectionColor)
 				? (raw.color as ConnectionColor)
 				: undefined
+		const location =
+			raw.location === 'turso' || raw.location === 'd1' || raw.location === 'ssh'
+				? raw.location
+				: !raw.location && Boolean(raw.sshHost)
+					? 'ssh'
+					: 'local'
+		const sshRuntime =
+			raw.sshRuntime === 'bun' ||
+			raw.sshRuntime === 'python3' ||
+			raw.sshRuntime === 'sqlite3' ||
+			raw.sshRuntime === 'auto'
+				? raw.sshRuntime
+				: undefined
 		return {
 			id,
 			name: String(raw.name ?? 'Untitled'),
 			driver: raw.driver === 'postgres' ? 'postgres' : 'sqlite',
-			location: raw.location === 'ssh' || (!raw.location && Boolean(raw.sshHost)) ? 'ssh' : 'local',
+			location,
 			path: String(raw.path ?? ''),
 			sshHost: raw.sshHost ? String(raw.sshHost) : undefined,
 			sshUser: raw.sshUser ? String(raw.sshUser) : undefined,
 			sshPort: typeof raw.sshPort === 'number' && Number.isFinite(raw.sshPort) ? raw.sshPort : undefined,
+			sshRuntime,
+			authToken: raw.authToken ? String(raw.authToken) : undefined,
 			isProduction: Boolean(raw.isProduction),
 			alwaysReadOnly: Boolean(raw.alwaysReadOnly) || undefined,
 			group: raw.group ? String(raw.group).trim() || undefined : undefined,
