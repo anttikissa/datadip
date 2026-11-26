@@ -1,6 +1,6 @@
 // Connection lifecycle manager, Read-Only / Read-Write safety gatekeeper, orphaned-connection tracker, and SSH pool coordinator.
-import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { closeSync, existsSync, openSync, readSync, realpathSync, watch } from 'node:fs'
+import { basename, dirname, resolve } from 'node:path'
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import type {
 	BrowseParams,
@@ -35,6 +35,7 @@ interface AdapterEntry {
 	adapter: DbAdapter
 	config: ConnectionConfig
 	lastLatencyMs: number | null
+	stopWatch?: () => void
 }
 
 export class ConnectionManager {
@@ -44,6 +45,7 @@ export class ConnectionManager {
 	private adapters = new Map<string, AdapterEntry>()
 	private rwStates = new Map<string, RwState>()
 	private subscribers = new Set<(payload: ConnectionsPayload) => void>()
+	private dbChangeListeners = new Set<(ev: { connectionId: string; ts: number }) => void>()
 	private unsubStore: () => void
 	private askpassConfig: SshAskpassConfig | null = null
 
@@ -90,6 +92,7 @@ export class ConnectionManager {
 			}
 			const nextSig = this.signature(updated)
 			if (nextSig !== entry.sig) {
+				entry.stopWatch?.()
 				entry.adapter.close()
 				this.adapters.delete(id)
 				this.rwStates.delete(id)
@@ -110,6 +113,54 @@ export class ConnectionManager {
 		this.subscribers.add(listener)
 		return () => {
 			this.subscribers.delete(listener)
+		}
+	}
+
+	subscribeDbChanges(listener: (ev: { connectionId: string; ts: number }) => void): () => void {
+		this.dbChangeListeners.add(listener)
+		return () => {
+			this.dbChangeListeners.delete(listener)
+		}
+	}
+
+	private emitDbChange(connectionId: string) {
+		if (this.dbChangeListeners.size === 0) return
+		const ev = { connectionId, ts: Date.now() }
+		for (const cb of this.dbChangeListeners) {
+			try {
+				cb(ev)
+			} catch {}
+		}
+	}
+
+	private watchLocalSqlite(connectionId: string, rawPath: string): (() => void) | undefined {
+		const expanded = resolve(expandTilde(rawPath))
+		let targetPath = expanded
+		try {
+			targetPath = realpathSync(expanded)
+		} catch {}
+		const dir = dirname(targetPath)
+		const base = basename(targetPath)
+		if (!existsSync(dir)) return undefined
+		let timer: ReturnType<typeof setTimeout> | null = null
+		try {
+			const watcher = watch(dir, { persistent: false }, (_event, filename) => {
+				if (filename && filename !== base && filename !== `${base}-wal` && filename !== `${base}-shm`) return
+				if (timer) clearTimeout(timer)
+				timer = setTimeout(() => {
+					timer = null
+					this.emitDbChange(connectionId)
+				}, 250)
+				timer.unref?.()
+			})
+			return () => {
+				if (timer) clearTimeout(timer)
+				try {
+					watcher.close()
+				} catch {}
+			}
+		} catch {
+			return undefined
 		}
 	}
 
@@ -154,9 +205,13 @@ export class ConnectionManager {
 			cached.config = conn
 			return cached.adapter
 		}
-		if (cached) cached.adapter.close()
+		if (cached) {
+			cached.stopWatch?.()
+			cached.adapter.close()
+		}
 
 		let adapter: DbAdapter
+		let stopWatch: (() => void) | undefined
 		if (conn.driver === 'postgres') {
 			const ssh =
 				conn.location === 'ssh'
@@ -176,9 +231,10 @@ export class ConnectionManager {
 			)
 		} else {
 			adapter = new LocalSqliteAdapter(conn.path)
+			stopWatch = this.watchLocalSqlite(conn.id, conn.path)
 		}
 
-		this.adapters.set(conn.id, { sig, adapter, config: conn, lastLatencyMs: null })
+		this.adapters.set(conn.id, { sig, adapter, config: conn, lastLatencyMs: null, stopWatch })
 		this.notifySubscribers()
 		return adapter
 	}
@@ -559,6 +615,7 @@ export class ConnectionManager {
 		const cached = this.adapters.get(id)
 		const had = Boolean(cached)
 		if (cached) {
+			cached.stopWatch?.()
 			cached.adapter.close()
 			this.adapters.delete(id)
 		}
@@ -570,8 +627,12 @@ export class ConnectionManager {
 	closeAll() {
 		this.unsubStore()
 		this.subscribers.clear()
+		this.dbChangeListeners.clear()
 		this.sshPrompts.closeAll()
-		for (const entry of this.adapters.values()) entry.adapter.close()
+		for (const entry of this.adapters.values()) {
+			entry.stopWatch?.()
+			entry.adapter.close()
+		}
 		this.adapters.clear()
 		this.sshPool.closeAll()
 	}

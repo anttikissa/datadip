@@ -55,6 +55,8 @@ export function TableView(props: {
 	tableSchema: TableSchema | null
 	rwArmed: boolean
 	reconnectTick?: number
+	dbChangeTick?: number
+	isLocalSqlite?: boolean
 	onNavigate: (next: TableRoute, options?: { replace?: boolean; trailLabel?: string }) => void
 	onOpenInSql: (sql: string) => void
 	onRequestConfirm: (state: ConfirmState) => void
@@ -82,6 +84,8 @@ export function TableView(props: {
 	const [inspectorRowIdx, setInspectorRowIdx] = createSignal<number | null>(null)
 	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
 	const [wrapRows, setWrapRows] = createSignal(false)
+	const [freezeFirst, setFreezeFirst] = createSignal(false)
+	const [liveWatch, setLiveWatch] = createSignal(true)
 	const [colWidths, setColWidths] = createSignal<Record<string, number>>({})
 	const [hoverPeek, setHoverPeek] = createSignal<{
 		x: number
@@ -213,6 +217,17 @@ export function TableView(props: {
 			return () => {
 				cancelled = true
 			}
+		},
+	)
+
+	// Auto-refresh when the local SQLite .db/-wal file changes externally (only when no unsaved edits/editors are active).
+	createEffect(
+		() => props.dbChangeTick ?? 0,
+		(tick) => {
+			if (!tick || !props.isLocalSqlite || !liveWatch()) return
+			if (props.route.tab !== 'data') return
+			if (stagedCount() > 0 || editingCell() || insertOpen()) return
+			setReloadTick((n) => n + 1)
 		},
 	)
 
@@ -945,6 +960,32 @@ export function TableView(props: {
 						Wrap
 					</button>
 
+					{/* Freeze first column toggle */}
+					<button
+						type="button"
+						class={['btn sm', { 'active-toggle': freezeFirst() }]}
+						aria-pressed={freezeFirst() ? 'true' : 'false'}
+						title="Pin the first data column while scrolling horizontally"
+						onClick={() => setFreezeFirst((v) => !v)}
+					>
+						Freeze 1st
+					</button>
+
+					<Show when={props.isLocalSqlite}>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': liveWatch() }]}
+							aria-pressed={liveWatch() ? 'true' : 'false'}
+							title="Auto-refresh when the local SQLite .db or -wal file changes"
+							onClick={() => setLiveWatch((v) => !v)}
+						>
+							<Show when={liveWatch()}>
+								<span class="status-dot" />
+							</Show>
+							Live
+						</button>
+					</Show>
+
 					{/* Column picker (fields= in URL) */}
 					<div class="popover-anchor">
 						<button
@@ -1195,7 +1236,7 @@ export function TableView(props: {
 
 						<Show when={data()}>
 							{(res) => (
-								<table class={['data-table', { 'wrap-rows': wrapRows() }]}>
+								<table class={['data-table', { 'wrap-rows': wrapRows(), 'freeze-first': freezeFirst() }]}>
 									<thead>
 										<tr>
 											<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>

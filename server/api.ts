@@ -47,6 +47,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					send('ssh-prompts', { prompts: manager.sshPrompts.list() })
 					const unsub = manager.subscribe((payload) => send('connections', payload))
 					const unsubPrompts = manager.sshPrompts.subscribe((prompts) => send('ssh-prompts', { prompts }))
+					const unsubDbChanges = manager.subscribeDbChanges((ev) => send('db-changed', ev))
 					const ping = setInterval(() => {
 						try {
 							controller.enqueue(encoder.encode(': ping\n\n'))
@@ -56,6 +57,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					cleanup = () => {
 						unsub()
 						unsubPrompts()
+						unsubDbChanges()
 						clearInterval(ping)
 					}
 					req.signal.addEventListener(

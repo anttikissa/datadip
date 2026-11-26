@@ -61,6 +61,46 @@ export function ConsoleView(props: {
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
 	const [activeCell, setActiveCell] = createSignal<{ row: number; col: number } | null>(null)
 	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
+	const [colWidths, setColWidths] = createSignal<Record<string, number>>({})
+	const [freezeFirst, setFreezeFirst] = createSignal(false)
+
+	function startColResize(e: MouseEvent, colName: string) {
+		e.preventDefault()
+		e.stopPropagation()
+		const th = (e.currentTarget as HTMLElement).parentElement
+		if (!th) return
+		const startX = e.clientX
+		const startW = th.getBoundingClientRect().width
+		const onMove = (ev: MouseEvent) => {
+			const nextW = Math.max(64, Math.min(1400, Math.round(startW + (ev.clientX - startX))))
+			setColWidths((prev) => ({ ...prev, [colName]: nextW }))
+		}
+		const onUp = () => {
+			window.removeEventListener('mousemove', onMove)
+			window.removeEventListener('mouseup', onUp)
+		}
+		window.addEventListener('mousemove', onMove)
+		window.addEventListener('mouseup', onUp)
+	}
+
+	function autoFitColumn(e: MouseEvent, colName: string) {
+		e.preventDefault()
+		e.stopPropagation()
+		const res = currentResult()
+		if (!res) return
+		let maxChars = colName.length + 6
+		for (const row of res.rows) {
+			const firstLine = formatCellText(row[colName]).split('\n')[0] ?? ''
+			if (firstLine.length > maxChars) maxChars = firstLine.length
+		}
+		const fitted = Math.max(96, Math.min(720, Math.round(maxChars * 7.6 + 28)))
+		setColWidths((prev) => ({ ...prev, [colName]: fitted }))
+	}
+
+	function colWidthStyle(colName: string): string | undefined {
+		const w = colWidths()[colName]
+		return w ? `width:${w}px;min-width:${w}px;max-width:${w}px` : undefined
+	}
 
 	let wrapEl: HTMLDivElement | undefined
 	let gridScrollEl: HTMLDivElement | undefined
@@ -726,6 +766,15 @@ export function ConsoleView(props: {
 							<Show when={(currentResult()?.rows.length ?? 0) > 0}>
 								<button
 									type="button"
+									class={['btn sm', { 'active-toggle': freezeFirst() }]}
+									aria-pressed={freezeFirst() ? 'true' : 'false'}
+									title="Pin the first result column while scrolling horizontally"
+									onClick={() => setFreezeFirst((v) => !v)}
+								>
+									Freeze 1st
+								</button>
+								<button
+									type="button"
 									class="btn sm"
 									onClick={async () => {
 										const r = currentResult()!
@@ -825,13 +874,13 @@ export function ConsoleView(props: {
 												</div>
 											}
 										>
-											<table class="data-table">
+											<table class={['data-table', { 'freeze-first': freezeFirst() }]}>
 												<thead>
 													<tr>
 														<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>
 														<For each={res().columns}>
 															{(col) => (
-																<th>
+																<th style={colWidthStyle(col)}>
 																	<span>{col}</span>
 																	<Show when={currentFkMap().get(col)}>
 																		{(fk) => (
@@ -840,6 +889,12 @@ export function ConsoleView(props: {
 																			</span>
 																		)}
 																	</Show>
+																	<span
+																		class="col-resizer"
+																		title="Drag to resize · Double-click to auto-fit"
+																		onMouseDown={(e) => startColResize(e, col)}
+																		onDblClick={(e) => autoFitColumn(e, col)}
+																	/>
 																</th>
 															)}
 														</For>
@@ -866,6 +921,7 @@ export function ConsoleView(props: {
 																			<td
 																				data-r={rIdx()}
 																				data-c={cIdx()}
+																				style={colWidthStyle(col)}
 																				class={{ 'cell-active': active() }}
 																				onClick={() => {
 																					setActiveCell({ row: rIdx(), col: cIdx() })

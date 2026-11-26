@@ -54,3 +54,7 @@ bun run serve         # API server on :4747
 bun run dev           # Vite HMR client on :4748
 ./test                # typecheck + unit tests
 ```
+
+## License
+
+[MIT](LICENSE)

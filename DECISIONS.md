@@ -99,9 +99,16 @@ obvious.
 - Truncated table cells support four complementary inspection modes:
   double-click / `Enter` opens an anchored Cell Viewer popover (with
   JSON pretty-print, Copy, and multi-line editor in Read-Write mode),
-  column header dividers drag to resize and double-click to auto-fit,
-  a toolbar `Wrap` toggle expands rows vertically, and hovering a
-  truncated non-FK cell shows a delayed preview card.
+  column header dividers drag to resize and double-click to auto-fit
+  (in both Table Browser and SQL Console result grids, alongside a
+  CSS-sticky `Freeze 1st` column toggle), a toolbar `Wrap` toggle expands
+  rows vertically, and hovering a truncated non-FK cell shows a delayed
+  preview card.
+- Local SQLite live auto-refresh (`server/db/manager.ts`, `TableView.tsx`):
+  open local SQLite adapters watch their directory for `.db`, `-wal`, and
+  `-shm` writes (250ms debounce) and push SSE `db-changed` events; a
+  `Live` toggle in `TableView` auto-reloads silently when no staged edits
+  or inline cell editors are active.
 - Server liveness is tracked continuously via `/api/events` (SSE). When
   the local server stops, the web UI shows a clear offline banner and
   auto-reconnects/reloads on recovery; inside `DataDip.app`, both SSE

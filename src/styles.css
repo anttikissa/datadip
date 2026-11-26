@@ -1302,6 +1302,39 @@ textarea {
 	cursor: pointer;
 }
 
+.data-table.freeze-first th:nth-child(1),
+.data-table.freeze-first td:nth-child(1) {
+	position: sticky;
+	left: 0;
+	width: 44px;
+	min-width: 44px;
+	max-width: 44px;
+	z-index: 3;
+}
+.data-table.freeze-first th:nth-child(2),
+.data-table.freeze-first td:nth-child(2) {
+	position: sticky;
+	left: 44px;
+	z-index: 3;
+	border-right: 2px solid var(--border-strong);
+}
+.data-table.freeze-first thead th:nth-child(1),
+.data-table.freeze-first thead th:nth-child(2) {
+	z-index: 5;
+}
+.data-table.freeze-first tbody td:nth-child(2) {
+	background: var(--bg-surface);
+}
+.data-table.freeze-first tbody tr:nth-child(even) td:nth-child(2) {
+	background: var(--bg-row-stripe);
+}
+.data-table.freeze-first tbody tr:hover td:nth-child(2) {
+	background: var(--bg-hover);
+}
+.data-table.freeze-first tbody tr.row-selected td:nth-child(2) {
+	background: var(--bg-selected);
+}
+
 .cell-null {
 	color: var(--ink-muted);
 	font-style: italic;

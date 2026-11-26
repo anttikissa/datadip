@@ -61,6 +61,7 @@ export function App() {
 	const [configError, setConfigError] = createSignal<string | null>(null)
 	const [serverOnline, setServerOnline] = createSignal(true)
 	const [reconnectTick, setReconnectTick] = createSignal(0)
+	const [dbChangeTick, setDbChangeTick] = createSignal(0)
 	const [recents, setRecents] = createSignal<RecentTable[]>([])
 	const [schema, setSchema] = createSignal<DatabaseSchema | null>(null)
 	const [schemaLoading, setSchemaLoading] = createSignal(false)
@@ -579,6 +580,15 @@ export function App() {
 				try {
 					const payload = parseAson((ev as MessageEvent).data) as { prompts?: SshPromptRequest[] }
 					setSshPrompts(payload.prompts ?? [])
+				} catch {}
+			})
+
+			source.addEventListener('db-changed', (ev) => {
+				try {
+					const payload = parseAson((ev as MessageEvent).data) as { connectionId?: string }
+					if (payload.connectionId && payload.connectionId === activeConnId()) {
+						setDbChangeTick((n) => n + 1)
+					}
 				} catch {}
 			})
 
@@ -1257,6 +1267,8 @@ export function App() {
 							tableSchema={schema()?.schemas[r().table] ?? null}
 							rwArmed={rwArmed()}
 							reconnectTick={reconnectTick()}
+							dbChangeTick={dbChangeTick()}
+							isLocalSqlite={activeConn()?.driver === 'sqlite' && activeConn()?.location === 'local'}
 							onNavigate={(next, opts) => navigate(next, opts)}
 							onOpenInSql={(sqlText) => {
 								void openOrCreateConsole(r().connId, sqlText)
