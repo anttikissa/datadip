@@ -6,6 +6,8 @@ import type {
 	DatabaseInfo,
 	DatabaseSchema,
 	IdMatch,
+	KeyExistenceProbe,
+	KeyExistenceResult,
 	MutateRequest,
 	MutateResponse,
 	QueryStatementResult,
@@ -30,6 +32,7 @@ export interface DbAdapter {
 		row: Record<string, unknown>,
 		extraReverseFks?: ReverseForeignKeyInfo[],
 	): Promise<ReverseFkCount[]>
+	checkKeysExist?(probes: KeyExistenceProbe[]): Promise<KeyExistenceResult[]>
 	searchId(value: string): Promise<IdMatch[]>
 	profileColumn(table: string, column: string): Promise<ColumnProfile>
 	getInfo(): Promise<DatabaseInfo>

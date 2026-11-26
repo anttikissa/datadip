@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
+import type { ColumnIdSignature } from '../src/shared/id-fingerprint.ts'
 import { liveFiles } from '../src/shared/live-file.ts'
 import { tid } from '../src/shared/tid.ts'
 import type {
@@ -11,10 +12,35 @@ import type {
 	ConnectionConfig,
 	Console,
 	IgnoredForeignKey,
+	LearnedForeignKey,
 	QueryHistoryEntry,
 	RecentTable,
 	VirtualForeignKey,
 } from '../src/shared/types.ts'
+
+export type LearnedFkStatus = 'verified' | 'probed_none' | 'polymorphic' | 'ambiguous'
+
+export interface StoredColumnProfile {
+	tableName: string
+	columnName: string
+	isPk: boolean
+	signature: ColumnIdSignature
+	samples: string[]
+	updatedAt: string
+}
+
+export interface StoredLearnedFkRow {
+	fromTable: string
+	fromColumn: string
+	toTable: string
+	toColumn: string
+	confidence: number
+	reason: string
+	matchedCount: number
+	sampledCount: number
+	status: LearnedFkStatus
+	updatedAt: string
+}
 
 const VALID_COLORS = new Set<ConnectionColor>(['blue', 'green', 'amber', 'purple', 'rose', 'slate'])
 
@@ -217,6 +243,34 @@ export class DataStore {
 				key TEXT PRIMARY KEY,
 				value TEXT NOT NULL
 			);
+
+			CREATE TABLE IF NOT EXISTS fk_column_profiles (
+				connection_id TEXT NOT NULL,
+				table_name TEXT NOT NULL,
+				column_name TEXT NOT NULL,
+				is_pk INTEGER NOT NULL DEFAULT 0,
+				signature_ason TEXT NOT NULL,
+				sample_values_ason TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				PRIMARY KEY (connection_id, table_name, column_name)
+			);
+			CREATE INDEX IF NOT EXISTS idx_fk_profiles_conn_pk ON fk_column_profiles(connection_id, is_pk);
+
+			CREATE TABLE IF NOT EXISTS learned_fks (
+				connection_id TEXT NOT NULL,
+				from_table TEXT NOT NULL,
+				from_column TEXT NOT NULL,
+				to_table TEXT NOT NULL,
+				to_column TEXT NOT NULL,
+				confidence REAL NOT NULL,
+				reason TEXT NOT NULL,
+				matched_count INTEGER NOT NULL,
+				sampled_count INTEGER NOT NULL,
+				status TEXT NOT NULL DEFAULT 'verified',
+				updated_at TEXT NOT NULL,
+				PRIMARY KEY (connection_id, from_table, from_column)
+			);
+			CREATE INDEX IF NOT EXISTS idx_learned_fks_conn_status ON learned_fks(connection_id, status);
 		`)
 	}
 
@@ -405,6 +459,7 @@ export class DataStore {
 		const current = this.getConnection(id)
 		if (!current) return null
 		const next = normalizeIgnoredForeignKeys([...(current.ignoredForeignKeys ?? []), target]) ?? []
+		this.deleteLearnedFk(id, target.fromTable, target.fromColumn)
 		const updated = this.updateConnection(id, { ignoredForeignKeys: next })
 		return updated ? (updated.ignoredForeignKeys ?? []) : null
 	}
@@ -441,8 +496,171 @@ export class DataStore {
 		liveFiles.save(this.connectionsFile)
 		this.db.run('DELETE FROM recent_tables WHERE connection_id = ?', [id])
 		this.db.run('DELETE FROM connection_visits WHERE connection_id = ?', [id])
+		this.db.run('DELETE FROM fk_column_profiles WHERE connection_id = ?', [id])
+		this.db.run('DELETE FROM learned_fks WHERE connection_id = ?', [id])
 		this.emitConnectionsChange({ external: false, error: null })
 		return true
+	}
+
+	// --- Passive FK Learning State (persisted in state.db so learning survives restarts without dirtying connections.ason) ---
+
+	listFkColumnProfiles(connectionId: string): StoredColumnProfile[] {
+		const rows = this.db
+			.query<
+				{
+					table_name: string
+					column_name: string
+					is_pk: number
+					signature_ason: string
+					sample_values_ason: string
+					updated_at: string
+				},
+				[string]
+			>(
+				`SELECT table_name, column_name, is_pk, signature_ason, sample_values_ason, updated_at
+				 FROM fk_column_profiles
+				 WHERE connection_id = ?`,
+			)
+			.all(connectionId)
+		const out: StoredColumnProfile[] = []
+		for (const r of rows) {
+			try {
+				const signature = parseAson(r.signature_ason) as unknown as ColumnIdSignature
+				const samples = parseAson(r.sample_values_ason) as unknown as string[]
+				if (signature && typeof signature === 'object' && Array.isArray(samples)) {
+					out.push({
+						tableName: r.table_name,
+						columnName: r.column_name,
+						isPk: Boolean(r.is_pk),
+						signature,
+						samples,
+						updatedAt: r.updated_at,
+					})
+				}
+			} catch {}
+		}
+		return out
+	}
+
+	upsertFkColumnProfile(
+		connectionId: string,
+		profile: {
+			tableName: string
+			columnName: string
+			isPk: boolean
+			signature: ColumnIdSignature
+			samples: string[]
+		},
+	) {
+		this.db.run(
+			`INSERT INTO fk_column_profiles
+				(connection_id, table_name, column_name, is_pk, signature_ason, sample_values_ason, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(connection_id, table_name, column_name) DO UPDATE SET
+				is_pk = excluded.is_pk,
+				signature_ason = excluded.signature_ason,
+				sample_values_ason = excluded.sample_values_ason,
+				updated_at = excluded.updated_at`,
+			[
+				connectionId,
+				profile.tableName,
+				profile.columnName,
+				profile.isPk ? 1 : 0,
+				stringifyAson(profile.signature, 'short'),
+				stringifyAson(profile.samples, 'short'),
+				new Date().toISOString(),
+			],
+		)
+	}
+
+	listLearnedFkEntries(connectionId: string): StoredLearnedFkRow[] {
+		const rows = this.db
+			.query<
+				{
+					from_table: string
+					from_column: string
+					to_table: string
+					to_column: string
+					confidence: number
+					reason: string
+					matched_count: number
+					sampled_count: number
+					status: string
+					updated_at: string
+				},
+				[string]
+			>(
+				`SELECT from_table, from_column, to_table, to_column, confidence, reason, matched_count, sampled_count, status, updated_at
+				 FROM learned_fks
+				 WHERE connection_id = ?`,
+			)
+			.all(connectionId)
+		return rows.map((r) => ({
+			fromTable: r.from_table,
+			fromColumn: r.from_column,
+			toTable: r.to_table,
+			toColumn: r.to_column,
+			confidence: r.confidence,
+			reason: r.reason,
+			matchedCount: r.matched_count,
+			sampledCount: r.sampled_count,
+			status: (r.status as LearnedFkStatus) || 'verified',
+			updatedAt: r.updated_at,
+		}))
+	}
+
+	listVerifiedLearnedFks(connectionId: string): LearnedForeignKey[] {
+		return this.listLearnedFkEntries(connectionId)
+			.filter((r) => r.status === 'verified' && r.toTable && r.toColumn)
+			.map((r) => ({
+				fromTable: r.fromTable,
+				fromColumn: r.fromColumn,
+				toTable: r.toTable,
+				toColumn: r.toColumn,
+				confidence: r.confidence,
+				reason: r.reason,
+				matchedCount: r.matchedCount,
+				sampledCount: r.sampledCount,
+				updatedAt: r.updatedAt,
+			}))
+	}
+
+	upsertLearnedFk(connectionId: string, entry: Omit<StoredLearnedFkRow, 'updatedAt'>) {
+		this.db.run(
+			`INSERT INTO learned_fks
+				(connection_id, from_table, from_column, to_table, to_column, confidence, reason, matched_count, sampled_count, status, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(connection_id, from_table, from_column) DO UPDATE SET
+				to_table = excluded.to_table,
+				to_column = excluded.to_column,
+				confidence = excluded.confidence,
+				reason = excluded.reason,
+				matched_count = excluded.matched_count,
+				sampled_count = excluded.sampled_count,
+				status = excluded.status,
+				updated_at = excluded.updated_at`,
+			[
+				connectionId,
+				entry.fromTable,
+				entry.fromColumn,
+				entry.toTable,
+				entry.toColumn,
+				entry.confidence,
+				entry.reason,
+				entry.matchedCount,
+				entry.sampledCount,
+				entry.status,
+				new Date().toISOString(),
+			],
+		)
+	}
+
+	deleteLearnedFk(connectionId: string, fromTable: string, fromColumn: string) {
+		this.db.run('DELETE FROM learned_fks WHERE connection_id = ? AND from_table = ? AND from_column = ?', [
+			connectionId,
+			fromTable,
+			fromColumn,
+		])
 	}
 
 	// --- Consoles ---

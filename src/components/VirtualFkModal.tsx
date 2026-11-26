@@ -231,12 +231,26 @@ export function VirtualFkModal(props: {
 								<For each={existingForColumn()}>
 									{(fk) => (
 										<div class="vfk-existing-row">
-											<span class="mono" style="font-size:12px">
-												{fk.fromColumn} → <strong>{fk.toTable}</strong>.{fk.toColumn}
-											</span>
+											<div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+												<span class="mono" style="font-size:12px">
+													{fk.fromColumn} → <strong>{fk.toTable}</strong>.{fk.toColumn}
+												</span>
+												<Show when={fk.inferenceReason}>
+													{(reason) => <span style="font-size:11px;color:var(--ink-muted)">{reason()}</span>}
+												</Show>
+											</div>
 											<div class="vfk-existing-actions">
-												<span class={['tag', { virtual: fk.source === 'virtual', inferred: fk.source === 'inferred' }]}>
-													{fk.source === 'virtual' ? 'VIRTUAL' : fk.source === 'inferred' ? 'AUTO' : 'DB FK'}
+												<span
+													class={['tag', { virtual: fk.source === 'virtual', inferred: fk.source === 'inferred' }]}
+													title={fk.inferenceReason}
+												>
+													{fk.source === 'virtual'
+														? 'VIRTUAL'
+														: fk.source === 'inferred'
+															? fk.inferenceKind === 'data'
+																? 'LEARNED'
+																: 'AUTO'
+															: 'DB FK'}
 												</span>
 												<Show when={fk.source === 'inferred'}>
 													<button

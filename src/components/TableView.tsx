@@ -1346,7 +1346,7 @@ export function TableView(props: {
 																					f().source === 'virtual'
 																						? `Virtual FK → ${f().toTable}.${f().toColumn} (configured in DataDip)`
 																						: f().source === 'inferred'
-																							? `Auto-inferred FK → ${f().toTable}.${f().toColumn} (click link icon to save or dismiss)`
+																							? `${f().inferenceReason ?? `Auto-inferred FK → ${f().toTable}.${f().toColumn}`} (click link icon to save or dismiss)`
 																							: `Foreign key → ${f().toTable}.${f().toColumn}`
 																				}
 																			>
@@ -1704,11 +1704,14 @@ export function TableView(props: {
 													</span>
 													<span
 														class={['tag', { virtual: fk.source === 'virtual', inferred: fk.source === 'inferred' }]}
+														title={fk.inferenceReason}
 													>
 														{fk.source === 'virtual'
 															? 'VIRTUAL'
 															: fk.source === 'inferred'
-																? 'AUTO'
+																? fk.inferenceKind === 'data'
+																	? 'LEARNED'
+																	: 'AUTO'
 																: `DEL: ${fk.onDelete}`}
 													</span>
 												</button>
@@ -1772,8 +1775,11 @@ export function TableView(props: {
 													<span class="ref-card-meta">
 														<Show when={rfk.source}>
 															{(src) => (
-																<span class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}>
-																	{src() === 'virtual' ? 'VIRTUAL' : 'AUTO'}
+																<span
+																	class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}
+																	title={rfk.inferenceReason}
+																>
+																	{src() === 'virtual' ? 'VIRTUAL' : rfk.inferenceKind === 'data' ? 'LEARNED' : 'AUTO'}
 																</span>
 															)}
 														</Show>

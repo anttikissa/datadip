@@ -9,6 +9,8 @@ import type {
 	DatabaseInfo,
 	DatabaseSchema,
 	IdMatch,
+	KeyExistenceProbe,
+	KeyExistenceResult,
 	MutateRequest,
 	MutateResponse,
 	QueryStatementResult,
@@ -17,6 +19,7 @@ import type {
 } from '../../src/shared/types.ts'
 import {
 	browseSqliteTable,
+	checkSqliteKeysExist,
 	countSqliteReverseFks,
 	getSqliteInfo,
 	getSqliteSchema,
@@ -150,6 +153,10 @@ export class LocalSqliteAdapter implements DbAdapter {
 		extraReverseFks?: ReverseForeignKeyInfo[],
 	): Promise<ReverseFkCount[]> {
 		return countSqliteReverseFks(this.open(false), table, row, extraReverseFks)
+	}
+
+	async checkKeysExist(probes: KeyExistenceProbe[]): Promise<KeyExistenceResult[]> {
+		return checkSqliteKeysExist(this.open(false), probes)
 	}
 
 	async searchId(value: string): Promise<IdMatch[]> {

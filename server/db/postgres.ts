@@ -13,6 +13,8 @@ import type {
 	ForeignKeyInfo,
 	IdMatch,
 	IndexInfo,
+	KeyExistenceProbe,
+	KeyExistenceResult,
 	MutateRequest,
 	MutateResponse,
 	OrderSpec,
@@ -1170,6 +1172,71 @@ export class PostgresAdapter implements DbAdapter {
 			}
 		}
 		return counts
+	}
+
+	// Single-round-trip batched PK-index lookup in a READ ONLY transaction with strict statement_timeout.
+	async checkKeysExist(probes: KeyExistenceProbe[]): Promise<KeyExistenceResult[]> {
+		if (probes.length === 0) return []
+		const capped = probes.slice(0, 48)
+		const results: KeyExistenceResult[] = capped.map((p) => ({
+			table: p.table,
+			column: p.column,
+			matchedValues: [],
+		}))
+		const sql = await this.getClient()
+		const schema = await this.getCachedSchema()
+
+		const branches: string[] = []
+		const bindings: unknown[] = []
+		let paramIdx = 1
+
+		for (let i = 0; i < capped.length; i++) {
+			const probe = capped[i]!
+			const ts = schema.schemas[probe.table]
+			const col = ts?.columns.find((c) => c.name === probe.column)
+			if (!ts || !col) continue
+			const vals = Array.from(
+				new Set(probe.values.filter((v) => typeof v === 'string' && v.length > 0 && canMatchPgType(v, col.type))),
+			).slice(0, 16)
+			if (vals.length === 0) continue
+
+			const placeholders: string[] = []
+			for (const v of vals) {
+				placeholders.push(`$${paramIdx++}`)
+				bindings.push(coercePgParam(v, col.type))
+			}
+			const qTable = quotePgTable(ts.name)
+			const qCol = quotePgIdent(col.name)
+			branches.push(
+				`SELECT ${i} AS idx, CAST(${qCol} AS TEXT) AS v FROM ${qTable} WHERE ${qCol} IN (${placeholders.join(', ')})`,
+			)
+		}
+
+		if (branches.length === 0) return results
+
+		try {
+			const rows = await sql.begin('READ ONLY', async (tx) => {
+				await tx.unsafe("SET LOCAL statement_timeout = '1500'")
+				return tx.unsafe<{ idx: number | string; v: string }[]>(branches.join(' UNION ALL '), bindings)
+			})
+			const seenByIdx = new Map<number, Set<string>>()
+			for (const r of rows) {
+				const idx = Number(r.idx)
+				if (!Number.isInteger(idx) || idx < 0 || idx >= results.length || !r.v) continue
+				let set = seenByIdx.get(idx)
+				if (!set) {
+					set = new Set<string>()
+					seenByIdx.set(idx, set)
+				}
+				if (!set.has(r.v)) {
+					set.add(r.v)
+					results[idx]!.matchedValues.push(r.v)
+				}
+			}
+		} catch {
+			// Best-effort probe: fall back cleanly without breaking browsing on permission/timeout edge cases.
+		}
+		return results
 	}
 
 	async searchId(value: string): Promise<IdMatch[]> {

@@ -567,6 +567,33 @@ function discoverDbs(roots, maxDepth) {
 	return found.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
+function checkKeysExist(db, probes) {
+	if (!Array.isArray(probes) || probes.length === 0) return [];
+	const schema = getSchema(db);
+	const results = [];
+	for (const probe of probes.slice(0, 48)) {
+		const ts = schema.schemas[probe.table];
+		const col = ts && ts.columns.find(c => c.name === probe.column);
+		const vals = Array.from(new Set((probe.values || []).filter(v => typeof v === 'string' && v.length > 0))).slice(0, 16);
+		if (!ts || !col || vals.length === 0) {
+			results.push({ table: probe.table, column: probe.column, matchedValues: [] });
+			continue;
+		}
+		try {
+			const placeholders = vals.map(() => '?').join(', ');
+			const rows = db.query('SELECT DISTINCT ' + quoteIdent(col.name) + ' AS v FROM ' + quoteIdent(ts.name) + ' WHERE ' + quoteIdent(col.name) + ' IN (' + placeholders + ')').all(...vals);
+			results.push({
+				table: probe.table,
+				column: probe.column,
+				matchedValues: rows.map(r => (r.v === null || r.v === undefined ? '' : String(r.v))).filter(Boolean),
+			});
+		} catch {
+			results.push({ table: probe.table, column: probe.column, matchedValues: [] });
+		}
+	}
+	return results;
+}
+
 function handle(req) {
 	const { op, path: dbPath, rw, params } = req;
 	if (op === 'discover') return discoverDbs(params.roots, params.maxDepth);
@@ -584,6 +611,9 @@ function handle(req) {
 		case 'mutate': return mutateTable(db, params);
 		case 'peek': return peekRow(db, params.table, params.column, params.value);
 		case 'reverseFks': return countReverseFks(db, params.table, params.row, params.extraReverseFks);
+		case 'checkKeys':
+		case 'checkKeysExist':
+			return checkKeysExist(db, params.probes);
 		case 'searchId': return searchId(db, params.value);
 		case 'profileColumn': return profileColumn(db, params.table, params.column);
 		case 'info': return getDbInfo(db, dbPath);

@@ -14,6 +14,8 @@ import type {
 	ForeignKeyInfo,
 	IdMatch,
 	IndexInfo,
+	KeyExistenceProbe,
+	KeyExistenceResult,
 	MutateRequest,
 	MutateResponse,
 	OrderSpec,
@@ -705,6 +707,38 @@ export function countSqliteReverseFks(
 		}
 	}
 	return counts
+}
+
+// Fast PK-index existence probe for passive FK verification (validates table/column against schema, caps batch size).
+export function checkSqliteKeysExist(db: Database, probes: KeyExistenceProbe[]): KeyExistenceResult[] {
+	if (probes.length === 0) return []
+	const schema = getSqliteSchema(db)
+	const results: KeyExistenceResult[] = []
+	for (const probe of probes.slice(0, 48)) {
+		const ts = schema.schemas[probe.table]
+		const col = ts?.columns.find((c) => c.name === probe.column)
+		const vals = Array.from(new Set(probe.values.filter((v) => typeof v === 'string' && v.length > 0))).slice(0, 16)
+		if (!ts || !col || vals.length === 0) {
+			results.push({ table: probe.table, column: probe.column, matchedValues: [] })
+			continue
+		}
+		try {
+			const placeholders = vals.map(() => '?').join(', ')
+			const rows = db
+				.query<{ v: unknown }, string[]>(
+					`SELECT DISTINCT ${quoteIdent(col.name)} AS v FROM ${quoteIdent(ts.name)} WHERE ${quoteIdent(col.name)} IN (${placeholders})`,
+				)
+				.all(...vals)
+			results.push({
+				table: probe.table,
+				column: probe.column,
+				matchedValues: rows.map((r) => (r.v === null || r.v === undefined ? '' : String(r.v))).filter(Boolean),
+			})
+		} catch {
+			results.push({ table: probe.table, column: probe.column, matchedValues: [] })
+		}
+	}
+	return results
 }
 
 export function searchSqliteId(db: Database, value: string): IdMatch[] {

@@ -57,6 +57,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					const unsub = manager.subscribe((payload) => send('connections', payload))
 					const unsubPrompts = manager.sshPrompts.subscribe((prompts) => send('ssh-prompts', { prompts }))
 					const unsubDbChanges = manager.subscribeDbChanges((ev) => send('db-changed', ev))
+					const unsubSchemaChanges = manager.subscribeSchemaChanges((ev) => send('schema-changed', ev))
 					const ping = setInterval(() => {
 						try {
 							controller.enqueue(encoder.encode(': ping\n\n'))
@@ -67,6 +68,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 						unsub()
 						unsubPrompts()
 						unsubDbChanges()
+						unsubSchemaChanges()
 						clearInterval(ping)
 					}
 					req.signal.addEventListener(
@@ -331,9 +333,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 
 			if (rest === 'browse' && method === 'POST') {
 				const body = await readBody<BrowseParams>(req)
-				const { adapter } = manager.getAdapterById(connId)
-				const result = await adapter.browseTable(body)
-				manager.store.recordRecentTable(connId, body.table)
+				const result = await manager.browseTable(connId, body)
 				return asonResponse(result)
 			}
 

@@ -118,8 +118,11 @@ export function RowInspector(props: {
 												<span class="ref-card-meta">
 													<Show when={rfk.source}>
 														{(src) => (
-															<span class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}>
-																{src() === 'virtual' ? 'VIRTUAL' : 'AUTO'}
+															<span
+																class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}
+																title={rfk.inferenceReason}
+															>
+																{src() === 'virtual' ? 'VIRTUAL' : rfk.inferenceKind === 'data' ? 'LEARNED' : 'AUTO'}
 															</span>
 														)}
 													</Show>

@@ -787,14 +787,26 @@ describe('DataDip server API & safety boundaries', () => {
 			expect.objectContaining({ fromColumn: 'user_id', toTable: 'users', toColumn: 'id', source: 'inferred' }),
 		])
 		expect(schemas1.users!.reverseForeignKeys).toEqual([
-			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred' },
+			expect.objectContaining({
+				fromTable: 'tickets',
+				fromColumn: 'user_id',
+				toColumn: 'id',
+				source: 'inferred',
+				inferenceKind: 'schema',
+			}),
 		])
 
 		// Live reverse-FK counts include auto-inferred FKs
 		const rev1 = await apiCall('POST', `/api/connections/${id}/reverse-fks`, { table: 'users', row: { id: 'u1' } })
 		expect(rev1.status).toBe(200)
 		expect(rev1.data.counts).toEqual([
-			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred', count: 2 },
+			expect.objectContaining({
+				fromTable: 'tickets',
+				fromColumn: 'user_id',
+				toColumn: 'id',
+				source: 'inferred',
+				count: 2,
+			}),
 		])
 
 		// 2. Add manual virtual FK for non-standard column `tickets.owner -> users.id`
@@ -812,8 +824,20 @@ describe('DataDip server API & safety boundaries', () => {
 		const rev2 = await apiCall('POST', `/api/connections/${id}/reverse-fks`, { table: 'users', row: { id: 'u2' } })
 		expect(rev2.status).toBe(200)
 		expect(rev2.data.counts).toEqual([
-			{ fromTable: 'tickets', fromColumn: 'owner', toColumn: 'id', source: 'virtual', count: 1 },
-			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred', count: 0 },
+			expect.objectContaining({
+				fromTable: 'tickets',
+				fromColumn: 'owner',
+				toColumn: 'id',
+				source: 'virtual',
+				count: 1,
+			}),
+			expect.objectContaining({
+				fromTable: 'tickets',
+				fromColumn: 'user_id',
+				toColumn: 'id',
+				source: 'inferred',
+				count: 0,
+			}),
 		])
 
 		// 3. Dismiss auto-inferred FK on `tickets.user_id`

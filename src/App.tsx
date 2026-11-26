@@ -685,6 +685,21 @@ export function App() {
 				} catch {}
 			})
 
+			source.addEventListener('schema-changed', (ev) => {
+				try {
+					const payload = parseAson((ev as MessageEvent).data) as { connectionId?: string }
+					const activeId = activeConnId()
+					if (payload.connectionId && payload.connectionId === activeId) {
+						void api
+							.getSchema(activeId)
+							.then((sRes) => {
+								if (activeConnId() === activeId) setSchema(sRes)
+							})
+							.catch(() => {})
+					}
+				} catch {}
+			})
+
 			source.onerror = () => {
 				if (disposed) return
 				setServerOnline(false)

@@ -301,6 +301,32 @@ obvious.
 - CLI probe/control commands (`url`, `status`, `open`, `stop`, and the
   duplicate server check) read only `server.ason` without opening
   `state.db`.
+- Foreign keys support three layers merged non-mutatingly in
+  `src/shared/virtual-fks.ts`: DB-declared FKs, user-configured manual
+  Virtual FKs (`virtualForeignKeys` in `connections.ason`), and
+  automatic inference (dismissible per column via `ignoredForeignKeys`).
+  Automatic inference combines three tiers:
+  1. **Tier 1 (Schema-only, 0 queries)**: strict `*_id` / `*Id` stem
+     matching (including irregular plurals) and unique single-PK column
+     name matches (`course_id -> courses.course_id`) with compatible SQL
+     type families. Only tier allowed to infer plain integer FKs.
+  2. **Tier 2 (Passive ID-signature learning, 0 extra queries on browse)**:
+     `src/shared/id-fingerprint.ts` fingerprints string/UUID values from
+     rows already returned by `browseTable` and single-table `SELECT`
+     queries, separating universal formats (`uuid`, `ulid` — defeating
+     shared timestamp-prefix traps), delimited typed IDs (`usr_...`),
+     delimiterless typed IDs (`u` + Crockford base32/ULID via alpha
+     prefix + suffix entropy), high-entropy opaque IDs, and polymorphic
+     columns while ignoring plain integers and low-entropy enums.
+  3. **Tier 3 (O(k log N) PK-index verification, `server/db/fk-learner.ts`)**:
+     runs async non-blocking batched PK existence checks
+     (`checkKeysExist`, single `UNION ALL` read-only transaction with
+     1.5s timeout on Postgres) against ranked candidate targets (plus
+     retroactive checks when a parent table is browsed later), persists
+     profiles and verified/negative-cached outcomes in `state.db`
+     (`fk_column_profiles`, `learned_fks`), demotes on polymorphic drift,
+     and pushes live `schema-changed` SSE updates so learned links appear
+     immediately with provenance (`LEARNED` badge & reason).
 - PostgreSQL table row counts (`server/db/postgres.ts`,
   `src/lib/format.ts`): avoid presenting stale `pg_class.reltuples` as
   exact counts. In `getSchema()`, probe up to 100 small readable regular

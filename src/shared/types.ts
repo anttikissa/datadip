@@ -27,6 +27,27 @@ export interface IgnoredForeignKey {
 }
 
 export type ForeignKeySource = 'virtual' | 'inferred'
+export type ForeignKeyInferenceKind = 'schema' | 'data'
+
+export interface LearnedForeignKey extends VirtualForeignKey {
+	confidence: number
+	reason: string
+	matchedCount: number
+	sampledCount: number
+	updatedAt: string
+}
+
+export interface KeyExistenceProbe {
+	table: string
+	column: string
+	values: string[]
+}
+
+export interface KeyExistenceResult {
+	table: string
+	column: string
+	matchedValues: string[]
+}
 
 export interface ConnectionConfig {
 	id: string
@@ -103,6 +124,8 @@ export interface ForeignKeyInfo {
 	onUpdate: string
 	onDelete: string
 	source?: ForeignKeySource
+	inferenceKind?: ForeignKeyInferenceKind
+	inferenceReason?: string
 }
 
 export interface ReverseForeignKeyInfo {
@@ -110,6 +133,8 @@ export interface ReverseForeignKeyInfo {
 	fromColumn: string
 	toColumn: string
 	source?: ForeignKeySource
+	inferenceKind?: ForeignKeyInferenceKind
+	inferenceReason?: string
 }
 
 export interface IndexInfo {
@@ -265,6 +290,8 @@ export interface ReverseFkCount {
 	toColumn: string
 	count: number
 	source?: ForeignKeySource
+	inferenceKind?: ForeignKeyInferenceKind
+	inferenceReason?: string
 }
 
 export interface IdMatch {

@@ -5,6 +5,7 @@ import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import { getExtraReverseFksForTable, mergeSchemaForeignKeys } from '../../src/shared/virtual-fks.ts'
 import type {
 	BrowseParams,
+	BrowseResult,
 	ColumnProfile,
 	ConnectionConfig,
 	ConnectionsPayload,
@@ -23,6 +24,7 @@ import { formatExportRows, sanitizeExportFilename } from '../export.ts'
 import type { DataStore } from '../store.ts'
 import { createD1Adapter } from './d1.ts'
 import { discoverLocalSqliteDbs, suggestDbName } from './discover.ts'
+import { type LearnedChangeEvent, PassiveFkLearner } from './fk-learner.ts'
 import { PostgresAdapter } from './postgres.ts'
 import { expandTilde, LocalSqliteAdapter } from './sqlite-local.ts'
 import { SshSqliteAdapter } from './sqlite-ssh.ts'
@@ -51,15 +53,18 @@ export class ConnectionManager {
 	readonly store: DataStore
 	readonly sshPool = new SshMuxPool()
 	readonly sshPrompts: SshPromptBroker
+	readonly fkLearner: PassiveFkLearner
 	private adapters = new Map<string, AdapterEntry>()
 	private rwStates = new Map<string, RwState>()
 	private subscribers = new Set<(payload: ConnectionsPayload) => void>()
 	private dbChangeListeners = new Set<(ev: { connectionId: string; ts: number }) => void>()
+	private schemaChangeListeners = new Set<(ev: LearnedChangeEvent) => void>()
 	private unsubStore: () => void
 	private askpassConfig: SshAskpassConfig | null = null
 
 	constructor(store: DataStore) {
 		this.store = store
+		this.fkLearner = new PassiveFkLearner(store, (ev) => this.emitSchemaChange(ev))
 		this.sshPrompts = new SshPromptBroker((host, active) => {
 			this.sshPool.setHostPromptActive(host, active)
 			for (const entry of this.adapters.values()) {
@@ -131,6 +136,22 @@ export class ConnectionManager {
 		this.dbChangeListeners.add(listener)
 		return () => {
 			this.dbChangeListeners.delete(listener)
+		}
+	}
+
+	subscribeSchemaChanges(listener: (ev: LearnedChangeEvent) => void): () => void {
+		this.schemaChangeListeners.add(listener)
+		return () => {
+			this.schemaChangeListeners.delete(listener)
+		}
+	}
+
+	private emitSchemaChange(ev: LearnedChangeEvent) {
+		if (this.schemaChangeListeners.size === 0) return
+		for (const cb of this.schemaChangeListeners) {
+			try {
+				cb(ev)
+			} catch {}
 		}
 	}
 
@@ -590,7 +611,43 @@ export class ConnectionManager {
 		})
 		this.store.touchConnection(conn.id)
 
+		// Passively observe single-table SELECT query rows for FK learning without delaying the response.
+		const entry = this.adapters.get(conn.id)
+		const rawSchema = entry?.lastRawSchema
+		if (rawSchema) {
+			for (const res of results) {
+				if (!res.error && res.sourceTable && res.rows.length > 0 && rawSchema.schemas[res.sourceTable]) {
+					this.fkLearner.observeRows(conn, rawSchema, adapter, res.sourceTable, res.rows)
+				}
+			}
+		}
+
 		return { results, totalDurationMs, rwArmedUntil }
+	}
+
+	async browseTable(id: string, params: BrowseParams): Promise<BrowseResult> {
+		const { conn, adapter } = this.getAdapterById(id)
+		const result = await adapter.browseTable(params)
+		this.store.recordRecentTable(conn.id, params.table)
+
+		// Trigger zero-blocking passive ID-signature learning on the already-fetched page of rows.
+		if (result.rows.length > 0) {
+			const entry = this.adapters.get(conn.id)
+			const cached = entry?.lastRawSchema
+			if (cached) {
+				this.fkLearner.observeRows(conn, cached, adapter, params.table, result.rows)
+			} else if (entry) {
+				void adapter
+					.getSchema()
+					.then((raw) => {
+						entry.lastRawSchema = raw
+						this.fkLearner.observeRows(conn, raw, adapter, params.table, result.rows)
+					})
+					.catch(() => {})
+			}
+		}
+
+		return result
 	}
 
 	async cancelQuery(id: string, queryId: string): Promise<boolean> {
@@ -625,7 +682,8 @@ export class ConnectionManager {
 		const entry = this.adapters.get(conn.id)
 		if (entry) entry.lastRawSchema = rawSchema
 		this.store.touchConnection(id)
-		return mergeSchemaForeignKeys(rawSchema, conn.virtualForeignKeys, conn.ignoredForeignKeys)
+		const learnedFks = this.store.listVerifiedLearnedFks(conn.id)
+		return mergeSchemaForeignKeys(rawSchema, conn.virtualForeignKeys, conn.ignoredForeignKeys, learnedFks)
 	}
 
 	async countReverseFks(id: string, table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
@@ -633,11 +691,13 @@ export class ConnectionManager {
 		const entry = this.adapters.get(conn.id)
 		const rawSchema = entry?.lastRawSchema ?? (await adapter.getSchema())
 		if (entry && !entry.lastRawSchema) entry.lastRawSchema = rawSchema
+		const learnedFks = this.store.listVerifiedLearnedFks(conn.id)
 		const extraReverseFks = getExtraReverseFksForTable(
 			rawSchema,
 			table,
 			conn.virtualForeignKeys,
 			conn.ignoredForeignKeys,
+			learnedFks,
 		)
 		return adapter.countReverseFks(table, row, extraReverseFks)
 	}
@@ -743,6 +803,7 @@ export class ConnectionManager {
 		this.unsubStore()
 		this.subscribers.clear()
 		this.dbChangeListeners.clear()
+		this.schemaChangeListeners.clear()
 		this.sshPrompts.closeAll()
 		for (const entry of this.adapters.values()) {
 			entry.stopWatch?.()
