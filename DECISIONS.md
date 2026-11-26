@@ -115,6 +115,17 @@ obvious.
   renders tables, PK/FK columns, and Bezier FK edges in pure SVG with
   pan, zoom, draggable cards, neighborhood highlighting, and
   click-to-browse with zero external graph dependencies.
+- Automatic FK inference & Virtual Foreign Keys (`src/shared/virtual-fks.ts`,
+  `VirtualFkModal.tsx`, `POST/DELETE /api/connections/:id/virtual-fks`,
+  `POST/DELETE /api/connections/:id/ignored-fks`): columns without
+  database-declared `FOREIGN KEY` constraints are automatically inferred
+  when their `<stem>_id` / `<stem>Id` name matches a table's single PK
+  with a compatible SQL type family (preferring same-schema tables), and
+  any column can be manually linked or dismissed locally in
+  `connections.ason` (`virtualForeignKeys` / `ignoredForeignKeys`) without
+  touching the database (works in Read-Only / Production mode). Merged
+  non-mutatingly into schema, hover peeks, reverse-FK counts, SQL Console
+  results, and ER Diagram edges (dashed for virtual, dotted for inferred).
 
 ## Inspection, Profiling, Workspaces & Internals (v0.2.0)
 

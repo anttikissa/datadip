@@ -1261,6 +1261,72 @@ textarea {
 	border-color: rgba(37, 99, 235, 0.35);
 	color: var(--fk-link);
 }
+.th-badge.fk.virtual {
+	border-style: dashed;
+}
+.th-badge.fk.inferred {
+	border-style: dotted;
+	opacity: 0.9;
+}
+.tag.virtual {
+	border-style: dashed;
+	border-color: rgba(37, 99, 235, 0.4);
+	color: var(--fk-link);
+}
+.tag.inferred {
+	border-style: dotted;
+	border-color: rgba(37, 99, 235, 0.35);
+	color: var(--fk-link);
+}
+.ref-card-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.ref-card-row .ref-card {
+	flex: 1;
+	min-width: 0;
+}
+.ref-card-meta {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+}
+.ref-card-meta svg {
+	align-self: center;
+}
+.ref-card-del {
+	width: 28px;
+	height: 28px;
+	flex: 0 0 auto;
+	color: var(--ink-muted);
+}
+.ref-card-del:hover {
+	color: var(--danger);
+}
+.vfk-existing-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 10px;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+}
+.vfk-existing-actions {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+}
+.vfk-preview {
+	padding: 8px 10px;
+	border: 1px dashed rgba(37, 99, 235, 0.4);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+	font-size: 12px;
+	color: var(--fk-link);
+}
 
 .data-table tbody tr {
 	border-bottom: 1px solid var(--border-subtle);
@@ -2324,14 +2390,23 @@ dialog.omnibar-dialog::backdrop {
 	gap: 6px;
 	width: 100%;
 }
-.th-profile-btn {
+.th-actions {
 	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+	align-self: center;
+	gap: 2px;
+}
+.th-profile-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	border: 0;
 	background: transparent;
 	color: var(--ink-muted);
 	font-size: 11px;
 	font-weight: 600;
-	padding: 1px 4px;
+	padding: 2px 4px;
 	border-radius: 3px;
 	cursor: pointer;
 	opacity: 0;

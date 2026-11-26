@@ -18,7 +18,9 @@ import type {
 	RecentTable,
 	ReverseFkCount,
 	Console,
+	IgnoredForeignKey,
 	SshHostOption,
+	VirtualForeignKey,
 } from '../shared/types.ts'
 
 export class ApiError extends Error {
@@ -84,6 +86,30 @@ export const api = {
 		}),
 
 	getSchema: (id: string) => request<DatabaseSchema>('GET', `/api/connections/${encodeURIComponent(id)}/schema`),
+	addVirtualFk: (id: string, fk: VirtualForeignKey) =>
+		request<{ virtualForeignKeys: VirtualForeignKey[] }>(
+			'POST',
+			`/api/connections/${encodeURIComponent(id)}/virtual-fks`,
+			fk,
+		),
+	removeVirtualFk: (id: string, fk: VirtualForeignKey) =>
+		request<{ virtualForeignKeys: VirtualForeignKey[] }>(
+			'DELETE',
+			`/api/connections/${encodeURIComponent(id)}/virtual-fks`,
+			fk,
+		),
+	ignoreInferredFk: (id: string, target: IgnoredForeignKey) =>
+		request<{ ignoredForeignKeys: IgnoredForeignKey[] }>(
+			'POST',
+			`/api/connections/${encodeURIComponent(id)}/ignored-fks`,
+			target,
+		),
+	unignoreInferredFk: (id: string, target: IgnoredForeignKey) =>
+		request<{ ignoredForeignKeys: IgnoredForeignKey[] }>(
+			'DELETE',
+			`/api/connections/${encodeURIComponent(id)}/ignored-fks`,
+			target,
+		),
 	browseTable: (id: string, params: BrowseParams) =>
 		request<BrowseResult>('POST', `/api/connections/${encodeURIComponent(id)}/browse`, params),
 	runQuery: (id: string, sql: string, confirmedDestructive = false, queryId?: string) =>

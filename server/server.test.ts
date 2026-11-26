@@ -752,4 +752,95 @@ describe('DataDip server API & safety boundaries', () => {
 		expect(js.format).toBe('json')
 		expect(js.rows).toEqual([{ id: 1, meta: '{"a":true}' }])
 	})
+
+	test('auto-infers undeclared FKs, supports manual virtual FKs and dismissals, and counts reverse FKs', async () => {
+		const vfkPath = join(workDir, 'vfk.sqlite')
+		const vdb = new Database(vfkPath)
+		vdb.exec(`
+			CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+			CREATE TABLE tickets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, owner TEXT);
+			INSERT INTO users (id, name) VALUES ('u1', 'Ada'), ('u2', 'Grace');
+			INSERT INTO tickets (id, user_id, owner) VALUES ('t1', 'u1', 'u2'), ('t2', 'u1', 'u1');
+		`)
+		vdb.close()
+
+		const created = await apiCall('POST', '/api/connections', {
+			name: 'Virtual FK Test',
+			driver: 'sqlite',
+			location: 'local',
+			path: vfkPath,
+			isProduction: false,
+		})
+		const id = (created.data.connection as { id: string }).id
+
+		// 1. Auto-inference links tickets.user_id -> users.id out of the box
+		const s1 = await apiCall('GET', `/api/connections/${id}/schema`)
+		expect(s1.status).toBe(200)
+		const schemas1 = s1.data.schemas as Record<
+			string,
+			{
+				foreignKeys: { fromColumn: string; toTable: string; toColumn: string; source?: string }[]
+				reverseForeignKeys: { fromTable: string; fromColumn: string; toColumn: string; source?: string }[]
+			}
+		>
+		expect(schemas1.tickets!.foreignKeys).toEqual([
+			expect.objectContaining({ fromColumn: 'user_id', toTable: 'users', toColumn: 'id', source: 'inferred' }),
+		])
+		expect(schemas1.users!.reverseForeignKeys).toEqual([
+			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred' },
+		])
+
+		// Live reverse-FK counts include auto-inferred FKs
+		const rev1 = await apiCall('POST', `/api/connections/${id}/reverse-fks`, { table: 'users', row: { id: 'u1' } })
+		expect(rev1.status).toBe(200)
+		expect(rev1.data.counts).toEqual([
+			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred', count: 2 },
+		])
+
+		// 2. Add manual virtual FK for non-standard column `tickets.owner -> users.id`
+		const addRes = await apiCall('POST', `/api/connections/${id}/virtual-fks`, {
+			fromTable: 'tickets',
+			fromColumn: 'owner',
+			toTable: 'users',
+			toColumn: 'id',
+		})
+		expect(addRes.status).toBe(200)
+		expect(addRes.data.virtualForeignKeys).toEqual([
+			{ fromTable: 'tickets', fromColumn: 'owner', toTable: 'users', toColumn: 'id' },
+		])
+
+		const rev2 = await apiCall('POST', `/api/connections/${id}/reverse-fks`, { table: 'users', row: { id: 'u2' } })
+		expect(rev2.status).toBe(200)
+		expect(rev2.data.counts).toEqual([
+			{ fromTable: 'tickets', fromColumn: 'owner', toColumn: 'id', source: 'virtual', count: 1 },
+			{ fromTable: 'tickets', fromColumn: 'user_id', toColumn: 'id', source: 'inferred', count: 0 },
+		])
+
+		// 3. Dismiss auto-inferred FK on `tickets.user_id`
+		const ignRes = await apiCall('POST', `/api/connections/${id}/ignored-fks`, {
+			fromTable: 'tickets',
+			fromColumn: 'user_id',
+		})
+		expect(ignRes.status).toBe(200)
+		const s3 = await apiCall('GET', `/api/connections/${id}/schema`)
+		const schemas3 = s3.data.schemas as typeof schemas1
+		expect(schemas3.tickets!.foreignKeys.map((fk) => [fk.fromColumn, fk.source])).toEqual([['owner', 'virtual']])
+
+		// 4. Remove manual virtual FK and restore ignored inference
+		await apiCall('DELETE', `/api/connections/${id}/virtual-fks`, {
+			fromTable: 'tickets',
+			fromColumn: 'owner',
+			toTable: 'users',
+			toColumn: 'id',
+		})
+		await apiCall('DELETE', `/api/connections/${id}/ignored-fks`, {
+			fromTable: 'tickets',
+			fromColumn: 'user_id',
+		})
+		const s4 = await apiCall('GET', `/api/connections/${id}/schema`)
+		const schemas4 = s4.data.schemas as typeof schemas1
+		expect(schemas4.tickets!.foreignKeys.map((fk) => [fk.fromColumn, fk.source])).toEqual([['user_id', 'inferred']])
+
+		await apiCall('DELETE', `/api/connections/${id}`)
+	})
 })

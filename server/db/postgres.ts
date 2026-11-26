@@ -18,6 +18,7 @@ import type {
 	OrderSpec,
 	QueryStatementResult,
 	ReverseFkCount,
+	ReverseForeignKeyInfo,
 	TableSchema,
 	TableSummary,
 	TriggerInfo,
@@ -1121,13 +1122,32 @@ export class PostgresAdapter implements DbAdapter {
 		return rows[0] ? normalizePgRow(rows[0]) : null
 	}
 
-	async countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
+	async countReverseFks(
+		table: string,
+		row: Record<string, unknown>,
+		extraReverseFks: ReverseForeignKeyInfo[] = [],
+	): Promise<ReverseFkCount[]> {
 		const sql = await this.getClient()
 		const schema = await this.getCachedSchema(table)
 		const tableSchema = schema.schemas[table]
 		if (!tableSchema) return []
-		const counts: ReverseFkCount[] = []
+		const seen = new Set<string>()
+		const allReverseFks: ReverseForeignKeyInfo[] = []
 		for (const rfk of tableSchema.reverseForeignKeys) {
+			seen.add(`${rfk.fromTable}\0${rfk.fromColumn}\0${rfk.toColumn}`)
+			allReverseFks.push(rfk)
+		}
+		for (const rfk of extraReverseFks) {
+			const key = `${rfk.fromTable}\0${rfk.fromColumn}\0${rfk.toColumn}`
+			if (seen.has(key)) continue
+			const fromSchema = schema.schemas[rfk.fromTable]
+			if (!fromSchema?.columns.some((c) => c.name === rfk.fromColumn)) continue
+			if (!tableSchema.columns.some((c) => c.name === rfk.toColumn)) continue
+			seen.add(key)
+			allReverseFks.push(rfk)
+		}
+		const counts: ReverseFkCount[] = []
+		for (const rfk of allReverseFks) {
 			const val = row[rfk.toColumn]
 			if (val === null || val === undefined) {
 				counts.push({ ...rfk, count: 0 })

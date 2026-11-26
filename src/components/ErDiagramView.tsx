@@ -87,7 +87,14 @@ export function ErDiagramView(props: { schema: DatabaseSchema | null; onOpenTabl
 
 	const edges = createMemo(() => {
 		const visSet = new Set(visibleTables().map((t) => t.name))
-		const list: { id: string; fromTable: string; fromColumn: string; toTable: string; toColumn: string }[] = []
+		const list: {
+			id: string
+			fromTable: string
+			fromColumn: string
+			toTable: string
+			toColumn: string
+			source?: 'virtual' | 'inferred'
+		}[] = []
 		for (const ts of visibleTables()) {
 			for (const fk of ts.foreignKeys) {
 				if (!visSet.has(fk.toTable)) continue
@@ -97,6 +104,7 @@ export function ErDiagramView(props: { schema: DatabaseSchema | null; onOpenTabl
 					fromColumn: fk.fromColumn,
 					toTable: fk.toTable,
 					toColumn: fk.toColumn,
+					source: fk.source,
 				})
 			}
 		}
@@ -317,11 +325,15 @@ export function ErDiagramView(props: { schema: DatabaseSchema | null; onOpenTabl
 											fill="none"
 											stroke={isHi() ? 'var(--accent)' : 'var(--border-strong)'}
 											stroke-width={isHi() ? 2.2 : 1.4}
+											stroke-dasharray={
+												edge.source === 'virtual' ? '5 4' : edge.source === 'inferred' ? '2 3' : undefined
+											}
 											stroke-opacity={isDim() ? 0.18 : 0.9}
 											marker-end={isHi() ? 'url(#er-arrow-hi)' : 'url(#er-arrow)'}
 										>
 											<title>
 												{edge.fromTable}.{edge.fromColumn} → {edge.toTable}.{edge.toColumn}
+												{edge.source === 'virtual' ? ' (virtual)' : edge.source === 'inferred' ? ' (inferred)' : ''}
 											</title>
 										</path>
 									)

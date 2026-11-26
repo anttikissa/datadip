@@ -15,19 +15,23 @@ import {
 	IconClose,
 	IconColumns,
 	IconCopy,
+	IconLink,
 	IconPlus,
 	IconRefresh,
 	IconSearch,
 	IconSql,
+	IconTrash,
 } from '../lib/icons.tsx'
 import { hasTextSelection, isEditableTarget, isNativeApp, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
 import type {
 	BrowseResult,
+	DatabaseSchema,
 	FilterOp,
 	FilterSpec,
 	ForeignKeyInfo,
 	OrderSpec,
 	PendingUpdate,
+	ReverseForeignKeyInfo,
 	TableSchema,
 } from '../shared/types.ts'
 import type { AppRoute } from '../shared/url.ts'
@@ -37,6 +41,7 @@ import { ColumnProfileModal } from './ColumnProfileModal.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
 import { ImportModal } from './ImportModal.tsx'
 import { RowInspector } from './RowInspector.tsx'
+import { VirtualFkModal } from './VirtualFkModal.tsx'
 
 type TableRoute = Extract<AppRoute, { kind: 'table' }>
 
@@ -55,6 +60,7 @@ const FILTER_OPS: { value: FilterOp; label: string }[] = [
 
 export function TableView(props: {
 	route: TableRoute
+	schema?: DatabaseSchema | null
 	tableSchema: TableSchema | null
 	rwArmed: boolean
 	reconnectTick?: number
@@ -105,13 +111,40 @@ export function TableView(props: {
 	const [staged, setStaged] = createSignal<Map<string, PendingUpdate>>(new Map())
 	const [editingCell, setEditingCell] = createSignal<{ row: number; colName: string; draft: string } | null>(null)
 
-	// Insert row, Import CSV/JSON, and Column Profile modals
+	// Insert row, Import CSV/JSON, Column Profile, and Virtual FK modals
 	const [insertOpen, setInsertOpen] = createSignal(false)
 	const [insertDraft, setInsertDraft] = createSignal<Record<string, string>>({})
 	const [importOpen, setImportOpen] = createSignal(false)
 	const [profileCol, setProfileCol] = createSignal<string | null>(null)
+	const [vfkOpen, setVfkOpen] = createSignal(false)
+	const [vfkCol, setVfkCol] = createSignal<string | null>(null)
 	let insertDialogEl: HTMLDialogElement | undefined
 	let searchInputEl: HTMLInputElement | undefined
+
+	function openVirtualFkModal(colName?: string | null) {
+		setVfkCol(colName ?? null)
+		setVfkOpen(true)
+	}
+
+	async function removeVirtualFk(fromTable: string, fromColumn: string, toTable: string, toColumn: string) {
+		try {
+			await api.removeVirtualFk(props.route.connId, { fromTable, fromColumn, toTable, toColumn })
+			props.onSchemaChanged()
+			props.onNotify(`Removed virtual FK ${fromTable}.${fromColumn} → ${toTable}.${toColumn}`, 'ok')
+		} catch (err) {
+			props.onNotify(err instanceof Error ? err.message : String(err), 'error')
+		}
+	}
+
+	async function dismissInferredFk(fromTable: string, fromColumn: string) {
+		try {
+			await api.ignoreInferredFk(props.route.connId, { fromTable, fromColumn })
+			props.onSchemaChanged()
+			props.onNotify(`Dismissed inferred FK on ${fromTable}.${fromColumn}`, 'info')
+		} catch (err) {
+			props.onNotify(err instanceof Error ? err.message : String(err), 'error')
+		}
+	}
 
 	// FK hover peek
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
@@ -1301,23 +1334,60 @@ export function TableView(props: {
 																	<Show when={isPk()}>
 																		<span class="th-badge pk">PK</span>
 																	</Show>
-																	<Show when={fk()}>{(f) => <span class="th-badge fk">→ {f().toTable}</span>}</Show>
+																	<Show when={fk()}>
+																		{(f) => (
+																			<span
+																				class={[
+																					'th-badge',
+																					'fk',
+																					{ virtual: f().source === 'virtual', inferred: f().source === 'inferred' },
+																				]}
+																				title={
+																					f().source === 'virtual'
+																						? `Virtual FK → ${f().toTable}.${f().toColumn} (configured in DataDip)`
+																						: f().source === 'inferred'
+																							? `Auto-inferred FK → ${f().toTable}.${f().toColumn} (click link icon to save or dismiss)`
+																							: `Foreign key → ${f().toTable}.${f().toColumn}`
+																				}
+																			>
+																				→ {f().toTable}
+																			</span>
+																		)}
+																	</Show>
 																	<Show when={sortSpec()}>
 																		{(s) => <span style="color:var(--accent)">{s().dir === 'asc' ? '▲' : '▼'}</span>}
 																	</Show>
 																</button>
-																<button
-																	type="button"
-																	class="th-profile-btn"
-																	title={`Profile ${colName} (p)`}
-																	aria-label={`Profile ${colName}`}
-																	onClick={(e) => {
-																		e.stopPropagation()
-																		setProfileCol(colName)
-																	}}
-																>
-																	Σ
-																</button>
+																<span class="th-actions">
+																	<button
+																		type="button"
+																		class="th-profile-btn"
+																		title={
+																			fk()
+																				? `Manage virtual foreign key for ${colName}`
+																				: `Link ${colName} as virtual foreign key`
+																		}
+																		aria-label={`Configure foreign key for ${colName}`}
+																		onClick={(e) => {
+																			e.stopPropagation()
+																			openVirtualFkModal(colName)
+																		}}
+																	>
+																		<IconLink />
+																	</button>
+																	<button
+																		type="button"
+																		class="th-profile-btn"
+																		title={`Profile ${colName} (p)`}
+																		aria-label={`Profile ${colName}`}
+																		onClick={(e) => {
+																			e.stopPropagation()
+																			setProfileCol(colName)
+																		}}
+																	>
+																		Σ
+																	</button>
+																</span>
 															</div>
 															<span
 																class="col-resizer"
@@ -1453,6 +1523,7 @@ export function TableView(props: {
 							rwArmed={props.rwArmed}
 							onClose={() => setInspectorRowIdx(null)}
 							onFollowFk={followFk}
+							onLinkColumn={(colName) => openVirtualFkModal(colName)}
 							onDuplicateRow={openDuplicateRow}
 							onDeleteRow={requestDeleteRow}
 							onNotify={(m) => props.onNotify(m)}
@@ -1601,6 +1672,10 @@ export function TableView(props: {
 							<div class="schema-card">
 								<div class="schema-card-head">
 									<span>Outgoing Foreign Keys ({ts().foreignKeys.length})</span>
+									<button type="button" class="btn sm" onClick={() => openVirtualFkModal(null)}>
+										<IconPlus />
+										Add Virtual FK
+									</button>
 								</div>
 								<div style="padding:10px;display:flex;flex-direction:column;gap:6px">
 									<Show when={ts().foreignKeys.length === 0}>
@@ -1608,26 +1683,58 @@ export function TableView(props: {
 									</Show>
 									<For each={ts().foreignKeys}>
 										{(fk) => (
-											<button
-												type="button"
-												class="ref-card"
-												onClick={() =>
-													props.onNavigate({
-														...props.route,
-														table: fk.toTable,
-														tab: 'schema',
-														filters: [],
-														order: [],
-														start: null,
-														offset: null,
-													})
-												}
-											>
-												<span class="mono" style="font-size:12px">
-													{fk.fromColumn} → <strong>{fk.toTable}</strong>.{fk.toColumn}
-												</span>
-												<span class="tag">DEL: {fk.onDelete}</span>
-											</button>
+											<div class="ref-card-row">
+												<button
+													type="button"
+													class="ref-card"
+													onClick={() =>
+														props.onNavigate({
+															...props.route,
+															table: fk.toTable,
+															tab: 'schema',
+															filters: [],
+															order: [],
+															start: null,
+															offset: null,
+														})
+													}
+												>
+													<span class="mono" style="font-size:12px">
+														{fk.fromColumn} → <strong>{fk.toTable}</strong>.{fk.toColumn}
+													</span>
+													<span
+														class={['tag', { virtual: fk.source === 'virtual', inferred: fk.source === 'inferred' }]}
+													>
+														{fk.source === 'virtual'
+															? 'VIRTUAL'
+															: fk.source === 'inferred'
+																? 'AUTO'
+																: `DEL: ${fk.onDelete}`}
+													</span>
+												</button>
+												<Show when={fk.source === 'virtual'}>
+													<button
+														type="button"
+														class="icon-btn ghost ref-card-del"
+														title="Remove virtual foreign key"
+														aria-label={`Remove virtual FK ${fk.fromColumn} to ${fk.toTable}.${fk.toColumn}`}
+														onClick={() => void removeVirtualFk(ts().name, fk.fromColumn, fk.toTable, fk.toColumn)}
+													>
+														<IconTrash />
+													</button>
+												</Show>
+												<Show when={fk.source === 'inferred'}>
+													<button
+														type="button"
+														class="icon-btn ghost ref-card-del"
+														title="Dismiss auto-inferred foreign key"
+														aria-label={`Dismiss inferred FK on ${fk.fromColumn}`}
+														onClick={() => void dismissInferredFk(ts().name, fk.fromColumn)}
+													>
+														<IconClose />
+													</button>
+												</Show>
+											</div>
 										)}
 									</For>
 								</div>
@@ -1642,27 +1749,60 @@ export function TableView(props: {
 										<span style="color:var(--ink-muted)">No tables reference this table.</span>
 									</Show>
 									<For each={ts().reverseForeignKeys}>
-										{(rfk) => (
-											<button
-												type="button"
-												class="ref-card"
-												onClick={() =>
-													props.onNavigate({
-														...props.route,
-														table: rfk.fromTable,
-														tab: 'data',
-														filters: [],
-														order: [],
-														start: null,
-														offset: null,
-													})
-												}
-											>
-												<span class="mono" style="font-size:12px">
-													<strong>{rfk.fromTable}</strong>.{rfk.fromColumn} → {rfk.toColumn}
-												</span>
-												<IconArrowRight />
-											</button>
+										{(rfk: ReverseForeignKeyInfo) => (
+											<div class="ref-card-row">
+												<button
+													type="button"
+													class="ref-card"
+													onClick={() =>
+														props.onNavigate({
+															...props.route,
+															table: rfk.fromTable,
+															tab: 'data',
+															filters: [],
+															order: [],
+															start: null,
+															offset: null,
+														})
+													}
+												>
+													<span class="mono" style="font-size:12px">
+														<strong>{rfk.fromTable}</strong>.{rfk.fromColumn} → {rfk.toColumn}
+													</span>
+													<span class="ref-card-meta">
+														<Show when={rfk.source}>
+															{(src) => (
+																<span class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}>
+																	{src() === 'virtual' ? 'VIRTUAL' : 'AUTO'}
+																</span>
+															)}
+														</Show>
+														<IconArrowRight />
+													</span>
+												</button>
+												<Show when={rfk.source === 'virtual'}>
+													<button
+														type="button"
+														class="icon-btn ghost ref-card-del"
+														title="Remove virtual foreign key"
+														aria-label={`Remove virtual FK ${rfk.fromTable}.${rfk.fromColumn} to ${ts().name}.${rfk.toColumn}`}
+														onClick={() => void removeVirtualFk(rfk.fromTable, rfk.fromColumn, ts().name, rfk.toColumn)}
+													>
+														<IconTrash />
+													</button>
+												</Show>
+												<Show when={rfk.source === 'inferred'}>
+													<button
+														type="button"
+														class="icon-btn ghost ref-card-del"
+														title="Dismiss auto-inferred foreign key"
+														aria-label={`Dismiss inferred FK on ${rfk.fromTable}.${rfk.fromColumn}`}
+														onClick={() => void dismissInferredFk(rfk.fromTable, rfk.fromColumn)}
+													>
+														<IconClose />
+													</button>
+												</Show>
+											</div>
 										)}
 									</For>
 								</div>
@@ -1838,6 +1978,20 @@ export function TableView(props: {
 					props.onSchemaChanged()
 					props.onNotify(`Imported ${count.toLocaleString()} row(s) into ${props.route.table}`, 'ok')
 				}}
+			/>
+
+			<VirtualFkModal
+				open={vfkOpen()}
+				connId={props.route.connId}
+				fromTable={props.route.table}
+				initialFromColumn={vfkCol()}
+				schema={props.schema ?? null}
+				onClose={() => setVfkOpen(false)}
+				onChanged={(msg) => {
+					props.onSchemaChanged()
+					props.onNotify(msg, 'ok')
+				}}
+				onNotify={props.onNotify}
 			/>
 		</div>
 	)

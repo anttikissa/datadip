@@ -19,6 +19,7 @@ import type {
 	OrderSpec,
 	QueryStatementResult,
 	ReverseFkCount,
+	ReverseForeignKeyInfo,
 	TableSchema,
 	TableSummary,
 	TriggerInfo,
@@ -661,12 +662,32 @@ export function peekSqliteRow(
 	return row ? normalizeRow(row) : null
 }
 
-export function countSqliteReverseFks(db: Database, table: string, row: Record<string, unknown>): ReverseFkCount[] {
+export function countSqliteReverseFks(
+	db: Database,
+	table: string,
+	row: Record<string, unknown>,
+	extraReverseFks: ReverseForeignKeyInfo[] = [],
+): ReverseFkCount[] {
 	const schema = getSqliteSchema(db)
 	const tableSchema = schema.schemas[table]
 	if (!tableSchema) return []
-	const counts: ReverseFkCount[] = []
+	const seen = new Set<string>()
+	const allReverseFks: ReverseForeignKeyInfo[] = []
 	for (const rfk of tableSchema.reverseForeignKeys) {
+		seen.add(`${rfk.fromTable}\0${rfk.fromColumn}\0${rfk.toColumn}`)
+		allReverseFks.push(rfk)
+	}
+	for (const rfk of extraReverseFks) {
+		const key = `${rfk.fromTable}\0${rfk.fromColumn}\0${rfk.toColumn}`
+		if (seen.has(key)) continue
+		const fromSchema = schema.schemas[rfk.fromTable]
+		if (!fromSchema?.columns.some((c) => c.name === rfk.fromColumn)) continue
+		if (!tableSchema.columns.some((c) => c.name === rfk.toColumn)) continue
+		seen.add(key)
+		allReverseFks.push(rfk)
+	}
+	const counts: ReverseFkCount[] = []
+	for (const rfk of allReverseFks) {
 		const val = row[rfk.toColumn]
 		if (val === null || val === undefined) {
 			counts.push({ ...rfk, count: 0 })

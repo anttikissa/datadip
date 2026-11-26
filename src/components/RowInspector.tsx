@@ -10,7 +10,7 @@ import {
 	tryFormatTimestampHint,
 	tryPrettyJson,
 } from '../lib/format.ts'
-import { IconArrowRight, IconClose, IconCopy, IconTrash } from '../lib/icons.tsx'
+import { IconArrowRight, IconClose, IconCopy, IconLink, IconTrash } from '../lib/icons.tsx'
 import type { ForeignKeyInfo, ReverseFkCount, TableSchema } from '../shared/types.ts'
 
 export function RowInspector(props: {
@@ -20,6 +20,7 @@ export function RowInspector(props: {
 	rwArmed: boolean
 	onClose: () => void
 	onFollowFk: (targetTable: string, targetColumn: string, value: unknown) => void
+	onLinkColumn?: (columnName: string) => void
 	onDuplicateRow?: (row: Record<string, unknown>) => void
 	onDeleteRow: (row: Record<string, unknown>) => void
 	onNotify: (msg: string) => void
@@ -114,7 +115,14 @@ export function RowInspector(props: {
 												<span class="mono" style="font-size:12px">
 													<strong>{rfk.fromTable}</strong>.{rfk.fromColumn}
 												</span>
-												<span style="display:inline-flex;align-items:center;gap:6px">
+												<span class="ref-card-meta">
+													<Show when={rfk.source}>
+														{(src) => (
+															<span class={['tag', { virtual: src() === 'virtual', inferred: src() === 'inferred' }]}>
+																{src() === 'virtual' ? 'VIRTUAL' : 'AUTO'}
+															</span>
+														)}
+													</Show>
 													<span class="tag">{rfk.count} rows</span>
 													<IconArrowRight />
 												</span>
@@ -144,21 +152,58 @@ export function RowInspector(props: {
 													<Show when={col.primaryKey > 0}>
 														<span class="th-badge pk">PK</span>
 													</Show>
-													<Show when={fk()}>{(f) => <span class="th-badge fk">→ {f().toTable}</span>}</Show>
+													<Show when={fk()}>
+														{(f) => (
+															<span
+																class={[
+																	'th-badge',
+																	'fk',
+																	{ virtual: f().source === 'virtual', inferred: f().source === 'inferred' },
+																]}
+																title={
+																	f().source === 'virtual'
+																		? `Virtual FK → ${f().toTable}.${f().toColumn}`
+																		: f().source === 'inferred'
+																			? `Auto-inferred FK → ${f().toTable}.${f().toColumn}`
+																			: `Foreign key → ${f().toTable}.${f().toColumn}`
+																}
+															>
+																→ {f().toTable}
+															</span>
+														)}
+													</Show>
 												</span>
-												<button
-													type="button"
-													class="icon-btn ghost"
-													style="width:22px;height:22px"
-													onClick={async () => {
-														if (await copyToClipboard(formatCellText(val()))) {
-															props.onNotify(`Copied ${col.name}`)
-														}
-													}}
-													aria-label={`Copy ${col.name}`}
-												>
-													<IconCopy />
-												</button>
+												<span style="display:inline-flex;align-items:center;gap:2px;align-self:center">
+													<Show when={props.onLinkColumn}>
+														<button
+															type="button"
+															class="icon-btn ghost"
+															style="width:22px;height:22px"
+															title={
+																fk()
+																	? `Manage foreign key link for ${col.name}`
+																	: `Link ${col.name} as virtual foreign key`
+															}
+															aria-label={`Configure foreign key for ${col.name}`}
+															onClick={() => props.onLinkColumn?.(col.name)}
+														>
+															<IconLink />
+														</button>
+													</Show>
+													<button
+														type="button"
+														class="icon-btn ghost"
+														style="width:22px;height:22px"
+														onClick={async () => {
+															if (await copyToClipboard(formatCellText(val()))) {
+																props.onNotify(`Copied ${col.name}`)
+															}
+														}}
+														aria-label={`Copy ${col.name}`}
+													>
+														<IconCopy />
+													</button>
+												</span>
 											</div>
 
 											<Show

@@ -387,11 +387,26 @@ function peekRow(db, table, column, value) {
 	return r ? normalizeRow(r) : null;
 }
 
-function countReverseFks(db, table, row) {
+function countReverseFks(db, table, row, extraReverseFks) {
 	const schema = getSchema(db);
 	const ts = schema.schemas[table];
 	if (!ts) return [];
-	return ts.reverseForeignKeys.map(rfk => {
+	const seen = new Set();
+	const all = [];
+	for (const rfk of ts.reverseForeignKeys) {
+		seen.add(rfk.fromTable + '\0' + rfk.fromColumn + '\0' + rfk.toColumn);
+		all.push(rfk);
+	}
+	for (const rfk of extraReverseFks || []) {
+		const key = rfk.fromTable + '\0' + rfk.fromColumn + '\0' + rfk.toColumn;
+		if (seen.has(key)) continue;
+		const fromSchema = schema.schemas[rfk.fromTable];
+		if (!fromSchema || !fromSchema.columns.some(c => c.name === rfk.fromColumn)) continue;
+		if (!ts.columns.some(c => c.name === rfk.toColumn)) continue;
+		seen.add(key);
+		all.push(rfk);
+	}
+	return all.map(rfk => {
 		const v = row[rfk.toColumn];
 		if (v === null || v === undefined) return { ...rfk, count: 0 };
 		try {
@@ -568,7 +583,7 @@ function handle(req) {
 		case 'query': return executeStatements(db, params.statements, params.maxRows);
 		case 'mutate': return mutateTable(db, params);
 		case 'peek': return peekRow(db, params.table, params.column, params.value);
-		case 'reverseFks': return countReverseFks(db, params.table, params.row);
+		case 'reverseFks': return countReverseFks(db, params.table, params.row, params.extraReverseFks);
 		case 'searchId': return searchId(db, params.value);
 		case 'profileColumn': return profileColumn(db, params.table, params.column);
 		case 'info': return getDbInfo(db, dbPath);

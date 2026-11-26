@@ -1,7 +1,14 @@
 // HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, consoles, and discovery.
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { APP_VERSION } from '../src/shared/changelog.ts'
-import type { BrowseParams, ConnectionConfig, DiscoverPreset, MutateRequest } from '../src/shared/types.ts'
+import type {
+	BrowseParams,
+	ConnectionConfig,
+	DiscoverPreset,
+	IgnoredForeignKey,
+	MutateRequest,
+	VirtualForeignKey,
+} from '../src/shared/types.ts'
 import { type ConnectionManager, HttpError } from './db/manager.ts'
 import { listSshConfigHosts } from './db/ssh-config.ts'
 import { EXPORT_MIME, type ExportFormat } from './export.ts'
@@ -195,6 +202,8 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean) : undefined,
 				color: body.color,
 				pinned: Boolean(body.pinned),
+				virtualForeignKeys: Array.isArray(body.virtualForeignKeys) ? body.virtualForeignKeys : undefined,
+				ignoredForeignKeys: Array.isArray(body.ignoredForeignKeys) ? body.ignoredForeignKeys : undefined,
 			})
 			return asonResponse({ connection: conn }, 201)
 		}
@@ -253,10 +262,48 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			}
 
 			if (rest === 'schema' && method === 'GET') {
-				const { adapter } = manager.getAdapterById(connId)
-				const schema = await adapter.getSchema()
-				manager.store.touchConnection(connId)
+				const schema = await manager.getSchema(connId)
 				return asonResponse(schema)
+			}
+
+			if (rest === 'virtual-fks' && (method === 'POST' || method === 'DELETE')) {
+				const body = await readBody<Partial<VirtualForeignKey>>(req)
+				const fk: VirtualForeignKey = {
+					fromTable: String(body.fromTable ?? '').trim(),
+					fromColumn: String(body.fromColumn ?? '').trim(),
+					toTable: String(body.toTable ?? '').trim(),
+					toColumn: String(body.toColumn ?? '').trim(),
+				}
+				if (!fk.fromTable || !fk.fromColumn || !fk.toTable || !fk.toColumn) {
+					throw new HttpError(400, 'fromTable, fromColumn, toTable, and toColumn are required')
+				}
+				const virtualForeignKeys =
+					method === 'POST'
+						? manager.store.addVirtualForeignKey(connId, fk)
+						: manager.store.removeVirtualForeignKey(connId, fk)
+				if (virtualForeignKeys === null) {
+					throw new HttpError(404, 'Connection not found in connections.ason')
+				}
+				return asonResponse({ virtualForeignKeys })
+			}
+
+			if (rest === 'ignored-fks' && (method === 'POST' || method === 'DELETE')) {
+				const body = await readBody<Partial<IgnoredForeignKey>>(req)
+				const target: IgnoredForeignKey = {
+					fromTable: String(body.fromTable ?? '').trim(),
+					fromColumn: String(body.fromColumn ?? '').trim(),
+				}
+				if (!target.fromTable || !target.fromColumn) {
+					throw new HttpError(400, 'fromTable and fromColumn are required')
+				}
+				const ignoredForeignKeys =
+					method === 'POST'
+						? manager.store.addIgnoredForeignKey(connId, target)
+						: manager.store.removeIgnoredForeignKey(connId, target)
+				if (ignoredForeignKeys === null) {
+					throw new HttpError(404, 'Connection not found in connections.ason')
+				}
+				return asonResponse({ ignoredForeignKeys })
 			}
 
 			if (rest === 'browse' && method === 'POST') {
@@ -303,8 +350,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 
 			if (rest === 'reverse-fks' && method === 'POST') {
 				const body = await readBody<{ table: string; row: Record<string, unknown> }>(req)
-				const { adapter } = manager.getAdapterById(connId)
-				const counts = await adapter.countReverseFks(body.table, body.row)
+				const counts = await manager.countReverseFks(connId, body.table, body.row)
 				return asonResponse({ counts })
 			}
 

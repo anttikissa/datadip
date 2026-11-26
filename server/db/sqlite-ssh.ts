@@ -10,6 +10,7 @@ import type {
 	MutateResponse,
 	QueryStatementResult,
 	ReverseFkCount,
+	ReverseForeignKeyInfo,
 } from '../../src/shared/types.ts'
 import type { SshMuxPool, SshTarget } from './ssh-mux.ts'
 import type { DbAdapter } from './types.ts'
@@ -73,8 +74,12 @@ export class SshSqliteAdapter implements DbAdapter {
 		return this.rpc<Record<string, unknown> | null>('peek', { table, column, value })
 	}
 
-	countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
-		return this.rpc<ReverseFkCount[]>('reverseFks', { table, row })
+	countReverseFks(
+		table: string,
+		row: Record<string, unknown>,
+		extraReverseFks?: ReverseForeignKeyInfo[],
+	): Promise<ReverseFkCount[]> {
+		return this.rpc<ReverseFkCount[]>('reverseFks', { table, row, extraReverseFks })
 	}
 
 	searchId(value: string): Promise<IdMatch[]> {

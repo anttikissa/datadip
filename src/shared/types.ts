@@ -19,6 +19,13 @@ export interface VirtualForeignKey {
 	toColumn: string
 }
 
+export interface IgnoredForeignKey {
+	fromTable: string
+	fromColumn: string
+}
+
+export type ForeignKeySource = 'virtual' | 'inferred'
+
 export interface ConnectionConfig {
 	id: string
 	name: string
@@ -35,6 +42,7 @@ export interface ConnectionConfig {
 	color?: ConnectionColor
 	pinned?: boolean
 	virtualForeignKeys?: VirtualForeignKey[]
+	ignoredForeignKeys?: IgnoredForeignKey[]
 	createdAt: string
 	lastVisitedAt?: string
 }
@@ -89,14 +97,14 @@ export interface ForeignKeyInfo {
 	toColumn: string
 	onUpdate: string
 	onDelete: string
-	virtual?: boolean
+	source?: ForeignKeySource
 }
 
 export interface ReverseForeignKeyInfo {
 	fromTable: string
 	fromColumn: string
 	toColumn: string
-	virtual?: boolean
+	source?: ForeignKeySource
 }
 
 export interface IndexInfo {
@@ -250,7 +258,7 @@ export interface ReverseFkCount {
 	fromColumn: string
 	toColumn: string
 	count: number
-	virtual?: boolean
+	source?: ForeignKeySource
 }
 
 export interface IdMatch {

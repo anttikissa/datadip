@@ -13,6 +13,7 @@ import type {
 	MutateResponse,
 	QueryStatementResult,
 	ReverseFkCount,
+	ReverseForeignKeyInfo,
 } from '../../src/shared/types.ts'
 import {
 	browseSqliteTable,
@@ -143,8 +144,12 @@ export class LocalSqliteAdapter implements DbAdapter {
 		return peekSqliteRow(this.open(false), table, column, value)
 	}
 
-	async countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
-		return countSqliteReverseFks(this.open(false), table, row)
+	async countReverseFks(
+		table: string,
+		row: Record<string, unknown>,
+		extraReverseFks?: ReverseForeignKeyInfo[],
+	): Promise<ReverseFkCount[]> {
+		return countSqliteReverseFks(this.open(false), table, row, extraReverseFks)
 	}
 
 	async searchId(value: string): Promise<IdMatch[]> {

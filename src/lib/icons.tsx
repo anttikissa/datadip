@@ -237,3 +237,16 @@ export function IconCompass() {
 		</svg>
 	)
 }
+
+export function IconLink() {
+	return (
+		<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+			<path
+				d="M6.8 9.2L9.2 6.8M5.8 6.4L4.2 8a2.5 2.5 0 0 0 3.5 3.5l1.6-1.6M10.2 9.6l1.6-1.6a2.5 2.5 0 0 0-3.5-3.5L6.7 6.1"
+				stroke="currentColor"
+				stroke-width="1.4"
+				stroke-linecap="round"
+			/>
+		</svg>
+	)
+}

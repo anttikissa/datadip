@@ -2,6 +2,7 @@
 import { closeSync, existsSync, openSync, readSync, realpathSync, watch } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
+import { getExtraReverseFksForTable, mergeSchemaForeignKeys } from '../../src/shared/virtual-fks.ts'
 import type {
 	BrowseParams,
 	ColumnProfile,
@@ -9,11 +10,13 @@ import type {
 	ConnectionsPayload,
 	ConnectionWithStatus,
 	DatabaseInfo,
+	DatabaseSchema,
 	DiscoveredDb,
 	DiscoverPreset,
 	MutateRequest,
 	MutateResponse,
 	QueryResponse,
+	ReverseFkCount,
 } from '../../src/shared/types.ts'
 import type { ExportFormat } from '../export.ts'
 import { formatExportRows, sanitizeExportFilename } from '../export.ts'
@@ -38,6 +41,7 @@ interface AdapterEntry {
 	adapter: DbAdapter
 	config: ConnectionConfig
 	lastLatencyMs: number | null
+	lastRawSchema?: DatabaseSchema
 	stopWatch?: () => void
 }
 
@@ -580,6 +584,29 @@ export class ConnectionManager {
 		const res = await adapter.mutate(req)
 		this.refreshProdRwTimer(conn)
 		return res
+	}
+
+	async getSchema(id: string): Promise<DatabaseSchema> {
+		const { conn, adapter } = this.getAdapterById(id)
+		const rawSchema = await adapter.getSchema()
+		const entry = this.adapters.get(conn.id)
+		if (entry) entry.lastRawSchema = rawSchema
+		this.store.touchConnection(id)
+		return mergeSchemaForeignKeys(rawSchema, conn.virtualForeignKeys, conn.ignoredForeignKeys)
+	}
+
+	async countReverseFks(id: string, table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
+		const { conn, adapter } = this.getAdapterById(id)
+		const entry = this.adapters.get(conn.id)
+		const rawSchema = entry?.lastRawSchema ?? (await adapter.getSchema())
+		if (entry && !entry.lastRawSchema) entry.lastRawSchema = rawSchema
+		const extraReverseFks = getExtraReverseFksForTable(
+			rawSchema,
+			table,
+			conn.virtualForeignKeys,
+			conn.ignoredForeignKeys,
+		)
+		return adapter.countReverseFks(table, row, extraReverseFks)
 	}
 
 	async profileColumn(id: string, table: string, column: string): Promise<ColumnProfile> {

@@ -6,7 +6,15 @@ import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { liveFiles } from '../src/shared/live-file.ts'
 import { tid } from '../src/shared/tid.ts'
-import type { ConnectionColor, ConnectionConfig, QueryHistoryEntry, RecentTable, Console } from '../src/shared/types.ts'
+import type {
+	ConnectionColor,
+	ConnectionConfig,
+	Console,
+	IgnoredForeignKey,
+	QueryHistoryEntry,
+	RecentTable,
+	VirtualForeignKey,
+} from '../src/shared/types.ts'
 
 const VALID_COLORS = new Set<ConnectionColor>(['blue', 'green', 'amber', 'purple', 'rose', 'slate'])
 
@@ -63,6 +71,44 @@ export function readServerInfo(dataDir?: string): ServerInfo | null {
 	}
 }
 
+function normalizeVirtualForeignKeys(raw: unknown): VirtualForeignKey[] | undefined {
+	if (!Array.isArray(raw)) return undefined
+	const seen = new Set<string>()
+	const out: VirtualForeignKey[] = []
+	for (const item of raw) {
+		if (!item || typeof item !== 'object') continue
+		const r = item as Partial<VirtualForeignKey>
+		const fromTable = String(r.fromTable ?? '').trim()
+		const fromColumn = String(r.fromColumn ?? '').trim()
+		const toTable = String(r.toTable ?? '').trim()
+		const toColumn = String(r.toColumn ?? '').trim()
+		if (!fromTable || !fromColumn || !toTable || !toColumn) continue
+		const key = `${fromTable}\0${fromColumn}\0${toTable}\0${toColumn}`
+		if (seen.has(key)) continue
+		seen.add(key)
+		out.push({ fromTable, fromColumn, toTable, toColumn })
+	}
+	return out.length > 0 ? out : undefined
+}
+
+function normalizeIgnoredForeignKeys(raw: unknown): IgnoredForeignKey[] | undefined {
+	if (!Array.isArray(raw)) return undefined
+	const seen = new Set<string>()
+	const out: IgnoredForeignKey[] = []
+	for (const item of raw) {
+		if (!item || typeof item !== 'object') continue
+		const r = item as Partial<IgnoredForeignKey>
+		const fromTable = String(r.fromTable ?? '').trim()
+		const fromColumn = String(r.fromColumn ?? '').trim()
+		if (!fromTable || !fromColumn) continue
+		const key = `${fromTable}\0${fromColumn}`
+		if (seen.has(key)) continue
+		seen.add(key)
+		out.push({ fromTable, fromColumn })
+	}
+	return out.length > 0 ? out : undefined
+}
+
 function serializeConnection(c: ConnectionConfig): Record<string, unknown> {
 	const out: Record<string, unknown> = {
 		id: c.id,
@@ -82,6 +128,10 @@ function serializeConnection(c: ConnectionConfig): Record<string, unknown> {
 	if (c.tags && c.tags.length > 0) out.tags = c.tags
 	if (c.color && VALID_COLORS.has(c.color)) out.color = c.color
 	if (c.pinned) out.pinned = true
+	const virtualFks = normalizeVirtualForeignKeys(c.virtualForeignKeys)
+	if (virtualFks && virtualFks.length > 0) out.virtualForeignKeys = virtualFks
+	const ignoredFks = normalizeIgnoredForeignKeys(c.ignoredForeignKeys)
+	if (ignoredFks && ignoredFks.length > 0) out.ignoredForeignKeys = ignoredFks
 	out.createdAt = c.createdAt
 	return out
 }
@@ -236,6 +286,8 @@ export class DataStore {
 			tags: tags && tags.length > 0 ? tags : undefined,
 			color,
 			pinned: Boolean(raw.pinned),
+			virtualForeignKeys: normalizeVirtualForeignKeys(raw.virtualForeignKeys),
+			ignoredForeignKeys: normalizeIgnoredForeignKeys(raw.ignoredForeignKeys),
 			createdAt: raw.createdAt ? String(raw.createdAt) : new Date().toISOString(),
 			lastVisitedAt,
 		}
@@ -298,6 +350,54 @@ export class DataStore {
 		liveFiles.save(this.connectionsFile)
 		this.emitConnectionsChange({ external: false, error: null })
 		return updated
+	}
+
+	addVirtualForeignKey(id: string, fk: VirtualForeignKey): VirtualForeignKey[] | null {
+		const current = this.getConnection(id)
+		if (!current) return null
+		const next = normalizeVirtualForeignKeys([...(current.virtualForeignKeys ?? []), fk]) ?? []
+		const nextIgnored = (current.ignoredForeignKeys ?? []).filter(
+			(i) => !(i.fromTable === fk.fromTable && i.fromColumn === fk.fromColumn),
+		)
+		const updated = this.updateConnection(id, {
+			virtualForeignKeys: next,
+			ignoredForeignKeys: nextIgnored.length > 0 ? nextIgnored : undefined,
+		})
+		return updated ? (updated.virtualForeignKeys ?? []) : null
+	}
+
+	removeVirtualForeignKey(id: string, fk: VirtualForeignKey): VirtualForeignKey[] | null {
+		const current = this.getConnection(id)
+		if (!current) return null
+		const next = (current.virtualForeignKeys ?? []).filter(
+			(v) =>
+				!(
+					v.fromTable === fk.fromTable &&
+					v.fromColumn === fk.fromColumn &&
+					v.toTable === fk.toTable &&
+					v.toColumn === fk.toColumn
+				),
+		)
+		const updated = this.updateConnection(id, { virtualForeignKeys: next.length > 0 ? next : undefined })
+		return updated ? (updated.virtualForeignKeys ?? []) : null
+	}
+
+	addIgnoredForeignKey(id: string, target: IgnoredForeignKey): IgnoredForeignKey[] | null {
+		const current = this.getConnection(id)
+		if (!current) return null
+		const next = normalizeIgnoredForeignKeys([...(current.ignoredForeignKeys ?? []), target]) ?? []
+		const updated = this.updateConnection(id, { ignoredForeignKeys: next })
+		return updated ? (updated.ignoredForeignKeys ?? []) : null
+	}
+
+	removeIgnoredForeignKey(id: string, target: IgnoredForeignKey): IgnoredForeignKey[] | null {
+		const current = this.getConnection(id)
+		if (!current) return null
+		const next = (current.ignoredForeignKeys ?? []).filter(
+			(i) => !(i.fromTable === target.fromTable && i.fromColumn === target.fromColumn),
+		)
+		const updated = this.updateConnection(id, { ignoredForeignKeys: next.length > 0 ? next : undefined })
+		return updated ? (updated.ignoredForeignKeys ?? []) : null
 	}
 
 	// Stored in state.db so browsing/querying never dirties hand-edited connections.ason.

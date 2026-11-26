@@ -637,12 +637,28 @@ export function App() {
 					setConfigError(payload.configError ?? null)
 					if (!initialEvent) {
 						const activeId = activeConnId()
-						const wasOrphaned = prev.find((c) => c.id === activeId)?.orphaned
-						const nowOrphaned = next.find((c) => c.id === activeId)?.orphaned
+						const prevActive = prev.find((c) => c.id === activeId)
+						const nextActive = next.find((c) => c.id === activeId)
+						const wasOrphaned = prevActive?.orphaned
+						const nowOrphaned = nextActive?.orphaned
 						if (nowOrphaned && !wasOrphaned) {
 							notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
-						} else if (activeId && !next.some((c) => c.id === activeId) && prev.some((c) => c.id === activeId)) {
+						} else if (activeId && !nextActive && prevActive) {
 							navigate({ kind: 'home' })
+						} else if (
+							activeId &&
+							nextActive &&
+							(JSON.stringify(prevActive?.virtualForeignKeys ?? []) !==
+								JSON.stringify(nextActive.virtualForeignKeys ?? []) ||
+								JSON.stringify(prevActive?.ignoredForeignKeys ?? []) !==
+									JSON.stringify(nextActive.ignoredForeignKeys ?? []))
+						) {
+							void api
+								.getSchema(activeId)
+								.then((sRes) => {
+									if (activeConnId() === activeId) setSchema(sRes)
+								})
+								.catch(() => {})
 						}
 						void api
 							.listRecents()
@@ -1515,6 +1531,7 @@ export function App() {
 					{(r) => (
 						<TableView
 							route={r()}
+							schema={schema()}
 							tableSchema={schema()?.schemas[r().table] ?? null}
 							rwArmed={rwArmed()}
 							reconnectTick={reconnectTick()}

@@ -10,6 +10,7 @@ import type {
 	MutateResponse,
 	QueryStatementResult,
 	ReverseFkCount,
+	ReverseForeignKeyInfo,
 } from '../../src/shared/types.ts'
 
 export interface DbAdapter {
@@ -24,7 +25,11 @@ export interface DbAdapter {
 	cancelQuery?(queryId: string): Promise<boolean>
 	mutate(req: MutateRequest): Promise<MutateResponse>
 	peekRow(table: string, column: string, value: unknown): Promise<Record<string, unknown> | null>
-	countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]>
+	countReverseFks(
+		table: string,
+		row: Record<string, unknown>,
+		extraReverseFks?: ReverseForeignKeyInfo[],
+	): Promise<ReverseFkCount[]>
 	searchId(value: string): Promise<IdMatch[]>
 	profileColumn(table: string, column: string): Promise<ColumnProfile>
 	getInfo(): Promise<DatabaseInfo>
