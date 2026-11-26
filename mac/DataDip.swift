@@ -132,6 +132,15 @@ final class ScriptBridge: NSObject, WKScriptMessageHandler {
 	}
 }
 
+// Adds Copy Page URL to every right-click menu, since WKWebView has no address bar.
+final class DipWebView: WKWebView {
+	override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+		super.willOpenMenu(menu, with: event)
+		menu.addItem(.separator())
+		menu.addItem(withTitle: "Copy Page URL", action: #selector(App.copyPageUrl(_:)), keyEquivalent: "")
+	}
+}
+
 final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
 	var window: NSWindow!
 	var web: WKWebView!
@@ -289,7 +298,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	}
 
 	func makeWebView(_ config: WKWebViewConfiguration) -> WKWebView {
-		let w = WKWebView(frame: .zero, configuration: config)
+		let w = DipWebView(frame: .zero, configuration: config)
 		w.navigationDelegate = self
 		w.uiDelegate = self
 		w.allowsBackForwardNavigationGestures = true
@@ -321,6 +330,25 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		} else {
 			ensureServerRunning(forceReload: true, pathQuery: "/")
 		}
+	}
+	@objc func copyPageUrl(_ sender: Any?) {
+		guard let u = web.url, u.scheme == "http" || u.scheme == "https" else { return }
+		NSPasteboard.general.clearContents()
+		NSPasteboard.general.setString(u.absoluteString, forType: .string)
+	}
+	@objc func showAbout(_ sender: Any?) {
+		var options: [NSApplication.AboutPanelOptionKey: Any] = [:]
+		if let u = web.url, u.scheme == "http" || u.scheme == "https", let host = u.host, let port = u.port {
+			let origin = "\(u.scheme!)://\(host):\(port)"
+			let credits = NSMutableAttributedString(string: "Web URL\n", attributes: [.font: NSFont.systemFont(ofSize: 11)])
+			credits.append(NSAttributedString(string: origin, attributes: [.link: origin, .font: NSFont.systemFont(ofSize: 11)]))
+			let center = NSMutableParagraphStyle()
+			center.alignment = .center
+			credits.addAttribute(.paragraphStyle, value: center, range: NSRange(location: 0, length: credits.length))
+			options[.credits] = credits
+		}
+		NSApp.orderFrontStandardAboutPanel(options: options)
+		NSApp.activate(ignoringOtherApps: true)
 	}
 
 	func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) {
@@ -364,6 +392,8 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 			bar.addItem(item)
 		}
 		sub("DataDip", [
+			("About DataDip", #selector(showAbout(_:)), ""),
+			("-", nil, ""),
 			("Hide DataDip", #selector(NSApplication.hide(_:)), "h"),
 			("-", nil, ""),
 			("Quit DataDip", #selector(NSApplication.terminate(_:)), "q"),
@@ -376,6 +406,8 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 			("Copy", #selector(NSText.copy(_:)), "c"),
 			("Paste", #selector(NSText.paste(_:)), "v"),
 			("Select All", #selector(NSText.selectAll(_:)), "a"),
+			("-", nil, ""),
+			("Copy Page URL", #selector(copyPageUrl(_:)), "l"),
 		])
 		sub("Navigate", [
 			("Back", #selector(goBack(_:)), "["),

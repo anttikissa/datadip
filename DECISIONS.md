@@ -71,6 +71,9 @@ obvious.
 - `DataDip.app` sets `WKPreferences.tabFocusesLinks = true` so `Tab`
   navigates buttons, links, and form controls across the native app even
   when macOS system Keyboard Navigation is off.
+- `DataDip.app` has no address bar, so it shows the local web URL in
+  `About DataDip` and offers `Copy Page URL` in the Edit menu
+  (`Cmd+L`) and every right-click menu.
 - Focus uses `:focus-visible` with a single 2px ring across the app.
 - Auto-Discover follows directory symlinks safely (deduplicating via
   `realpathSync`) so symlinked storage volumes are found.

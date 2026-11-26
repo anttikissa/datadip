@@ -113,6 +113,12 @@ lengthen its timeout or skip it. Test behavior, not source text.
 
 ## Git
 
+Commit as soon as each change works and is verified; don't leave
+finished work uncommitted. Several agents share this checkout, so stage
+and commit only your own changes: name files explicitly (never
+`git add -A` or `.`), and when a file also holds someone else's edits,
+stage only your hunks.
+
 Wrap commit messages at 72 columns. End with these trailers:
 
     Implemented by: <model id>
