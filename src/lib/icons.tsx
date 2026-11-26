@@ -1,13 +1,37 @@
 // Crisp 16px utilitarian SVG icons centered in their viewBox, plus the DataDip mark.
 
+const BRAND_GRID = [
+	'....X.....X',
+	'....X.....X',
+	'....X.....X',
+	'.XXXX..XXXX',
+	'X...X.X...X',
+	'X...X.X...X',
+	'X...X.X...X',
+	'.XXXX..XXXX',
+]
+
+const BRAND_CELLS = BRAND_GRID.flatMap((row, r) =>
+	[...row]
+		.map((ch, c) =>
+			ch === 'X'
+				? {
+						x: +(3.75 + c * 1.5 + 0.11).toFixed(2),
+						y: +(6 + r * 1.5 + 0.11).toFixed(2),
+						fill: r <= 4 ? '#1c74ff' : '#032987',
+					}
+				: null,
+		)
+		.filter((v): v is { x: number; y: number; fill: string } => v !== null),
+)
+
 export function IconBrand() {
 	return (
 		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-			<ellipse cx="12" cy="18" rx="9" ry="3.2" stroke="currentColor" stroke-width="1.5" opacity="0.55" />
-			<path d="M5 12v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-4" stroke="currentColor" stroke-width="1.6" />
-			<path d="M5 7v5c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V7" stroke="currentColor" stroke-width="1.6" />
-			<ellipse cx="12" cy="7" rx="7" ry="2.6" fill="#e59a18" stroke="currentColor" stroke-width="1.5" />
-			<rect x="9.5" y="5.5" width="5" height="2.4" rx="0.8" fill="#fff099" stroke="#9e6200" stroke-width="0.9" />
+			<rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#f7f9fc" stroke="#cfd7e3" stroke-width="1" />
+			{BRAND_CELLS.map((cell) => (
+				<rect x={cell.x} y={cell.y} width="1.28" height="1.28" rx="0.28" fill={cell.fill} />
+			))}
 		</svg>
 	)
 }
