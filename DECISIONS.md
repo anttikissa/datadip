@@ -25,6 +25,21 @@ obvious.
   types for Finder double-click, Dock drop, and `Cmd+O` file open. Dev
   builds via `mac/build` continue to launch from the local checkout when
   `Contents/MacOS/datadip-server` is absent.
+- Built-in signed macOS self-updater (`mac/DataDip.swift`): checks GitHub
+  Releases (`releases/latest` API with zero-rate-limit web redirect +
+  `HEAD` fallback) manually via `DataDip -> Check for Updates…` and
+  passively every 12h on signed release builds (surfacing an unobtrusive
+  `Update vX.Y.Z` topbar pill), downloads the existing signed/notarized
+  `DataDip-<version>-<arch>.dmg` over HTTPS-only redirects, mounts and
+  extracts via `hdiutil` + `ditto`, verifies the staged bundle with
+  `SecStaticCodeCheckValidity` (strict nested code + Apple Developer ID
+  OIDs + matching `CFBundleIdentifier` and `TeamIdentifier` + no
+  downgrade), stops `datadip-server`, swaps the bundle atomically with
+  `FileManager.replaceItemAt`, and relaunches cleanly. Falls back to
+  opening the downloaded `.dmg` in Finder when running from a
+  non-writable location (mounted DMG, App Translocation, or restricted
+  `/Applications`) or ad-hoc build, avoiding Sparkle framework/XPC
+  complexity and extra signing keys.
 - Adapter abstraction (`server/db/types.ts`): all table listing, schema
   inspection, browsing, querying, mutations, FK peeks, and reverse-FK
   counts flow through `DbAdapter` for SQLite (local and SSH) and

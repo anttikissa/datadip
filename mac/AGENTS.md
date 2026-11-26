@@ -36,3 +36,11 @@ Specific rules for `DataDip.app` (`mac/DataDip.swift`) and its
   `CFBundleShortVersionString`; if they differ, stop the stale server
   and launch the bundled one so app upgrades never stay stuck on an
   older background server.
+- Built-in self-updates (`mac/DataDip.swift`) must verify every staged
+  `.app` bundle with `SecStaticCodeCheckValidity` (strict nested code,
+  Apple Developer ID cert OIDs, matching `CFBundleIdentifier`, matching
+  `TeamIdentifier` read from `Bundle.main`, and strictly newer semver)
+  before calling `replaceItemAt`, enforce HTTPS-only redirects during
+  download, fall back to opening the `.dmg` when the install path is not
+  writable or ad-hoc signed, and suppress `ensureServerRunning` while
+  swapping the bundle so SSE disconnect cannot respawn the old server.

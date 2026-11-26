@@ -2564,6 +2564,26 @@ dialog.omnibar-dialog::backdrop {
 	border-radius: 50%;
 	background: var(--accent);
 	flex-shrink: 0;
+	align-self: center;
+}
+.version-badge-btn.update-badge-btn {
+	align-items: baseline;
+	border-color: color-mix(in srgb, var(--ok) 48%, var(--border-strong));
+	background: color-mix(in srgb, var(--ok) 12%, var(--bg-subtle));
+	color: var(--ok);
+}
+.version-badge-btn.update-badge-btn:hover {
+	border-color: var(--ok);
+	background: color-mix(in srgb, var(--ok) 20%, var(--bg-subtle));
+	color: var(--ok);
+}
+.update-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--ok);
+	flex-shrink: 0;
+	align-self: center;
 }
 
 .changelog-modal {

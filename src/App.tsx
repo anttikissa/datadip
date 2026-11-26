@@ -96,6 +96,10 @@ export function App() {
 	const [dbInfoOpen, setDbInfoOpen] = createSignal(false)
 	const [changelogOpen, setChangelogOpen] = createSignal(false)
 	const [hasUnseenChangelog, setHasUnseenChangelog] = createSignal(false)
+	const [availableUpdate, setAvailableUpdate] = createSignal<{ version: string; releaseUrl?: string } | null>(
+		(window as unknown as { __datadipAvailableUpdate?: { version: string; releaseUrl?: string } })
+			.__datadipAvailableUpdate ?? null,
+	)
 	const [showInternalTables, setShowInternalTables] = createSignal(false)
 	const [omnibarOpen, setOmnibarOpen] = createSignal(false)
 	const [recentModalOpen, setRecentModalOpen] = createSignal(false)
@@ -555,10 +559,17 @@ export function App() {
 			if (!confirmState()) requestCloseConsole(cur)
 		}
 		const onChangelog = () => openChangelog()
+		const onUpdateAvailable = (e: Event) => {
+			const detail = (e as CustomEvent<{ version?: string; releaseUrl?: string }>).detail
+			if (detail?.version) {
+				setAvailableUpdate({ version: detail.version, releaseUrl: detail.releaseUrl })
+			}
+		}
 		window.addEventListener('datadip:refresh', onRefresh)
 		window.addEventListener('datadip:new-tab', onNewTab)
 		window.addEventListener('datadip:close-tab', onCloseTab)
 		window.addEventListener('datadip:changelog', onChangelog)
+		window.addEventListener('datadip:update-available', onUpdateAvailable)
 
 		const DIALOG_FOCUSABLE =
 			'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -682,6 +693,7 @@ export function App() {
 			window.removeEventListener('datadip:new-tab', onNewTab)
 			window.removeEventListener('datadip:close-tab', onCloseTab)
 			window.removeEventListener('datadip:changelog', onChangelog)
+			window.removeEventListener('datadip:update-available', onUpdateAvailable)
 			if (reconnectTimer) clearTimeout(reconnectTimer)
 			es?.close()
 			clearInterval(timer)
@@ -841,6 +853,28 @@ export function App() {
 					</Show>
 					v{APP_VERSION}
 				</button>
+
+				<Show when={availableUpdate()}>
+					{(u) => (
+						<button
+							type="button"
+							class="version-badge-btn update-badge-btn mono"
+							title={`Update DataDip to v${u().version}`}
+							aria-label={`Update available: DataDip v${u().version}`}
+							onClick={() => {
+								try {
+									const w = window as unknown as {
+										webkit?: { messageHandlers?: { datadip?: { postMessage: (msg: string) => void } } }
+									}
+									w.webkit?.messageHandlers?.datadip?.postMessage('installUpdate')
+								} catch {}
+							}}
+						>
+							<span class="update-dot" aria-hidden="true" />
+							Update v{u().version}
+						</button>
+					)}
+				</Show>
 
 				<Show when={activeConnId()}>
 					<button
