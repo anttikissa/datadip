@@ -420,4 +420,93 @@ describe('DataDip server API & safety boundaries', () => {
 			rmSync(probeDir, { recursive: true, force: true })
 		}
 	})
+
+	test('POST /api/connections/open-file opens & deduplicates local SQLite files and rejects invalid files', async () => {
+		// Reuses the already-saved fixture connection pointing to sampleDbPath
+		const res1 = await apiCall('POST', '/api/connections/open-file', { path: sampleDbPath })
+		expect(res1.status).toBe(200)
+		expect((res1.data.connection as { id: string }).id).toBe(connId)
+
+		// Opens a brand-new SQLite file and adds it once
+		const extraPath = join(workDir, 'adhoc.sqlite')
+		const extraDb = new Database(extraPath)
+		extraDb.exec('CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);')
+		extraDb.close()
+
+		const res2 = await apiCall('POST', '/api/connections/open-file', { path: extraPath })
+		expect(res2.status).toBe(200)
+		const adhocId = (res2.data.connection as { id: string }).id
+		expect(adhocId).not.toBe(connId)
+
+		const res3 = await apiCall('POST', '/api/connections/open-file', { path: extraPath })
+		expect(res3.status).toBe(200)
+		expect((res3.data.connection as { id: string }).id).toBe(adhocId)
+
+		// Rejects non-SQLite files and missing files
+		const badPath = join(workDir, 'not-a-db.txt')
+		writeFileSync(badPath, 'hello world, not sqlite header!', 'utf8')
+		const badRes = await apiCall('POST', '/api/connections/open-file', { path: badPath })
+		expect(badRes.status).toBe(400)
+
+		const missingRes = await apiCall('POST', '/api/connections/open-file', { path: join(workDir, 'missing.db') })
+		expect(missingRes.status).toBe(404)
+	})
+
+	test('POST /api/connections/:id/export downloads full table and query results in CSV, TSV, JSON, Markdown, SQL', async () => {
+		// Full table export as CSV
+		const csvRes = await handleApiRequest(
+			new Request(`http://127.0.0.1:4747/api/connections/${connId}/export`, {
+				method: 'POST',
+				headers: { 'content-type': 'text/plain; charset=utf-8' },
+				body: "{ mode: 'table', format: 'csv', browse: { table: 'users', limit: 100 } }",
+			}),
+			manager,
+		)
+		expect(csvRes.status).toBe(200)
+		expect(csvRes.headers.get('content-disposition')).toContain('.csv"')
+		expect(csvRes.headers.get('x-datadip-row-count')).toBe('3')
+		const csvText = await csvRes.text()
+		expect(csvText).toContain('id,name,email')
+		expect(csvText).toContain('ada@example.com')
+
+		// Query export as Markdown
+		const mdRes = await handleApiRequest(
+			new Request(`http://127.0.0.1:4747/api/connections/${connId}/export`, {
+				method: 'POST',
+				headers: { 'content-type': 'text/plain; charset=utf-8' },
+				body: "{ mode: 'query', format: 'markdown', sql: 'SELECT name, email FROM users ORDER BY id' }",
+			}),
+			manager,
+		)
+		expect(mdRes.status).toBe(200)
+		expect(mdRes.headers.get('content-disposition')).toContain('.md"')
+		const mdText = await mdRes.text()
+		expect(mdText).toContain('| name | email |')
+		expect(mdText).toContain('| Grace Hopper | grace@example.com |')
+
+		// Query export rejects write SQL
+		const writeRes = await handleApiRequest(
+			new Request(`http://127.0.0.1:4747/api/connections/${connId}/export`, {
+				method: 'POST',
+				headers: { 'content-type': 'text/plain; charset=utf-8' },
+				body: "{ mode: 'query', format: 'csv', sql: 'DELETE FROM users WHERE id = 1' }",
+			}),
+			manager,
+		)
+		expect(writeRes.status).toBe(403)
+	})
+
+	test('PostgreSQL URL parser, redaction, and identifier helpers work cleanly', async () => {
+		const { parsePostgresUrl, redactPostgresUrl, quotePgTable, normalizePgCell } = await import('./db/postgres.ts')
+		const parsed = parsePostgresUrl('postgres://alice:s3cr3t@db.example.com:5433/prod_app?sslmode=require')
+		expect(parsed.hostname).toBe('db.example.com')
+		expect(parsed.port).toBe(5433)
+		expect(parsed.database).toBe('prod_app')
+		expect(parsed.sslMode).toBe('require')
+		expect(redactPostgresUrl(parsed.rawUrl)).not.toContain('s3cr3t')
+		expect(quotePgTable('users')).toBe('"public"."users"')
+		expect(quotePgTable('billing.invoices')).toBe('"billing"."invoices"')
+		expect(normalizePgCell({ a: 1 })).toBe('{"a":1}')
+		expect(normalizePgCell(42n)).toBe('42')
+	})
 })

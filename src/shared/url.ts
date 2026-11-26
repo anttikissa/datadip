@@ -171,3 +171,14 @@ function formatFilterToken(f: FilterSpec): string {
 	if (f.op === 'isnull' || f.op === 'notnull') return `${f.column}:${f.op}`
 	return `${f.column}:${f.op}:${f.value}`
 }
+
+export function maskConnectionPath(path: string): string {
+	if (!/^postgres(?:ql)?:\/\//i.test(path.trim())) return path
+	try {
+		const u = new URL(path.trim())
+		if (u.password) u.password = '••••'
+		return u.toString()
+	} catch {
+		return path.replace(/(:\/\/[^:@/\s]+):[^@/\s]+@/, '$1:••••@')
+	}
+}

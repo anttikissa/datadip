@@ -42,7 +42,7 @@ import type {
 	Console,
 	SshPromptRequest,
 } from './shared/types.ts'
-import { type AppRoute, formatRoute, parseRoute } from './shared/url.ts'
+import { type AppRoute, formatRoute, maskConnectionPath, parseRoute } from './shared/url.ts'
 
 interface TrailStep {
 	label: string
@@ -380,7 +380,9 @@ export function App() {
 	onSettled(() => {
 		void refreshConnections()
 		void api.getPreferences().then((res) => {
-			const isDark = res.preferences.theme === 'dark'
+			const pref = res.preferences.theme
+			const isDark =
+				pref === 'dark' || (pref !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
 			setDark(isDark)
 			document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
 		})
@@ -987,13 +989,17 @@ export function App() {
 						<div class="sidebar-header">
 							<div class="sidebar-conn-row">
 								<div style="min-width:0;flex:1">
-									<div class="sidebar-db-name" title={activeConn()?.path}>
+									<div class="sidebar-db-name" title={maskConnectionPath(activeConn()?.path ?? '')}>
 										<span class="status-dot" />
 										<span class="sidebar-db-name-text">{activeConn()?.name ?? 'Database'}</span>
 									</div>
 									<div class="sidebar-meta mono">
 										<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-											{activeConn()?.location === 'ssh' ? `ssh://${activeConn()?.sshHost}` : 'local sqlite'}
+											{activeConn()?.location === 'ssh'
+												? `ssh://${activeConn()?.sshHost}${activeConn()?.driver === 'postgres' ? ' · pg' : ''}`
+												: activeConn()?.driver === 'postgres'
+													? 'postgresql'
+													: 'local sqlite'}
 										</span>
 										<Show when={schema()}>{(s) => <span>· {s().durationMs}ms</span>}</Show>
 									</div>
@@ -1343,6 +1349,7 @@ export function App() {
 									<ConsoleView
 										connId={r().connId}
 										connName={activeConn()?.name}
+										driver={activeConn()?.driver}
 										isProduction={activeConn()?.isProduction}
 										console={activeConsole()}
 										schema={schema()}
@@ -1419,6 +1426,7 @@ export function App() {
 											<ConsoleView
 												connId={r().connId}
 												connName={activeConn()?.name}
+												driver={activeConn()?.driver}
 												isProduction={activeConn()?.isProduction}
 												console={sp()}
 												schema={schema()}

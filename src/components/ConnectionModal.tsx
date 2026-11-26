@@ -65,12 +65,31 @@ export function ConnectionModal(props: {
 		}
 	}
 
+	function handlePathInput(val: string) {
+		setPath(val)
+		const trimmed = val.trim()
+		// Auto-detect pasted PostgreSQL DATABASE_URL and suggest a clean name
+		if (/^postgres(?:ql)?:\/\//i.test(trimmed)) {
+			if (driver() !== 'postgres') setDriver('postgres')
+			if (!name().trim()) {
+				try {
+					const u = new URL(trimmed)
+					const db = decodeURIComponent(u.pathname.replace(/^\/+/, '')) || 'postgres'
+					const host = u.hostname && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1' ? u.hostname : ''
+					setName(host ? `${db} · ${host}` : db)
+				} catch {}
+			}
+		}
+	}
+
 	async function handleTest() {
 		setError(null)
 		setTestMsg(null)
 		const draft = buildDraft()
 		if (!draft.path) {
-			setError('Enter a database file path first.')
+			setError(
+				draft.driver === 'postgres' ? 'Enter a PostgreSQL connection URL first.' : 'Enter a database file path first.',
+			)
 			return
 		}
 		if (draft.location === 'ssh' && !draft.sshHost) {
@@ -80,9 +99,10 @@ export function ConnectionModal(props: {
 		setTesting(true)
 		try {
 			const res = await api.testConnection(draft)
+			const engineLabel = draft.driver === 'postgres' ? 'PostgreSQL' : 'SQLite'
 			setTestMsg({
 				ok: true,
-				text: `Connected (${res.latencyMs} ms) — SQLite ${res.version ?? ''}, ${res.tableCount} tables/views.`,
+				text: `Connected (${res.latencyMs} ms) — ${engineLabel} ${res.version ?? ''}, ${res.tableCount} tables/views.`,
 			})
 		} catch (err) {
 			setTestMsg({ ok: false, text: err instanceof Error ? err.message : String(err) })
@@ -100,7 +120,7 @@ export function ConnectionModal(props: {
 			return
 		}
 		if (!draft.path) {
-			setError('Database path is required.')
+			setError(draft.driver === 'postgres' ? 'PostgreSQL connection URL is required.' : 'Database path is required.')
 			return
 		}
 		if (draft.location === 'ssh' && !draft.sshHost) {
@@ -162,7 +182,7 @@ export function ConnectionModal(props: {
 								onChange={(e) => setDriver(e.currentTarget.value as DriverKind)}
 							>
 								<option value="sqlite">SQLite</option>
-								<option value="postgres">PostgreSQL (coming in v1.1)</option>
+								<option value="postgres">PostgreSQL</option>
 							</select>
 						</div>
 
@@ -176,8 +196,10 @@ export function ConnectionModal(props: {
 								value={location()}
 								onChange={(e) => setLocation(e.currentTarget.value as LocationKind)}
 							>
-								<option value="local">Local machine</option>
-								<option value="ssh">Remote over SSH (multiplexed)</option>
+								<option value="local">{driver() === 'postgres' ? 'Direct (TCP / TLS)' : 'Local machine'}</option>
+								<option value="ssh">
+									{driver() === 'postgres' ? 'SSH tunnel (TCP port forward)' : 'Remote over SSH (multiplexed)'}
+								</option>
 							</select>
 						</div>
 					</div>
@@ -227,15 +249,31 @@ export function ConnectionModal(props: {
 
 					<div class="field-group">
 						<label class="field-label" for="conn-path">
-							SQLite File Path
+							{driver() === 'postgres'
+								? 'PostgreSQL Connection URL (paste DATABASE_URL)'
+								: 'SQLite File Path (or paste postgres:// URL)'}
 						</label>
 						<input
 							id="conn-path"
 							class="input mono"
-							placeholder={location() === 'ssh' ? '/srv/app/data/app.sqlite' : '~/projects/app/data/app.sqlite'}
+							placeholder={
+								driver() === 'postgres'
+									? location() === 'ssh'
+										? 'postgres://user:pass@127.0.0.1:5432/mydb'
+										: 'postgres://user:pass@db.example.com:5432/mydb?sslmode=require'
+									: location() === 'ssh'
+										? '/srv/app/data/app.sqlite'
+										: '~/projects/app/data/app.sqlite'
+							}
 							value={path()}
-							onInput={(e) => setPath(e.currentTarget.value)}
+							onInput={(e) => handlePathInput(e.currentTarget.value)}
 						/>
+						<Show when={driver() === 'postgres' && location() === 'ssh'}>
+							<div style="font-size:11.5px;color:var(--ink-muted);margin-top:4px">
+								Forwards a local port via OpenSSH (<span class="mono">ssh -N -L</span>) to the host and port in the URL
+								above — no remote Bun required.
+							</div>
+						</Show>
 					</div>
 
 					<label class={['checkbox-card', { prod: isProduction() }]}>

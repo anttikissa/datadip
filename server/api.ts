@@ -2,6 +2,7 @@
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import type { BrowseParams, ConnectionConfig, MutateRequest } from '../src/shared/types.ts'
 import { type ConnectionManager, HttpError } from './db/manager.ts'
+import { EXPORT_MIME, type ExportFormat } from './export.ts'
 
 function asonResponse(data: unknown, status = 200): Response {
 	return new Response(stringifyAson(data, 'short'), {
@@ -178,6 +179,12 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			const result = await manager.testDraftConnection(body)
 			return asonResponse(result)
 		}
+		if (path === '/api/connections/open-file' && method === 'POST') {
+			const body = await readBody<{ path?: string }>(req)
+			if (!body.path?.trim()) throw new HttpError(400, 'File path is required')
+			const connection = manager.openLocalFile(body.path)
+			return asonResponse({ connection })
+		}
 
 		// Per-connection routes: /api/connections/:id/...
 		const connMatch = /^\/api\/connections\/([^/]+)(?:\/(.*))?$/.exec(path)
@@ -282,6 +289,36 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				const { adapter } = manager.getAdapterById(connId)
 				const matches = await adapter.searchId(body.value ?? '')
 				return asonResponse({ matches })
+			}
+
+			if (rest === 'export' && method === 'POST') {
+				const body = await readBody<{
+					mode?: 'table' | 'query'
+					format?: ExportFormat
+					browse?: BrowseParams
+					sql?: string
+					filename?: string
+					maxRows?: number
+				}>(req)
+				const format = body.format && body.format in EXPORT_MIME ? body.format : 'csv'
+				const exported = await manager.exportData(connId, {
+					mode: body.mode === 'query' ? 'query' : 'table',
+					format,
+					browse: body.browse,
+					sql: body.sql,
+					filename: body.filename,
+					maxRows: body.maxRows,
+				})
+				const meta = EXPORT_MIME[format]
+				return new Response(exported.body, {
+					status: 200,
+					headers: {
+						'content-type': meta.contentType,
+						'content-disposition': `attachment; filename="${exported.filename}"`,
+						'x-datadip-row-count': String(exported.rowCount),
+						'x-datadip-truncated': exported.truncated ? '1' : '0',
+					},
+				})
 			}
 
 			// Consoles per connection

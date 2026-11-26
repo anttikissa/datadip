@@ -1,6 +1,9 @@
 // Connection lifecycle manager, Read-Only / Read-Write safety gatekeeper, orphaned-connection tracker, and SSH pool coordinator.
+import { closeSync, existsSync, openSync, readSync, realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import type {
+	BrowseParams,
 	ConnectionConfig,
 	ConnectionsPayload,
 	ConnectionWithStatus,
@@ -9,12 +12,14 @@ import type {
 	MutateResponse,
 	QueryResponse,
 } from '../../src/shared/types.ts'
+import type { ExportFormat } from '../export.ts'
+import { formatExportRows, sanitizeExportFilename } from '../export.ts'
 import type { DataStore } from '../store.ts'
 import { discoverLocalSqliteDbs, suggestDbName } from './discover.ts'
-import { PostgresAdapterStub } from './postgres-stub.ts'
-import { LocalSqliteAdapter } from './sqlite-local.ts'
+import { PostgresAdapter } from './postgres.ts'
+import { expandTilde, LocalSqliteAdapter } from './sqlite-local.ts'
 import { SshSqliteAdapter } from './sqlite-ssh.ts'
-import { SshMuxPool } from './ssh-mux.ts'
+import { type SshAskpassConfig, SshMuxPool } from './ssh-mux.ts'
 import { SshPromptBroker } from './ssh-prompts.ts'
 import type { DbAdapter } from './types.ts'
 
@@ -40,11 +45,17 @@ export class ConnectionManager {
 	private rwStates = new Map<string, RwState>()
 	private subscribers = new Set<(payload: ConnectionsPayload) => void>()
 	private unsubStore: () => void
+	private askpassConfig: SshAskpassConfig | null = null
 
 	constructor(store: DataStore) {
 		this.store = store
 		this.sshPrompts = new SshPromptBroker((host, active) => {
 			this.sshPool.setHostPromptActive(host, active)
+			for (const entry of this.adapters.values()) {
+				if (entry.adapter instanceof PostgresAdapter) {
+					entry.adapter.setHostPromptActive(host, active)
+				}
+			}
 		})
 		this.unsubStore = this.store.onConnectionsChange(() => {
 			this.reconcileActiveConnections()
@@ -53,10 +64,12 @@ export class ConnectionManager {
 	}
 
 	setServerUrl(url: string) {
-		this.sshPool.setAskpassConfig({
+		const cfg: SshAskpassConfig = {
 			url: `${url}/api/internal/ssh-askpass`,
 			token: this.sshPrompts.token,
-		})
+		}
+		this.askpassConfig = cfg
+		this.sshPool.setAskpassConfig(cfg)
 	}
 
 	hasSubscribers(): boolean {
@@ -145,7 +158,15 @@ export class ConnectionManager {
 
 		let adapter: DbAdapter
 		if (conn.driver === 'postgres') {
-			adapter = new PostgresAdapterStub()
+			const ssh =
+				conn.location === 'ssh'
+					? {
+							target: { host: conn.sshHost || '', user: conn.sshUser, port: conn.sshPort },
+							getAskpass: () => this.askpassConfig,
+						}
+					: undefined
+			if (conn.location === 'ssh' && !conn.sshHost) throw new Error('SSH connection is missing sshHost')
+			adapter = new PostgresAdapter(conn.path, ssh)
 		} else if (conn.location === 'ssh') {
 			if (!conn.sshHost) throw new Error('SSH connection is missing sshHost')
 			adapter = new SshSqliteAdapter(
@@ -253,7 +274,15 @@ export class ConnectionManager {
 		const temp: ConnectionConfig = { ...draft, id: '__test__', createdAt: '' }
 		const adapter =
 			temp.driver === 'postgres'
-				? new PostgresAdapterStub()
+				? new PostgresAdapter(
+						temp.path,
+						temp.location === 'ssh'
+							? {
+									target: { host: temp.sshHost || '', user: temp.sshUser, port: temp.sshPort },
+									getAskpass: () => this.askpassConfig,
+								}
+							: undefined,
+					)
 				: temp.location === 'ssh'
 					? new SshSqliteAdapter(
 							this.sshPool,
@@ -267,6 +296,143 @@ export class ConnectionManager {
 			return { ...ping, tableCount: schema.tables.length }
 		} finally {
 			adapter.close()
+		}
+	}
+
+	openLocalFile(rawPath: string): ConnectionConfig {
+		const expanded = resolve(expandTilde(rawPath.trim()))
+		if (!existsSync(expanded)) {
+			throw new HttpError(404, `SQLite file not found: ${expanded}`)
+		}
+		let realPath = expanded
+		try {
+			realPath = realpathSync(expanded)
+		} catch {}
+
+		// Validate SQLite header (allow empty 0-byte files too)
+		let fd: number | undefined
+		try {
+			fd = openSync(realPath, 'r')
+			const buf = Buffer.alloc(16)
+			const n = readSync(fd, buf, 0, 16, 0)
+			if (n > 0 && (n < 16 || buf.toString('utf8') !== 'SQLite format 3\0')) {
+				throw new HttpError(400, `Not a valid SQLite database file: ${realPath}`)
+			}
+		} catch (err) {
+			if (err instanceof HttpError) throw err
+			throw new HttpError(400, `Cannot read file: ${err instanceof Error ? err.message : String(err)}`)
+		} finally {
+			if (fd !== undefined) {
+				try {
+					closeSync(fd)
+				} catch {}
+			}
+		}
+
+		// Reuse existing saved local SQLite connection pointing to the same file
+		for (const conn of this.store.listConnections()) {
+			if (conn.driver !== 'sqlite' || conn.location !== 'local') continue
+			try {
+				const existingReal = realpathSync(resolve(expandTilde(conn.path)))
+				if (existingReal === realPath) {
+					this.store.touchConnection(conn.id)
+					return conn
+				}
+			} catch {}
+		}
+
+		return this.store.addConnection({
+			name: suggestDbName(realPath),
+			driver: 'sqlite',
+			location: 'local',
+			path: realPath,
+			isProduction: false,
+		})
+	}
+
+	async exportData(
+		id: string,
+		opts: {
+			mode: 'table' | 'query'
+			format: ExportFormat
+			browse?: BrowseParams
+			sql?: string
+			filename?: string
+			maxRows?: number
+		},
+	): Promise<{ body: string; filename: string; rowCount: number; truncated: boolean }> {
+		const { conn, adapter } = this.getAdapterById(id)
+		const maxRows = Math.max(1, Math.min(100_000, opts.maxRows ?? 100_000))
+
+		if (opts.mode === 'query') {
+			const rawSql = opts.sql?.trim() ?? ''
+			if (!rawSql) throw new HttpError(400, 'SQL query is required for export')
+			const stmts = splitSqlStatements(rawSql).map((s) => s.text)
+			if (stmts.length === 0) throw new HttpError(400, 'No SQL statement to export')
+			const danger = analyzeSqlDanger(rawSql)
+			if (danger.isWrite) {
+				throw new HttpError(403, 'Export only supports read-only SELECT queries')
+			}
+			const results = await adapter.executeStatements([stmts[stmts.length - 1]!], {
+				writable: false,
+				maxRows,
+			})
+			const res = results[0]
+			if (!res) throw new HttpError(400, 'Query returned no result set')
+			if (res.error) throw new HttpError(400, res.error)
+			const tableName = res.sourceTable || 'query_result'
+			const body = formatExportRows(opts.format, res.columns, res.rows, tableName)
+			const ext = opts.format === 'markdown' ? 'md' : opts.format
+			return {
+				body,
+				filename: sanitizeExportFilename(opts.filename || `${conn.name}_${tableName}`, ext),
+				rowCount: res.rows.length,
+				truncated: res.truncated,
+			}
+		}
+
+		// Table export: paginate through browseTable until done or maxRows reached
+		const browse = opts.browse
+		if (!browse?.table) throw new HttpError(400, 'Table name is required for export')
+		const allRows: Record<string, unknown>[] = []
+		let columns: string[] = []
+		let truncated = false
+		let cursor: string | undefined = undefined
+		let offset = 0
+		const pageSize = 2000
+
+		while (allRows.length < maxRows) {
+			const batchLimit = Math.min(pageSize, maxRows - allRows.length)
+			const page = await adapter.browseTable({
+				table: browse.table,
+				fields: browse.fields,
+				filters: browse.filters,
+				order: browse.order,
+				search: browse.search,
+				limit: batchLimit,
+				...(cursor !== undefined ? { start: cursor, direction: 'next' as const } : { offset }),
+			})
+			if (columns.length === 0) columns = page.columns
+			allRows.push(...page.rows)
+			if (!page.hasNext || page.rows.length === 0) break
+			if (allRows.length >= maxRows) {
+				truncated = true
+				break
+			}
+			if (page.keysetColumn && page.nextCursor !== null) {
+				cursor = page.nextCursor
+			} else {
+				offset += page.rows.length
+			}
+		}
+
+		const body = formatExportRows(opts.format, columns, allRows, browse.table)
+		const ext = opts.format === 'markdown' ? 'md' : opts.format
+		return {
+			body,
+			filename: sanitizeExportFilename(opts.filename || `${conn.name}_${browse.table}`, ext),
+			rowCount: allRows.length,
+			truncated,
 		}
 	}
 

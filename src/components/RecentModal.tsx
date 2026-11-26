@@ -4,6 +4,7 @@ import { formatRelative } from '../lib/format.ts'
 import { IconAlert, IconDisk, IconSearch, IconServer, IconTable, IconTrash } from '../lib/icons.tsx'
 import { recentsKeyLabel } from '../lib/shortcuts.ts'
 import type { ConnectionWithStatus, RecentTable } from '../shared/types.ts'
+import { maskConnectionPath } from '../shared/url.ts'
 
 type RecentEntry =
 	| {
@@ -252,7 +253,7 @@ export function RecentModal(props: {
 												class="mono"
 												style="font-size:11px;color:var(--ink-muted);max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
 											>
-												{c.lastVisitedAt ? formatRelative(c.lastVisitedAt) : c.path}
+												{c.lastVisitedAt ? formatRelative(c.lastVisitedAt) : maskConnectionPath(c.path)}
 											</span>
 										</button>
 									)

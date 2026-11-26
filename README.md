@@ -1,52 +1,56 @@
 # DataDip
 
-A fast, utilitarian database browser, foreign-key navigator, and SQL
-console IDE for local and SSH-remote databases.
+A fast, keyboard-first **SQLite & PostgreSQL** browser, foreign-key navigator, and SQL console for local databases and remote servers over SSH.
+
+Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[` / `Cmd+]`, trackpad swipe) to return without losing your filters, and paste any ID into `Cmd+K` to find matching rows across tables. Read-only by default. No Electron.
+
+## Supported Engines & Platforms
+
+| Engine / Transport | Status | Notes |
+|---|---|---|
+| **SQLite (local)** | Supported | Opens read-only by default (`bun:sqlite`); `datadip ./app.db` opens files directly |
+| **SQLite over SSH** | Supported | Reuses one persistent SSH session per host; requires `bun` on the remote host |
+| **PostgreSQL (direct TCP/TLS)** | Supported | Native `Bun.SQL`; paste any `DATABASE_URL` (`postgres://...`), enforces `BEGIN READ ONLY` in Read-Only mode |
+| **PostgreSQL over SSH tunnel** | Supported | Local OpenSSH port forwarding (`ssh -N -L`) with `~/.ssh/config` & `ProxyJump`; **no remote Bun needed** |
+| **macOS & Browser** | Supported | Web UI runs in any browser; optional lightweight macOS `DataDip.app` (`WKWebView` shell, no Electron) |
 
 ## Features
 
-- **URL-driven Table Browser**: Browse tables with filter chips, column
-  picker (`fields=...`), multi-sort (`order=...`), and keyset pagination
-  (`start=...`). Click foreign-key cells to follow links across tables
-  using normal browser Back/Forward history (`Cmd+[` / `Cmd+]`, trackpad
-  swipe).
-- **FK Hover Peek & Reverse FKs**: Hover foreign-key cells to preview the
-  target row without leaving your grid. Open the Row Inspector (`Space`)
-  to see formatted JSON/ASON, timestamps, outgoing FKs, and incoming
-  ("Referenced by") counts across other tables.
-- **SQL Console (`Cmd+Shift+L` / `Cmd+E`)**: Auto-saved multi-statement
-  documents with CodeMirror 6, SQLite syntax highlighting, live schema
-  autocomplete, custom SQL linter, SQL formatter (`Cmd+Shift+F`),
-  active-statement highlighting (`Cmd+Enter` runs the statement under
-  cursor; `Cmd+Shift+Enter` runs all), `EXPLAIN QUERY PLAN`
-  (`Cmd+Shift+E`), and clickable FK cells directly inside query results.
-- **Production Safety**: Mark connections as Production for a persistent
-  crimson header bar and `PROD` alert badge. Every connection opens
-  Read-Only by default (enforced both in SQLite handle flags and server
-  validation). Arming Read-Write on Production auto-relocks after 10
-  minutes idle. Destructive SQL requires confirmation on every database.
-- **Multiplexed SSH Access**: Connects once per SSH host to a lightweight
-  remote Bun worker so concurrent queries execute in milliseconds without
-  spawning a new SSH process per query. Includes an Auto-Discover wizard
-  for local and SSH hosts.
-- **Omnibar (`Cmd+K`)**: Jump to tables, columns, consoles, or
-  connections — or paste an ID to locate matching rows across tables.
+- **Navigate relationships like the web**: Click foreign-key cells to jump across tables, hover any FK cell to preview the target row, press `Space` to inspect a row's formatted JSON, outgoing FKs, and incoming ("Referenced by") counts, and hit Back/Forward to return to your exact filtered view.
+- **Read-only defaults and write safeguards**: Every connection starts Read-Only (enforced at the SQLite handle / PostgreSQL `READ ONLY` transaction layer and in server validation). Connections marked Production show a persistent crimson header bar and auto-relock Read-Write after 10 minutes idle. Inline grid edits are staged with a SQL preview before committing, and destructive SQL (`DROP`, `ALTER`, `TRUNCATE`, or `DELETE`/`UPDATE` without `WHERE`) requires confirmation on every database.
+- **Parallel, cancellable SQL Console (`Cmd+E` / `Cmd+Shift+L`)**: Tabbed and side-by-side split consoles with live schema autocomplete, SQL linting, formatting (`Cmd+Shift+F`), active-statement execution (`Cmd+Enter`), `EXPLAIN`, clickable foreign keys inside query results, and real cancellation (`Cmd+.` / Stop) on worker threads / PostgreSQL `CancelRequest`.
+- **Interactive SSH authentication**: Honors `~/.ssh/config` aliases and `ProxyJump`, and prompts cleanly in-app for encrypted key passphrases, SSH passwords, 2FA codes, and unknown host-key fingerprints via `SSH_ASKPASS` (never logged or saved to disk).
+- **Omnibar (`Cmd+K` / `Cmd+P`) & Recents (`Ctrl+R`)**: Jump to any table, column, console, or saved connection -- or paste an ID from a support ticket to locate matching rows across every table.
+- **Full-result file exports**: Download table views or SQL query results to disk as CSV, TSV, JSON, Markdown, or SQL `INSERT` statements (not limited to the visible page).
+- **Large-table friendly**: Uses keyset pagination and skips automatic full-table `COUNT(*)` scans on large databases (using `pg_class.reltuples` on Postgres and `sqlite_stat1` on large SQLite files).
 
-## Install & Run
+## Install & Run (from source)
+
+Prerequisites: macOS or Linux with `git` (and Xcode Command Line Tools / `swiftc` if you want the optional macOS `DataDip.app`).
+
+> **What `./install` does:** installs [Bun](https://bun.sh) via `curl | bash` if not already installed, runs `bun install` and `bun run build`, symlinks `~/.local/bin/datadip`, adds `~/.local/bin` to your shell config if missing, and builds `~/Applications/DataDip.app` on macOS when `swiftc` is present.
 
 ```sh
+git clone https://github.com/anttikissa/datadip.git
+cd datadip
 ./install
-datadip            # start server and open in browser
-datadip stop       # stop the background server
-datadip serve      # run server in foreground (default 127.0.0.1:4747)
-open -a DataDip    # launch the native macOS app
+```
+
+Usage:
+
+```sh
+datadip               # start local server and open in browser
+datadip ./app.db      # open a local SQLite file directly
+datadip stop          # stop the background server
+datadip serve         # run server in foreground (default 127.0.0.1:4747)
+open -a DataDip       # launch the macOS WKWebView app
 ```
 
 ## Development
 
 ```sh
 bun install
-bun run serve      # API server on :4747
-bun run dev        # Vite HMR client on :4748
-./test             # typecheck + unit tests
+bun run serve         # API server on :4747
+bun run dev           # Vite HMR client on :4748
+./test                # typecheck + unit tests
 ```

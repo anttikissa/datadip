@@ -3,7 +3,6 @@ import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'so
 import { api } from '../lib/api.ts'
 import {
 	copyToClipboard,
-	exportRowsAson,
 	exportRowsCsv,
 	exportRowsJson,
 	exportRowsSqlInsert,
@@ -825,20 +824,44 @@ export function TableView(props: {
 		setPeek(null)
 	}
 
-	async function doExport(kind: 'csv' | 'json' | 'ason' | 'sql') {
+	async function doExport(kind: 'csv' | 'tsv' | 'json' | 'sql') {
 		const res = data()
 		if (!res) return
 		const text =
 			kind === 'csv'
 				? exportRowsCsv(res.columns, res.rows)
-				: kind === 'json'
-					? exportRowsJson(res.rows)
-					: kind === 'ason'
-						? exportRowsAson(res.rows)
+				: kind === 'tsv'
+					? exportRowsTsv(res.columns, res.rows)
+					: kind === 'json'
+						? exportRowsJson(res.rows)
 						: exportRowsSqlInsert(res.table, res.columns, res.rows)
 		setShowExport(false)
 		if (await copyToClipboard(text)) {
 			props.onNotify(`Copied ${res.rows.length} rows as ${kind.toUpperCase()}`, 'ok')
+		}
+	}
+
+	async function doDownloadExport(format: 'csv' | 'tsv' | 'json' | 'markdown' | 'sql') {
+		setShowExport(false)
+		try {
+			const res = await api.exportToFile(props.route.connId, {
+				mode: 'table',
+				format,
+				browse: {
+					table: props.route.table,
+					fields: props.route.fields,
+					filters: props.route.filters,
+					order: props.route.order,
+					limit: props.route.limit,
+					search: props.route.search,
+				},
+			})
+			props.onNotify(
+				`Downloaded ${res.filename} (${res.rowCount.toLocaleString()} rows${res.truncated ? ', capped at 100k' : ''})`,
+				'ok',
+			)
+		} catch (err) {
+			props.onNotify(err instanceof Error ? err.message : String(err), 'error')
 		}
 	}
 
@@ -992,17 +1015,41 @@ export function TableView(props: {
 							Export
 						</button>
 						<Show when={showExport()}>
-							<div class="popover-menu right" style="min-width:160px">
-								<button type="button" class="popover-item" onClick={() => doExport('csv')}>
+							<div class="popover-menu right" style="min-width:190px">
+								<div class="popover-head" style="padding:4px 8px;font-size:10.5px;color:var(--ink-muted)">
+									Download full result
+								</div>
+								<button type="button" class="popover-item" onClick={() => void doDownloadExport('csv')}>
+									Download CSV
+								</button>
+								<button type="button" class="popover-item" onClick={() => void doDownloadExport('tsv')}>
+									Download TSV
+								</button>
+								<button type="button" class="popover-item" onClick={() => void doDownloadExport('json')}>
+									Download JSON
+								</button>
+								<button type="button" class="popover-item" onClick={() => void doDownloadExport('markdown')}>
+									Download Markdown
+								</button>
+								<button type="button" class="popover-item" onClick={() => void doDownloadExport('sql')}>
+									Download SQL INSERT
+								</button>
+								<div
+									class="popover-head"
+									style="padding:6px 8px 4px;font-size:10.5px;color:var(--ink-muted);border-top:1px solid var(--border);margin-top:4px"
+								>
+									Copy current page
+								</div>
+								<button type="button" class="popover-item" onClick={() => void doExport('csv')}>
 									Copy as CSV
 								</button>
-								<button type="button" class="popover-item" onClick={() => doExport('json')}>
+								<button type="button" class="popover-item" onClick={() => void doExport('tsv')}>
+									Copy as TSV
+								</button>
+								<button type="button" class="popover-item" onClick={() => void doExport('json')}>
 									Copy as JSON
 								</button>
-								<button type="button" class="popover-item" onClick={() => doExport('ason')}>
-									Copy as ASON
-								</button>
-								<button type="button" class="popover-item" onClick={() => doExport('sql')}>
+								<button type="button" class="popover-item" onClick={() => void doExport('sql')}>
 									Copy as SQL INSERT
 								</button>
 							</div>

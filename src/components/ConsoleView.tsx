@@ -14,7 +14,7 @@ import { IconAlert, IconArrowRight, IconClose, IconCopy, IconPlay, IconTable, Ic
 import { hasTextSelection, isEditableTarget, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
 import { formatSql, statementAtCursor } from '../shared/sql.ts'
 import { tid } from '../shared/tid.ts'
-import type { DatabaseSchema, ForeignKeyInfo, QueryHistoryEntry, Console } from '../shared/types.ts'
+import type { Console, DatabaseSchema, DriverKind, ForeignKeyInfo, QueryHistoryEntry } from '../shared/types.ts'
 import { CellViewer, type CellViewerState } from './CellViewer.tsx'
 import type { ConfirmState } from './ConfirmDialog.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
@@ -29,6 +29,7 @@ function formatElapsed(startedAt: number | null, nowMs: number): string {
 export function ConsoleView(props: {
 	connId: string
 	connName?: string
+	driver?: DriverKind
 	isProduction?: boolean
 	console: Console | null
 	schema: DatabaseSchema | null
@@ -55,6 +56,7 @@ export function ConsoleView(props: {
 	const [saveState, setSaveState] = createSignal<'saved' | 'saving'>('saved')
 
 	const [showHistory, setShowHistory] = createSignal(false)
+	const [showExport, setShowExport] = createSignal(false)
 	const [history, setHistory] = createSignal<QueryHistoryEntry[]>([])
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
 	const [activeCell, setActiveCell] = createSignal<{ row: number; col: number } | null>(null)
@@ -204,7 +206,8 @@ export function ConsoleView(props: {
 		const target = sel.trim() || statementAtCursor(sql(), pos)?.text || sql().trim()
 		if (!target) return
 		const stripped = target.replace(/^\s*EXPLAIN\s+(QUERY\s+PLAN\s+)?/i, '')
-		void executeSql(`EXPLAIN QUERY PLAN ${stripped}`)
+		const prefix = props.driver === 'postgres' ? 'EXPLAIN' : 'EXPLAIN QUERY PLAN'
+		void executeSql(`${prefix} ${stripped}`)
 	}
 
 	function handleFormat() {
@@ -746,6 +749,49 @@ export function ConsoleView(props: {
 								>
 									JSON
 								</button>
+								<div class="popover-anchor">
+									<button type="button" class="btn sm" onClick={() => setShowExport((v) => !v)}>
+										Download
+									</button>
+									<Show when={showExport()}>
+										<div class="popover-menu right" style="min-width:170px">
+											{(
+												[
+													['csv', 'Download CSV'],
+													['tsv', 'Download TSV'],
+													['json', 'Download JSON'],
+													['markdown', 'Download Markdown'],
+													['sql', 'Download SQL INSERT'],
+												] as const
+											).map(([fmt, label]) => (
+												<button
+													type="button"
+													class="popover-item"
+													onClick={async () => {
+														const r = currentResult()
+														setShowExport(false)
+														if (!r) return
+														try {
+															const out = await api.exportToFile(props.connId, {
+																mode: 'query',
+																format: fmt,
+																sql: r.sql,
+															})
+															props.onNotify(
+																`Downloaded ${out.filename} (${out.rowCount.toLocaleString()} rows${out.truncated ? ', capped at 100k' : ''})`,
+																'ok',
+															)
+														} catch (err) {
+															props.onNotify(err instanceof Error ? err.message : String(err), 'error')
+														}
+													}}
+												>
+													{label}
+												</button>
+											))}
+										</div>
+									</Show>
+								</div>
 							</Show>
 
 							<Show when={totalMs() !== null}>

@@ -12,6 +12,7 @@ import {
 	IconTrash,
 } from '../lib/icons.tsx'
 import type { ConnectionConfig, ConnectionWithStatus, RecentTable } from '../shared/types.ts'
+import { maskConnectionPath } from '../shared/url.ts'
 
 type ScopeFilter = 'all' | 'prod' | 'ssh' | 'local'
 
@@ -55,7 +56,7 @@ export function HomeView(props: {
 				<div>
 					<h1 class="home-title">Databases</h1>
 					<p class="home-sub">
-						Local SQLite and multiplexed SSH connections. Every database opens Read-Only by default.
+						SQLite and PostgreSQL — local, direct, or over SSH. Every database opens Read-Only by default.
 					</p>
 				</div>
 				<div class="home-actions">
@@ -83,7 +84,10 @@ export function HomeView(props: {
 									<button type="button" class="recent-main active-main" onClick={() => props.onOpenConnection(conn.id)}>
 										<span class="status-dot" />
 										<span class="active-name">{conn.name}</span>
-										<span class="mono active-path">{conn.path}</span>
+										<span class="mono active-path">{maskConnectionPath(conn.path)}</span>
+										<Show when={conn.driver === 'postgres'}>
+											<span class="tag">PG</span>
+										</Show>
 										<Show when={conn.orphaned}>
 											<span class="tag orphan">ORPHANED</span>
 										</Show>
@@ -215,14 +219,17 @@ export function HomeView(props: {
 													PROD
 												</span>
 											</Show>
+											<Show when={conn.driver === 'postgres'}>
+												<span class="tag">PG</span>
+											</Show>
 											<span class={['tag', { ssh: conn.location === 'ssh' }]}>
 												{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
-												{conn.location === 'ssh' ? conn.sshHost : 'local'}
+												{conn.location === 'ssh' ? conn.sshHost : conn.driver === 'postgres' ? 'direct' : 'local'}
 											</span>
 										</div>
 									</div>
 
-									<div class="conn-card-path">{conn.path}</div>
+									<div class="conn-card-path">{maskConnectionPath(conn.path)}</div>
 
 									<div class="conn-card-foot">
 										<span class="mono">

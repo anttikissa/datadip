@@ -206,11 +206,22 @@ function browseTable(db, params) {
 	}
 
 	const qTable = quoteIdent(ts.name);
-	let totalCount = null;
+	const tableSummary = schema.tables.find(t => t.name === ts.name);
+	let skipSlowCounts = false;
 	try {
-		const cSql = 'SELECT COUNT(*) AS c FROM ' + qTable + (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '');
-		totalCount = db.query(cSql).get(...bindings)?.c ?? 0;
+		const pc = db.query('PRAGMA page_count').get()?.page_count || 0;
+		const ps = db.query('PRAGMA page_size').get()?.page_size || 4096;
+		skipSlowCounts = pc * ps > 50 * 1024 * 1024;
 	} catch {}
+	let totalCount = null;
+	if (skipSlowCounts) {
+		totalCount = clauses.length === 0 ? (tableSummary?.rowCount ?? null) : null;
+	} else {
+		try {
+			const cSql = 'SELECT COUNT(*) AS c FROM ' + qTable + (clauses.length ? ' WHERE ' + clauses.join(' AND ') : '');
+			totalCount = db.query(cSql).get(...bindings)?.c ?? 0;
+		} catch {}
+	}
 
 	const fetchCols = keysetCol && !selectedCols.includes(keysetCol) ? [...selectedCols, keysetCol] : selectedCols;
 	const rowClauses = [...clauses];

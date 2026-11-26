@@ -308,16 +308,28 @@ export function browseSqliteTable(db: Database, params: BrowseParams): BrowseRes
 
 	const { clauses, bindings } = buildWhereClause(params.filters, params.search, colMap)
 	const qTable = quoteIdent(tableSchema.name)
+	const tableSummary = schema.tables.find((t) => t.name === tableSchema.name)
 
-	// Total count (for the filtered dataset)
-	let totalCount: number | null = null
+	// Avoid slow full-table COUNT(*) scans when browsing large databases (>50 MB).
+	let skipSlowCounts = false
 	try {
-		const countSql =
-			`SELECT COUNT(*) AS c FROM ${qTable}` + (clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '')
-		const cRow = db.query<{ c: number }, (string | number)[]>(countSql).get(...bindings)
-		totalCount = cRow?.c ?? 0
-	} catch {
-		totalCount = null
+		const pc = db.query<{ page_count: number }, []>('PRAGMA page_count').get()?.page_count ?? 0
+		const ps = db.query<{ page_size: number }, []>('PRAGMA page_size').get()?.page_size ?? 4096
+		skipSlowCounts = pc * ps > 50 * 1024 * 1024
+	} catch {}
+
+	let totalCount: number | null = null
+	if (skipSlowCounts) {
+		totalCount = clauses.length === 0 ? (tableSummary?.rowCount ?? null) : null
+	} else {
+		try {
+			const countSql =
+				`SELECT COUNT(*) AS c FROM ${qTable}` + (clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '')
+			const cRow = db.query<{ c: number }, (string | number)[]>(countSql).get(...bindings)
+			totalCount = cRow?.c ?? 0
+		} catch {
+			totalCount = null
+		}
 	}
 
 	// Ensure keyset column is fetched even if hidden in fields, so cursors stay valid

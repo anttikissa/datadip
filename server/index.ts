@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { handleApiRequest } from './api.ts'
 import { ConnectionManager } from './db/manager.ts'
 import { DataStore, readServerInfo } from './store.ts'
@@ -15,27 +16,36 @@ interface CliArgs {
 	host: string
 	port: number
 	dataDir?: string
+	openFile?: string
 }
 
 function parseArgs(argv: string[]): CliArgs {
 	let command: CliArgs['command'] = 'serve'
+	let explicitCommand = false
 	let host = '127.0.0.1'
 	let port = 4747
 	let dataDir: string | undefined
+	let openFile: string | undefined
 
 	const args = [...argv]
 	if (args[0] && ['serve', 'url', 'status', 'open', 'stop'].includes(args[0])) {
 		command = args.shift() as CliArgs['command']
+		explicitCommand = true
 	}
 
 	for (let i = 0; i < args.length; i++) {
-		const a = args[i]
+		const a = args[i]!
 		if (a === '--host' && args[i + 1]) host = args[++i]!
 		else if (a === '--port' && args[i + 1]) port = Number(args[++i]!) || 4747
 		else if ((a === '--data' || a === '--home') && args[i + 1]) dataDir = args[++i]!
+		else if (!a.startsWith('-') && !openFile) openFile = resolve(a)
 	}
 
-	return { command, host, port, dataDir }
+	if (!explicitCommand && openFile) {
+		command = 'open'
+	}
+
+	return { command, host, port, dataDir, openFile }
 }
 
 async function isServerAlive(url: string): Promise<boolean> {
@@ -185,10 +195,25 @@ async function runOpen(opts: CliArgs) {
 		console.error('Failed to start DataDip server')
 		process.exit(1)
 	}
-	console.log(url)
+	let targetUrl = url
+	if (opts.openFile) {
+		const res = await fetch(`${url}/api/connections/open-file`, {
+			method: 'POST',
+			headers: { 'content-type': 'text/plain; charset=utf-8' },
+			body: stringifyAson({ path: opts.openFile }, 'short'),
+		})
+		const text = await res.text()
+		const data = text.trim() ? (parseAson(text) as { connection?: { id: string }; error?: string }) : {}
+		if (!res.ok || !data.connection?.id) {
+			console.error(data.error || `Failed to open ${opts.openFile}`)
+			process.exit(1)
+		}
+		targetUrl = `${url}/c/${encodeURIComponent(data.connection.id)}`
+	}
+	console.log(targetUrl)
 	console.log('Run `datadip stop` to stop the server.')
 	const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
-	Bun.spawnSync([opener, url])
+	Bun.spawnSync([opener, targetUrl])
 }
 
 function isPidAlive(pid: number): boolean {

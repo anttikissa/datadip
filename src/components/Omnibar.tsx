@@ -3,7 +3,8 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { formatCellText } from '../lib/format.ts'
 import { IconSearch } from '../lib/icons.tsx'
-import type { ConnectionWithStatus, DatabaseSchema, IdMatch, Console } from '../shared/types.ts'
+import type { ConnectionWithStatus, Console, DatabaseSchema, IdMatch } from '../shared/types.ts'
+import { maskConnectionPath } from '../shared/url.ts'
 
 interface OmniItem {
 	id: string
@@ -133,12 +134,13 @@ export function Omnibar(props: {
 
 		// Connections
 		for (const c of props.connections) {
-			if (!q || c.name.toLowerCase().includes(q) || c.path.toLowerCase().includes(q)) {
+			const displayPath = maskConnectionPath(c.path)
+			if (!q || c.name.toLowerCase().includes(q) || displayPath.toLowerCase().includes(q)) {
 				list.push({
 					id: `c:${c.id}`,
 					kind: c.isProduction ? 'PROD DB' : 'DB',
 					label: c.name,
-					detail: c.location === 'ssh' ? `${c.sshHost}:${c.path}` : c.path,
+					detail: c.location === 'ssh' ? `${c.sshHost}:${displayPath}` : displayPath,
 					run: () => {
 						props.onSelectConnection(c.id)
 						props.onClose()

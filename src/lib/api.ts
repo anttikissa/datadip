@@ -143,4 +143,52 @@ export const api = {
 
 	answerSshPrompt: (id: string, payload: { answer?: string; cancelled?: boolean }) =>
 		request<{ ok: true }>('POST', `/api/ssh/prompts/${encodeURIComponent(id)}`, payload),
+
+	openLocalFile: (path: string) =>
+		request<{ connection: ConnectionConfig }>('POST', '/api/connections/open-file', { path }),
+
+	exportToFile: async (
+		connId: string,
+		payload: {
+			mode: 'table' | 'query'
+			format: 'csv' | 'tsv' | 'json' | 'markdown' | 'sql'
+			browse?: BrowseParams
+			sql?: string
+			filename?: string
+		},
+	): Promise<{ filename: string; rowCount: number; truncated: boolean }> => {
+		const res = await fetch(`/api/connections/${encodeURIComponent(connId)}/export`, {
+			method: 'POST',
+			headers: { 'content-type': 'text/plain; charset=utf-8' },
+			body: stringifyAson(payload, 'short'),
+		})
+		if (!res.ok) {
+			const text = await res.text()
+			let msg = `${res.status} Export failed`
+			if (text.trim()) {
+				try {
+					const data = parseAson(text) as { error?: string }
+					if (data?.error) msg = data.error
+				} catch {
+					msg = text
+				}
+			}
+			throw new ApiError(res.status, msg)
+		}
+		const blob = await res.blob()
+		const cd = res.headers.get('content-disposition') ?? ''
+		const match = /filename="([^"]+)"/.exec(cd)
+		const filename = match?.[1] ?? `export.${payload.format === 'markdown' ? 'md' : payload.format}`
+		const rowCount = Number(res.headers.get('x-datadip-row-count') ?? '0')
+		const truncated = res.headers.get('x-datadip-truncated') === '1'
+		const url = URL.createObjectURL(blob)
+		const a = document.createElement('a')
+		a.href = url
+		a.download = filename
+		document.body.appendChild(a)
+		a.click()
+		a.remove()
+		setTimeout(() => URL.revokeObjectURL(url), 1000)
+		return { filename, rowCount, truncated }
+	},
 }

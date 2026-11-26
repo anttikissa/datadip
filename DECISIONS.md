@@ -12,8 +12,27 @@ obvious.
   without reshaping the client.
 - Adapter abstraction (`server/db/types.ts`): all table listing, schema
   inspection, browsing, querying, mutations, FK peeks, and reverse-FK
-  counts flow through `DbAdapter` so Postgres and other drivers can be
-  added without changing the UI or routes.
+  counts flow through `DbAdapter` for SQLite (local and SSH) and
+  PostgreSQL (direct TCP/TLS and SSH TCP port forwarding via `Bun.SQL`,
+  zero external dependencies).
+- PostgreSQL adapter (`server/db/postgres.ts`) & OpenSSH TCP tunnel
+  (`server/db/ssh-tunnel.ts`): uses Bun's native `Bun.SQL` client with
+  `BEGIN READ ONLY` enforcement in Read-Only mode, `pg_class.reltuples`
+  row estimates (no automatic `COUNT(*)` on large tables >50k rows),
+  server-side `query.cancel()`, and `ssh -N -L` local port forwarding
+  reusing `SSH_ASKPASS` while preserving real-endpoint TLS `serverName`
+  (no remote Bun required). Connection URL passwords are always masked
+  in the UI (`maskConnectionPath`).
+- Large-table browsing guard: both SQLite (`>50 MB` files) and
+  PostgreSQL (`>50k` estimated rows) skip automatic full-table `COUNT(*)`
+  scans during table browsing, using `sqlite_stat1` / `pg_class.reltuples`
+  when unfiltered and `null` when filtered.
+- Full-result file export (`server/export.ts`, `POST /api/connections/:id/export`):
+  downloads table views or read-only SQL query results directly to disk
+  (up to 100k rows) in CSV, TSV, JSON, Markdown, or SQL `INSERT` format.
+- Ad-hoc CLI file opening (`datadip ./app.db`, `POST /api/connections/open-file`):
+  validates the SQLite header, deduplicates by resolved `realpath`, and
+  opens the database directly in the UI.
 - Multiplexed SSH transport (`server/db/ssh-mux.ts`): one persistent SSH
   process per remote host runs an inline Bun SQLite worker speaking
   NDJSON-RPC over stdin/stdout. Concurrent queries share one connection
@@ -58,9 +77,9 @@ obvious.
   `'Berkeley Mono', 'SF Mono', ui-monospace` for tables and SQL, with
   no external Google Fonts dependency so `DataDip.app` renders
   instantly offline.
-- Light theme by default with an optional dark theme toggle persisted in
-  local state (using slightly lighter body weight in dark mode to offset
-  irradiation).
+- Follows macOS/OS `prefers-color-scheme` on first launch, with a manual
+  light/dark toggle persisted in local state (using slightly lighter body
+  weight in dark mode to offset irradiation).
 - CodeMirror 6 provides SQL editing with SQLite syntax highlighting,
   live schema autocomplete, custom SQLite linting, active-statement
   highlighting, and SQL formatting.
