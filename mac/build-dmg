@@ -150,15 +150,89 @@ rm -rf "$out_dir/DataDip.app"
 cp -R "$app" "$out_dir/DataDip.app"
 
 dmg_stage="$tmp/dmg-stage"
-mkdir -p "$dmg_stage"
+mkdir -p "$dmg_stage/.background"
 cp -R "$app" "$dmg_stage/DataDip.app"
 ln -s /Applications "$dmg_stage/Applications"
+
+# Render 1x + 2x Retina DMG background artwork and combine into a HiDPI TIFF for Finder
+dmg_bg_tiff=""
+if [ -f "$mac/render-dmg-bg.swift" ] && command -v swift >/dev/null && command -v tiffutil >/dev/null; then
+	echo "==> Rendering Retina DMG background"
+	swift "$mac/render-dmg-bg.swift" "$tmp/bg-1x.png" "$tmp/bg-2x.png" "v$version"
+	tiffutil -cathidpicheck "$tmp/bg-1x.png" "$tmp/bg-2x.png" -out "$dmg_stage/.background/background.tiff" >/dev/null
+	dmg_bg_tiff=".background:background.tiff"
+fi
+
+# Custom volume icon matching DataDip.app
+if [ -f "$contents/Resources/AppIcon.icns" ]; then
+	cp "$contents/Resources/AppIcon.icns" "$dmg_stage/.VolumeIcon.icns"
+fi
 
 dmg="$out_dir/DataDip-${version}-${arch}.dmg"
 rm -f "$dmg"
 
-echo "==> Creating compressed DMG: $dmg"
-hdiutil create -volname "DataDip" -srcfolder "$dmg_stage" -ov -format UDZO "$dmg" >/dev/null
+rw_dmg="$tmp/DataDip-rw.dmg"
+vol_name="DataDip"
+
+# Detach any existing mounted DataDip volume to avoid name collisions ("DataDip 1")
+if [ -d "/Volumes/$vol_name" ]; then
+	hdiutil detach "/Volumes/$vol_name" -force >/dev/null 2>&1 || true
+fi
+
+echo "==> Creating styled DMG layout"
+hdiutil create -volname "$vol_name" -srcfolder "$dmg_stage" -fs HFS+ -fsargs "-c c=64,a=16,e=16" \
+	-format UDRW -ov "$rw_dmg" >/dev/null
+
+# Attach read-write and configure Finder window geometry, icon positions, background, and volume icon
+attach_out="$(hdiutil attach -readwrite -noverify -noautoopen "$rw_dmg")"
+dmg_dev="$(echo "$attach_out" | awk '/\/Volumes\// {print $1; exit}')"
+dmg_mnt="$(echo "$attach_out" | sed -n 's/.*\(\/Volumes\/.*\)$/\1/p' | head -n 1)"
+
+if [ -n "$dmg_mnt" ] && [ -d "$dmg_mnt" ]; then
+	if command -v SetFile >/dev/null; then
+		[ -f "$dmg_mnt/.VolumeIcon.icns" ] && SetFile -a C "$dmg_mnt" || true
+		[ -d "$dmg_mnt/.background" ] && SetFile -a V "$dmg_mnt/.background" || true
+	fi
+
+	# Ensure Finder writes .DS_Store with exact window bounds (640x400 content + 28pt titlebar) and icon placement
+	if command -v osascript >/dev/null && [ -n "$dmg_bg_tiff" ]; then
+		vol_base="$(basename "$dmg_mnt")"
+		osascript <<APPLESCRIPT || true
+tell application "Finder"
+	tell disk "$vol_base"
+		open
+		set current view of container window to icon view
+		set toolbar visible of container window to false
+		set statusbar visible of container window to false
+		set bounds of container window to {200, 140, 840, 568}
+		set viewOptions to the icon view options of container window
+		set arrangement of viewOptions to not arranged
+		set icon size of viewOptions to 128
+		set text size of viewOptions to 13
+		set background picture of viewOptions to file "$dmg_bg_tiff"
+		set position of item "DataDip.app" of container window to {175, 180}
+		set position of item "Applications" of container window to {465, 180}
+		update without registering applications
+		delay 2
+		close
+		open
+		delay 1
+		close
+	end tell
+end tell
+APPLESCRIPT
+	fi
+
+	# Prevent Finder from writing fsevents logs into the read-only image and flush .DS_Store
+	rm -rf "$dmg_mnt/.fseventsd" "$dmg_mnt/.Trashes" 2>/dev/null || true
+	chmod -Rf go-w "$dmg_mnt" 2>/dev/null || true
+	sync
+	sleep 1
+	hdiutil detach "$dmg_dev" >/dev/null || hdiutil detach "$dmg_dev" -force >/dev/null
+fi
+
+echo "==> Compressing final DMG: $dmg"
+hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -ov -o "$dmg" >/dev/null
 
 if [ "$sign_identity" != "-" ]; then
 	echo "==> Signing DMG"

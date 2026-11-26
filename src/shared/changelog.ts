@@ -1,6 +1,6 @@
 // Structured release changelog shared by the in-app What's New modal and version badge.
 
-export const APP_VERSION = '0.2.1'
+export const APP_VERSION = '0.3.0'
 
 export type ChangelogTag = 'new' | 'fix' | 'safety' | 'sql' | 'sqlite' | 'macos'
 
@@ -20,6 +20,39 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+	{
+		version: '0.3.0',
+		date: '2026-11-26',
+		headline: 'Signed macOS Self-Updater, Virtual & Inferred Foreign Keys, & Accurate Postgres Counts',
+		summary:
+			'DataDip.app now updates itself securely with Apple Developer ID verification, infers and links undeclared foreign keys across schemas and ER diagrams, and computes exact row counts for small Postgres tables.',
+		items: [
+			{
+				tag: 'macos',
+				title: 'Built-in signed macOS self-updater (DataDip -> Check for Updates…)',
+				detail:
+					'Checks GitHub Releases manually or passively every 12h (surfacing a subtle Update pill in the top bar), downloads the signed notarized DMG over HTTPS, verifies the Apple Developer ID signature and Team ID via SecStaticCodeCheckValidity, swaps the app bundle atomically, and relaunches cleanly.',
+			},
+			{
+				tag: 'new',
+				title: 'Automatic FK inference & configurable Virtual Foreign Keys',
+				detail:
+					'Infers undeclared <stem>_id / <stem>Id relationships automatically across tables with compatible PK types, and lets you link or dismiss custom foreign keys locally in connections.ason (even in Read-Only / Production mode) — reflected in table grids, hover peeks, reverse-FK counts, SQL results, and ER Diagram edges.',
+			},
+			{
+				tag: 'fix',
+				title: 'Accurate small-table Postgres row counts & clean large estimates',
+				detail:
+					'Probes small readable Postgres tables (<= 512 KB, LIMIT 1001) in one batched query for exact counts, displays floored lower bounds (1,000+, 14,100+, 1,920,000+) for larger tables, caches schema metadata per adapter for faster browsing, and fixes masked Postgres password display.',
+			},
+			{
+				tag: 'macos',
+				title: 'Styled Retina DMG installer & typographic baseline polish',
+				detail:
+					'Redesigned drag-to-Applications DMG with a Retina HiDPI background and aligned adjacent mixed-size text baselines across table headers, sidebar, and metadata rows.',
+			},
+		],
+	},
 	{
 		version: '0.2.1',
 		date: '2026-11-26',

@@ -2,6 +2,19 @@
 
 All notable changes to DataDip are documented here.
 
+## [0.3.0] - 2026-11-26
+
+**Signed macOS Self-Updater, Virtual & Inferred Foreign Keys, & Accurate Postgres Counts**
+
+### Added
+- **Built-in signed macOS self-updater** (`DataDip -> Check for Updates...`): checks GitHub Releases manually or every 12h in the background (showing an unobtrusive `Update vX.Y.Z` top-bar pill), downloads the notarized `.dmg` over HTTPS-only redirects, verifies the staged bundle with `SecStaticCodeCheckValidity` (strict nested code + Apple Developer ID cert OIDs + matching `CFBundleIdentifier` and `TeamIdentifier` + no downgrade), stops `datadip-server`, swaps atomically via `FileManager.replaceItemAt`, and relaunches cleanly.
+- **Automatic FK inference & Virtual Foreign Keys**: infers undeclared `<stem>_id` / `<stem>Id` relationships across tables with compatible PK types, and lets you link or dismiss virtual foreign keys locally in `connections.ason` without altering the database (works in Read-Only / Production mode), integrated across table grids, hover peeks, reverse-FK counts, SQL Console results, and ER Diagram edges (dashed for virtual, dotted for inferred).
+- **Styled Retina DMG installer**: HiDPI drag-to-Applications Finder layout with custom volume icon.
+
+### Fixed
+- **Accurate small-table PostgreSQL row counts & clean large estimates**: probes small readable tables (`<= 512 KB`, `LIMIT 1001`) in one batched query for exact counts, displays floored lower bounds (`1,000+`, `14,100+`, `1,920,000+`) for larger tables, caches schema metadata for snappier browsing, and fixes masked PostgreSQL password display (`••••` instead of percent-encoded characters).
+- **Typographic baseline alignment**: aligned adjacent mixed-size text across table headers, sidebar, and UI rows.
+
 ## [0.2.1] - 2026-11-26
 
 **PostgreSQL TLS Auto-Negotiation & Upgrade Server Refresh**
