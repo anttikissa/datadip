@@ -9,11 +9,13 @@ import { RecentModal } from './components/RecentModal.tsx'
 import { ScratchpadView } from './components/ScratchpadView.tsx'
 import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
+import { clearConsoleRun, getConsoleRun } from './lib/console-runs.ts'
 import { copyToClipboard, formatCountdown } from './lib/format.ts'
 import {
 	IconAlert,
 	IconBack,
 	IconBrand,
+	IconClose,
 	IconCopy,
 	IconForward,
 	IconLock,
@@ -62,6 +64,8 @@ export function App() {
 	const [schemaError, setSchemaError] = createSignal<string | null>(null)
 	const [scratchpads, setScratchpads] = createSignal<Scratchpad[]>([])
 	const [consoleFocusTick, setConsoleFocusTick] = createSignal(0)
+	const [splitPadId, setSplitPadId] = createSignal<string | null>(null)
+	let connSelectEl: HTMLSelectElement | undefined
 
 	const [sidebarOpen, setSidebarOpen] = createSignal(true)
 	const [tableFilter, setTableFilter] = createSignal('')
@@ -107,7 +111,7 @@ export function App() {
 		}
 		if (options?.trailLabel) {
 			setTrail((prev) => [...prev.slice(-5), { label: options.trailLabel!, url }])
-		} else if (next.kind === 'home' || next.kind === 'connection') {
+		} else if (next.kind === 'home' || next.kind === 'connection' || next.kind === 'sql') {
 			setTrail([])
 		} else if (next.kind === 'table' && next.filters.length === 0) {
 			setTrail([{ label: next.table, url }])
@@ -202,25 +206,112 @@ export function App() {
 		}
 	}
 
-	async function openOrCreateScratchpad(connId: string, initialSql?: string) {
+	function nextConsoleTitle(pads: Scratchpad[]): string {
+		const used = new Set(pads.map((p) => p.title.trim().toLowerCase()))
+		let n = 1
+		while (used.has(`console ${n}`)) n++
+		return `Console ${n}`
+	}
+
+	function isConsoleTrivial(pad: Scratchpad): boolean {
+		const nonCommentLines = pad.sql
+			.split('\n')
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0 && !l.startsWith('--'))
+		return nonCommentLines.length === 0
+	}
+
+	async function deleteConsoleImmediate(pad: Scratchpad) {
+		const run = getConsoleRun(pad.id)
+		if (run.running && run.queryId) {
+			void api.cancelQuery(pad.connectionId, run.queryId).catch(() => {})
+		}
 		try {
-			if (initialSql !== undefined) {
-				const res = await api.createScratchpad(connId, `Console ${scratchpads().length + 1}`, initialSql)
-				setScratchpads((prev) => [res.scratchpad, ...prev])
-				navigate({ kind: 'sql', connId, padId: res.scratchpad.id })
-				return
-			}
-			const existing = scratchpads()
-			if (existing.length > 0) {
-				navigate({ kind: 'sql', connId, padId: existing[0]!.id })
-				return
-			}
-			const res = await api.createScratchpad(connId, 'Console 1', '-- Press Cmd+Enter to run statement\n')
-			setScratchpads([res.scratchpad])
-			navigate({ kind: 'sql', connId, padId: res.scratchpad.id })
+			await api.deleteScratchpad(pad.id)
 		} catch (err) {
 			notify(err instanceof Error ? err.message : String(err), 'error')
+			return
 		}
+		clearConsoleRun(pad.id)
+		const rest = scratchpads().filter((p) => p.id !== pad.id)
+		setScratchpads(rest)
+		if (splitPadId() === pad.id) {
+			setSplitPadId(null)
+		}
+		const cur = route()
+		if (cur.kind === 'sql' && cur.padId === pad.id) {
+			const nextPad = rest.find((p) => p.id !== splitPadId()) ?? rest[0]
+			if (nextPad) {
+				if (splitPadId() === nextPad.id) setSplitPadId(null)
+				navigate({ kind: 'sql', connId: cur.connId, padId: nextPad.id }, { replace: true })
+			} else {
+				navigate({ kind: 'connection', connId: cur.connId }, { replace: true })
+			}
+		}
+	}
+
+	function requestCloseConsole(pad: Scratchpad) {
+		const run = getConsoleRun(pad.id)
+		if (isConsoleTrivial(pad) && !run.running) {
+			void deleteConsoleImmediate(pad)
+			return
+		}
+		setConfirmState({
+			title: `Close "${pad.title}"?`,
+			message: run.running
+				? 'This console has a running query. Closing will cancel the query and delete this console.'
+				: 'Closing deletes this console and its SQL text.',
+			confirmLabel: 'Close Console',
+			danger: true,
+			onConfirm: () => deleteConsoleImmediate(pad),
+		})
+	}
+
+	async function createNewConsole(
+		connId: string,
+		initialSql = '-- Press Cmd+Enter to run the highlighted statement\n',
+	): Promise<Scratchpad | null> {
+		try {
+			const title = nextConsoleTitle(scratchpads())
+			const res = await api.createScratchpad(connId, title, initialSql)
+			setScratchpads((prev) => [...prev, res.scratchpad])
+			return res.scratchpad
+		} catch (err) {
+			notify(err instanceof Error ? err.message : String(err), 'error')
+			return null
+		}
+	}
+
+	async function openOrCreateScratchpad(connId: string, initialSql?: string) {
+		if (initialSql !== undefined) {
+			const pad = await createNewConsole(connId, initialSql)
+			if (pad) navigate({ kind: 'sql', connId, padId: pad.id })
+			return
+		}
+		const existing = orderedConsoles()
+		if (existing.length > 0) {
+			navigate({ kind: 'sql', connId, padId: existing[0]!.id })
+			return
+		}
+		const pad = await createNewConsole(connId)
+		if (pad) navigate({ kind: 'sql', connId, padId: pad.id })
+	}
+
+	async function toggleSplitConsole() {
+		const id = activeConnId()
+		if (!id) return
+		if (splitPadId()) {
+			setSplitPadId(null)
+			return
+		}
+		const primary = activePad()
+		const existingOther = orderedConsoles().find((p) => p.id !== primary?.id)
+		if (existingOther) {
+			setSplitPadId(existingOther.id)
+			return
+		}
+		const created = await createNewConsole(id)
+		if (created) setSplitPadId(created.id)
 	}
 
 	async function setRw(armed: boolean) {
@@ -439,6 +530,7 @@ export function App() {
 		() => activeConnId(),
 		(connId) => {
 			setTableFilter('')
+			setSplitPadId(null)
 			if (!connId) {
 				setSchema(null)
 				setScratchpads([])
@@ -449,14 +541,11 @@ export function App() {
 		},
 	)
 
-	// Keep page title crisp & informative
+	// Keep the controlled <select> synced whenever dynamic <option>/<optgroup> children change.
 	createEffect(
-		() => [activeConn()?.name, route()] as const,
-		([connName, r]) => {
-			const prodPrefix = activeConn()?.isProduction ? '[PROD] ' : ''
-			if (r.kind === 'table') document.title = `${prodPrefix}${r.table} · ${connName ?? 'DataDip'}`
-			else if (r.kind === 'sql') document.title = `${prodPrefix}Console · ${connName ?? 'DataDip'}`
-			else document.title = 'DataDip'
+		() => [activeConnId(), connections()] as const,
+		([connId]) => {
+			if (connSelectEl) connSelectEl.value = connId ?? ''
 		},
 	)
 
@@ -466,13 +555,46 @@ export function App() {
 		return q ? list.filter((t) => t.name.toLowerCase().includes(q)) : list
 	})
 
+	// Stable left-to-right console order (by createdAt ASC) so tabs never jump around on edit/save.
+	const orderedConsoles = createMemo(() =>
+		[...scratchpads()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
+	)
+
 	const activePad = createMemo(() => {
 		const r = route()
 		if (r.kind !== 'sql') return null
-		const list = scratchpads()
+		const list = orderedConsoles()
 		if (r.padId) return list.find((p) => p.id === r.padId) ?? list[0] ?? null
 		return list[0] ?? null
 	})
+
+	const splitPad = createMemo(() => {
+		const sid = splitPadId()
+		if (!sid || route().kind !== 'sql') return null
+		const pad = orderedConsoles().find((p) => p.id === sid)
+		if (!pad || pad.id === activePad()?.id) return null
+		return pad
+	})
+
+	// Keep browser & DataDip.app window title prominently showing the active DB and view.
+	createEffect(
+		() => [activeConn(), route(), activePad()?.title, splitPad()?.title] as const,
+		([conn, r, p1, p2]) => {
+			if (r.kind === 'home' || !conn) {
+				document.title = 'DataDip'
+				return
+			}
+			const prodPrefix = conn.isProduction ? '[PROD] ' : ''
+			if (r.kind === 'table') {
+				document.title = `${prodPrefix}${r.table} · ${conn.name} — DataDip`
+			} else if (r.kind === 'sql') {
+				const consoleLabel = p2 ? `${p1 ?? 'Console'} | ${p2}` : (p1 ?? 'Console')
+				document.title = `${prodPrefix}${consoleLabel} · ${conn.name} — DataDip`
+			} else {
+				document.title = `${prodPrefix}${conn.name} — DataDip`
+			}
+		},
+	)
 
 	const defaultSshHost = createMemo(() => connections().find((c) => c.location === 'ssh' && c.sshHost)?.sshHost)
 	const activeConnections = createMemo(() => connections().filter((c) => c.connected))
@@ -536,6 +658,7 @@ export function App() {
 				</div>
 
 				<select
+					ref={connSelectEl}
 					class="conn-select"
 					aria-label="Active database connection"
 					value={activeConnId() ?? ''}
@@ -545,13 +668,15 @@ export function App() {
 						else navigate({ kind: 'connection', connId: nextId })
 					}}
 				>
-					<option value="">All Connections…</option>
+					<option value="" selected={!activeConnId()}>
+						All Connections…
+					</option>
 					<Show
 						when={activeConnections().length > 0}
 						fallback={
 							<For each={connections()}>
 								{(c) => (
-									<option value={c.id}>
+									<option value={c.id} selected={c.id === activeConnId()}>
 										{c.isProduction ? '[PROD] ' : ''}
 										{c.name}
 									</option>
@@ -562,7 +687,7 @@ export function App() {
 						<optgroup label={`Active (${activeConnections().length})`}>
 							<For each={activeConnections()}>
 								{(c) => (
-									<option value={c.id}>
+									<option value={c.id} selected={c.id === activeConnId()}>
 										● {c.orphaned ? '[ORPHANED] ' : ''}
 										{c.rwArmed ? '[RW] ' : ''}
 										{c.isProduction ? '[PROD] ' : ''}
@@ -575,7 +700,7 @@ export function App() {
 							<optgroup label="Saved">
 								<For each={inactiveConnections()}>
 									{(c) => (
-										<option value={c.id}>
+										<option value={c.id} selected={c.id === activeConnId()}>
 											{c.isProduction ? '[PROD] ' : ''}
 											{c.name}
 										</option>
@@ -759,12 +884,17 @@ export function App() {
 					<aside class="sidebar">
 						<div class="sidebar-header">
 							<div class="sidebar-conn-row">
-								<div class="sidebar-meta mono">
-									<span class="status-dot" />
-									<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-										{activeConn()?.location === 'ssh' ? `ssh://${activeConn()?.sshHost}` : 'local sqlite'}
-									</span>
-									<Show when={schema()}>{(s) => <span>· {s().durationMs}ms</span>}</Show>
+								<div style="min-width:0;flex:1">
+									<div class="sidebar-db-name" title={activeConn()?.path}>
+										<span class="status-dot" />
+										<span class="sidebar-db-name-text">{activeConn()?.name ?? 'Database'}</span>
+									</div>
+									<div class="sidebar-meta mono">
+										<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+											{activeConn()?.location === 'ssh' ? `ssh://${activeConn()?.sshHost}` : 'local sqlite'}
+										</span>
+										<Show when={schema()}>{(s) => <span>· {s().durationMs}ms</span>}</Show>
+									</div>
 								</div>
 								<button
 									type="button"
@@ -812,7 +942,7 @@ export function App() {
 								</span>
 							</div>
 
-							<Show when={scratchpads().length === 0}>
+							<Show when={orderedConsoles().length === 0}>
 								<button
 									type="button"
 									class="sidebar-item"
@@ -827,23 +957,45 @@ export function App() {
 								</button>
 							</Show>
 
-							<For each={scratchpads()}>
-								{(pad) => (
-									<button
-										type="button"
-										class={[
-											'sidebar-item',
-											{
-												active:
-													route().kind === 'sql' && (route() as Extract<AppRoute, { kind: 'sql' }>).padId === pad.id,
-											},
-										]}
-										onClick={() => navigate({ kind: 'sql', connId: pad.connectionId, padId: pad.id })}
-									>
-										<IconSql />
-										<span class="sidebar-item-label">{pad.title}</span>
-									</button>
-								)}
+							<For each={orderedConsoles()}>
+								{(pad) => {
+									const run = () => getConsoleRun(pad.id)
+									const isPrimary = () => route().kind === 'sql' && activePad()?.id === pad.id
+									const isSecondary = () => route().kind === 'sql' && splitPad()?.id === pad.id
+									return (
+										<div class={['sidebar-console-row', { active: isPrimary(), secondary: isSecondary() }]}>
+											<button
+												type="button"
+												class={['sidebar-item', { active: isPrimary() || isSecondary() }]}
+												onClick={() => {
+													if (splitPadId() === pad.id) setSplitPadId(activePad()?.id ?? null)
+													navigate({ kind: 'sql', connId: pad.connectionId, padId: pad.id })
+												}}
+											>
+												<IconSql />
+												<span class="sidebar-item-label">{pad.title}</span>
+												<Show when={run().running}>
+													<span class="sidebar-run-badge mono">
+														<span class="status-pulse accent" />
+														{Math.max(0, Math.floor((nowMs() - (run().startedAt ?? nowMs())) / 1000))}s
+													</span>
+												</Show>
+											</button>
+											<button
+												type="button"
+												class="sidebar-close-btn"
+												aria-label={`Close ${pad.title}`}
+												title={`Close ${pad.title}`}
+												onClick={(e) => {
+													e.stopPropagation()
+													requestCloseConsole(pad)
+												}}
+											>
+												<IconClose />
+											</button>
+										</div>
+									)
+								}}
 							</For>
 
 							{/* Tables & Views section */}
@@ -1009,69 +1161,223 @@ export function App() {
 
 				<Show when={activeSqlRoute()}>
 					{(r) => (
-						<ScratchpadView
-							connId={r().connId}
-							scratchpad={activePad()}
-							schema={schema()}
-							dark={dark()}
-							focusTick={consoleFocusTick()}
-							onScratchpadUpdated={(pad) => setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))}
-							onScratchpadDeleted={(padId) => {
-								const rest = scratchpads().filter((p) => p.id !== padId)
-								setScratchpads(rest)
-								if (rest.length > 0)
-									navigate({ kind: 'sql', connId: r().connId, padId: rest[0]!.id }, { replace: true })
-								else navigate({ kind: 'connection', connId: r().connId }, { replace: true })
-							}}
-							onFollowFk={(targetTable, targetColumn, value) =>
-								navigate(
-									{
-										kind: 'table',
-										connId: r().connId,
-										table: targetTable,
-										tab: 'data',
-										fields: [],
-										filters: [{ column: targetColumn, op: 'eq', value: String(value) }],
-										order: [],
-										limit: 100,
-										start: null,
-										direction: 'next',
-										offset: null,
-										search: '',
-										selectedRow: null,
-									},
-									{ trailLabel: `${targetTable}.${targetColumn}=${String(value)}` },
-								)
-							}
-							onOpenTable={(table) =>
-								navigate({
-									kind: 'table',
-									connId: r().connId,
-									table,
-									tab: 'data',
-									fields: [],
-									filters: [],
-									order: [],
-									limit: 100,
-									start: null,
-									direction: 'next',
-									offset: null,
-									search: '',
-									selectedRow: null,
-								})
-							}
-							onRequestConfirm={(st) => setConfirmState(st)}
-							onNotify={notify}
-							onSchemaChanged={() => {
-								const id = activeConnId()
-								if (id) void loadConnectionData(id)
-							}}
-							onRwTimerUpdated={(until) => {
-								const id = activeConnId()
-								if (!id) return
-								setConnections((prev) => prev.map((c) => (c.id === id ? { ...c, rwArmedUntil: until } : c)))
-							}}
-						/>
+						<div class="console-workspace">
+							{/* DataGrip-style Console Tab Bar */}
+							<div class="console-tabs-bar" role="tablist" aria-label="SQL Consoles">
+								<div class="console-tabs-scroll">
+									<For each={orderedConsoles()}>
+										{(pad) => {
+											const run = () => getConsoleRun(pad.id)
+											const isActive = () => activePad()?.id === pad.id
+											const isSplit = () => splitPad()?.id === pad.id
+											return (
+												<div
+													class={['console-tab', { active: isActive(), split: isSplit() }]}
+													onAuxClick={(e) => {
+														if (e.button === 1) {
+															e.preventDefault()
+															requestCloseConsole(pad)
+														}
+													}}
+												>
+													<button
+														type="button"
+														role="tab"
+														aria-selected={isActive() ? 'true' : 'false'}
+														class="console-tab-btn"
+														onClick={() => {
+															if (splitPadId() === pad.id) setSplitPadId(activePad()?.id ?? null)
+															navigate({ kind: 'sql', connId: r().connId, padId: pad.id })
+														}}
+													>
+														<IconSql />
+														<span>{pad.title}</span>
+														<Show when={run().running}>
+															<span class="sidebar-run-badge mono">
+																<span class="status-pulse accent" />
+																{Math.max(0, Math.floor((nowMs() - (run().startedAt ?? nowMs())) / 1000))}s
+															</span>
+														</Show>
+													</button>
+													<button
+														type="button"
+														class="console-tab-close"
+														aria-label={`Close ${pad.title}`}
+														title={`Close ${pad.title}`}
+														onClick={(e) => {
+															e.stopPropagation()
+															requestCloseConsole(pad)
+														}}
+													>
+														<IconClose />
+													</button>
+												</div>
+											)
+										}}
+									</For>
+									<button
+										type="button"
+										class="console-tab-add"
+										aria-label="New console"
+										title="New Console"
+										onClick={() => void openOrCreateScratchpad(r().connId, '-- Write SQL and press Cmd+Enter\n')}
+									>
+										<IconPlus />
+									</button>
+								</div>
+							</div>
+
+							<div class="consoles-split-grid">
+								<div class="console-pane">
+									<ScratchpadView
+										connId={r().connId}
+										connName={activeConn()?.name}
+										isProduction={activeConn()?.isProduction}
+										scratchpad={activePad()}
+										schema={schema()}
+										dark={dark()}
+										nowMs={nowMs()}
+										focusTick={consoleFocusTick()}
+										splitOpen={Boolean(splitPad())}
+										onToggleSplit={() => void toggleSplitConsole()}
+										onScratchpadUpdated={(pad) =>
+											setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))
+										}
+										onScratchpadDeleted={(padId) => {
+											const rest = scratchpads().filter((p) => p.id !== padId)
+											setScratchpads(rest)
+											if (splitPadId() === padId) setSplitPadId(null)
+											if (rest.length > 0)
+												navigate({ kind: 'sql', connId: r().connId, padId: rest[0]!.id }, { replace: true })
+											else navigate({ kind: 'connection', connId: r().connId }, { replace: true })
+										}}
+										onFollowFk={(targetTable, targetColumn, value) =>
+											navigate(
+												{
+													kind: 'table',
+													connId: r().connId,
+													table: targetTable,
+													tab: 'data',
+													fields: [],
+													filters: [{ column: targetColumn, op: 'eq', value: String(value) }],
+													order: [],
+													limit: 100,
+													start: null,
+													direction: 'next',
+													offset: null,
+													search: '',
+													selectedRow: null,
+												},
+												{ trailLabel: `${targetTable}.${targetColumn}=${String(value)}` },
+											)
+										}
+										onOpenTable={(table) =>
+											navigate({
+												kind: 'table',
+												connId: r().connId,
+												table,
+												tab: 'data',
+												fields: [],
+												filters: [],
+												order: [],
+												limit: 100,
+												start: null,
+												direction: 'next',
+												offset: null,
+												search: '',
+												selectedRow: null,
+											})
+										}
+										onRequestConfirm={(st) => setConfirmState(st)}
+										onNotify={notify}
+										onSchemaChanged={() => {
+											const id = activeConnId()
+											if (id) void loadConnectionData(id)
+										}}
+										onRwTimerUpdated={(until) => {
+											const id = activeConnId()
+											if (!id) return
+											setConnections((prev) => prev.map((c) => (c.id === id ? { ...c, rwArmedUntil: until } : c)))
+										}}
+									/>
+								</div>
+
+								<Show when={splitPad()}>
+									{(sp) => (
+										<div class="console-pane split-secondary">
+											<ScratchpadView
+												connId={r().connId}
+												connName={activeConn()?.name}
+												isProduction={activeConn()?.isProduction}
+												scratchpad={sp()}
+												schema={schema()}
+												dark={dark()}
+												nowMs={nowMs()}
+												isSplitPane
+												allConsoles={orderedConsoles().filter((p) => p.id !== activePad()?.id)}
+												onSelectPad={(pid) => setSplitPadId(pid)}
+												onCloseSplit={() => setSplitPadId(null)}
+												onScratchpadUpdated={(pad) =>
+													setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))
+												}
+												onScratchpadDeleted={(padId) => {
+													setScratchpads((prev) => prev.filter((p) => p.id !== padId))
+													if (splitPadId() === padId) setSplitPadId(null)
+												}}
+												onFollowFk={(targetTable, targetColumn, value) =>
+													navigate(
+														{
+															kind: 'table',
+															connId: r().connId,
+															table: targetTable,
+															tab: 'data',
+															fields: [],
+															filters: [{ column: targetColumn, op: 'eq', value: String(value) }],
+															order: [],
+															limit: 100,
+															start: null,
+															direction: 'next',
+															offset: null,
+															search: '',
+															selectedRow: null,
+														},
+														{ trailLabel: `${targetTable}.${targetColumn}=${String(value)}` },
+													)
+												}
+												onOpenTable={(table) =>
+													navigate({
+														kind: 'table',
+														connId: r().connId,
+														table,
+														tab: 'data',
+														fields: [],
+														filters: [],
+														order: [],
+														limit: 100,
+														start: null,
+														direction: 'next',
+														offset: null,
+														search: '',
+														selectedRow: null,
+													})
+												}
+												onRequestConfirm={(st) => setConfirmState(st)}
+												onNotify={notify}
+												onSchemaChanged={() => {
+													const id = activeConnId()
+													if (id) void loadConnectionData(id)
+												}}
+												onRwTimerUpdated={(until) => {
+													const id = activeConnId()
+													if (!id) return
+													setConnections((prev) => prev.map((c) => (c.id === id ? { ...c, rwArmedUntil: until } : c)))
+												}}
+											/>
+										</div>
+									)}
+								</Show>
+							</div>
+						</div>
 					)}
 				</Show>
 			</div>

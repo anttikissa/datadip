@@ -148,12 +148,13 @@ class SshHostChannel {
 	async call<T>(
 		payload: { op: string; path?: string; rw?: boolean; params?: unknown },
 		timeoutMs = 30_000,
+		customId?: string,
 	): Promise<T> {
 		await this.ensureConnected()
 		const proc = this.proc
 		if (!proc) throw new Error('SSH channel is not connected')
 
-		const id = tid('r')
+		const id = customId || tid('r')
 		return new Promise<T>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id)
@@ -175,6 +176,16 @@ class SshHostChannel {
 				reject(err instanceof Error ? err : new Error(String(err)))
 			}
 		})
+	}
+
+	async cancel(targetId: string): Promise<boolean> {
+		if (!this.proc || !this.pending.has(targetId)) return false
+		try {
+			const res = await this.call<{ cancelled: boolean }>({ op: 'cancel', params: { targetId } }, 5_000)
+			return Boolean(res?.cancelled)
+		} catch {
+			return false
+		}
 	}
 
 	private reset(err: Error) {

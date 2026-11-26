@@ -139,6 +139,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	var serve: Process?
 	let serveOutput = Tail()
 	var origin = ""
+	var titleObs: NSKeyValueObservation?
 	private let recoverLock = NSLock()
 	private var recovering = false
 
@@ -149,6 +150,10 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		config.userContentController.add(ScriptBridge(self), name: "datadip")
 		web = makeWebView(config)
 		window = makeWindow(web)
+		titleObs = web.observe(\.title, options: [.new]) { [weak self] w, _ in
+			guard let self, let t = w.title, !t.isEmpty else { return }
+			DispatchQueue.main.async { self.window.title = t }
+		}
 		web.loadHTMLString(statusPage("DataDip is starting…"), baseURL: nil)
 		NSApp.activate(ignoringOtherApps: true)
 		DispatchQueue.global().async {

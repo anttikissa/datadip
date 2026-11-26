@@ -108,6 +108,17 @@ describe('lintSql & formatSql', () => {
 		expect(msgs.some((m) => m.includes('without WHERE'))).toBe(true)
 	})
 
+	test('does not flag CTEs with column lists as unknown tables', () => {
+		const sql = `WITH RECURSIVE cnt(x) AS (
+			SELECT 1
+			UNION ALL
+			SELECT x + 1 FROM cnt WHERE x < 10
+		)
+		SELECT COUNT(*) FROM cnt;`
+		const diags = lintSql(sql, ['users'])
+		expect(diags).toHaveLength(0)
+	})
+
 	test('formats SQL with uppercase keywords and clean clause lines', () => {
 		const out = formatSql("select id, name from users where active = 1 and role = 'admin' order by id desc limit 20;")
 		expect(out).toContain(

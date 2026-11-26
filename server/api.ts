@@ -207,12 +207,20 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					sql: string
 					confirmedDestructive?: boolean
 					maxRows?: number
+					queryId?: string
 				}>(req)
 				const result = await manager.runQuery(connId, body.sql ?? '', {
 					confirmedDestructive: Boolean(body.confirmedDestructive),
 					maxRows: body.maxRows,
+					queryId: body.queryId,
 				})
 				return asonResponse(result)
+			}
+
+			if (rest === 'query/cancel' && method === 'POST') {
+				const body = await readBody<{ queryId: string }>(req)
+				const cancelled = body.queryId ? await manager.cancelQuery(connId, body.queryId) : false
+				return asonResponse({ ok: true, cancelled })
 			}
 
 			if (rest === 'mutate' && method === 'POST') {

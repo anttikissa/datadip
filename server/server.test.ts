@@ -312,6 +312,27 @@ describe('DataDip server API & safety boundaries', () => {
 		}
 	})
 
+	test('runs concurrent SQLite queries in parallel workers and supports cancellation', async () => {
+		const slowSql = `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000) SELECT COUNT(*) AS n FROM c`
+		const [r1, r2] = await Promise.all([manager.runQuery(connId, slowSql), manager.runQuery(connId, slowSql)])
+		expect(r1.results[0]?.rows[0]?.n).toBe(3000000)
+		expect(r2.results[0]?.rows[0]?.n).toBe(3000000)
+
+		// Cancel an in-flight long query
+		const verySlowSql = `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 500000000) SELECT COUNT(*) AS n FROM c`
+		const qid = 'qcanceltest1'
+		const pending = manager.runQuery(connId, verySlowSql, { queryId: qid })
+		await new Promise((r) => setTimeout(r, 80))
+		const cancelReq = new Request(`http://127.0.0.1:4747/api/connections/${connId}/query/cancel`, {
+			method: 'POST',
+			headers: { 'content-type': 'text/plain; charset=utf-8' },
+			body: `{ queryId: '${qid}' }`,
+		})
+		const cancelRes = await handleApiRequest(cancelReq, manager)
+		expect(cancelRes.status).toBe(200)
+		await expect(pending).rejects.toThrow(/cancelled/i)
+	})
+
 	test('readServerInfo reads server.ason without opening state.db', () => {
 		const probeDir = mkdtempSync(join(tmpdir(), 'datadip-probe-'))
 		try {

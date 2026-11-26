@@ -951,7 +951,13 @@ export function TableView(props: {
 								value={filterCol()}
 								onChange={(e) => setFilterCol(e.currentTarget.value)}
 							>
-								<For each={props.tableSchema?.columns ?? []}>{(c) => <option value={c.name}>{c.name}</option>}</For>
+								<For each={props.tableSchema?.columns ?? []}>
+									{(c) => (
+										<option value={c.name} selected={c.name === filterCol()}>
+											{c.name}
+										</option>
+									)}
+								</For>
 							</select>
 							<select
 								class="select mono"

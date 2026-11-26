@@ -485,6 +485,102 @@ function handle(req) {
 	}
 }
 
+const QUERY_WORKER_CODE = [
+	"const { Database } = await import('bun:sqlite');",
+	"const fs = await import('node:fs');",
+	"function normalizeCell(val) {",
+	"  if (val === null || val === undefined) return null;",
+	"  if (typeof val === 'bigint') return val.toString();",
+	"  if (val instanceof Uint8Array || val instanceof ArrayBuffer) {",
+	"    const bytes = val instanceof Uint8Array ? val : new Uint8Array(val);",
+	"    const preview = Array.from(bytes.slice(0, 32), b => b.toString(16).padStart(2, '0')).join('');",
+	"    return '<BLOB ' + bytes.length + 'B 0x' + preview + (bytes.length > 32 ? '…' : '') + '>';",
+	"  }",
+	"  return val;",
+	"}",
+	"function normalizeRow(row) {",
+	"  const out = {};",
+	"  for (const [k, v] of Object.entries(row)) out[k] = normalizeCell(v);",
+	"  return out;",
+	"}",
+	"function detectSourceTable(sql) {",
+	"  const m = /^\\s*SELECT\\b[\\s\\S]*?\\bFROM\\s+(?:[\"\\x60\\[]?([A-Za-z0-9_$-]+)[\"\\x60\\]]?\\s*\\.\\s*)?[\"\\x60\\[]?([A-Za-z0-9_$-]+)[\"\\x60\\]]?/i.exec(sql);",
+	"  return m && m[2] ? m[2] : null;",
+	"}",
+	"self.onmessage = (ev) => {",
+	"  const { dbPath, writable, statements, maxRows } = ev.data;",
+	"  let db = null;",
+	"  try {",
+	"    if (!fs.existsSync(dbPath)) throw new Error('SQLite database file not found on remote host: ' + dbPath);",
+	"    db = writable ? new Database(dbPath, { readwrite: true }) : new Database(dbPath, { readonly: true });",
+	"    db.exec(writable ? 'PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;' : 'PRAGMA busy_timeout = 5000;');",
+	"    const cap = maxRows || 2000;",
+	"    const results = [];",
+	"    for (const rawSql of statements) {",
+	"      const sql = String(rawSql).trim();",
+	"      if (!sql) continue;",
+	"      const t0 = performance.now();",
+	"      try {",
+	"        const stmt = db.query(sql);",
+	"        const cols = stmt.columnNames;",
+	"        if (cols.length > 0) {",
+	"          const rows = [];",
+	"          let truncated = false;",
+	"          for (const r of stmt.iterate()) {",
+	"            if (rows.length >= cap) { truncated = true; break; }",
+	"            rows.push(normalizeRow(r));",
+	"          }",
+	"          results.push({ sql, columns: cols, rows, rowCount: rows.length, changes: 0, lastInsertRowid: null, durationMs: Math.round((performance.now() - t0) * 100) / 100, sourceTable: detectSourceTable(sql), truncated });",
+	"        } else {",
+	"          const info = stmt.run();",
+	"          results.push({ sql, columns: [], rows: [], rowCount: 0, changes: info.changes, lastInsertRowid: typeof info.lastInsertRowid === 'bigint' ? info.lastInsertRowid.toString() : info.lastInsertRowid, durationMs: Math.round((performance.now() - t0) * 100) / 100, sourceTable: null, truncated: false });",
+	"        }",
+	"      } catch (err) {",
+	"        results.push({ sql, columns: [], rows: [], rowCount: 0, changes: 0, lastInsertRowid: null, durationMs: Math.round((performance.now() - t0) * 100) / 100, sourceTable: null, truncated: false, error: err && err.message ? err.message : String(err) });",
+	"        break;",
+	"      }",
+	"    }",
+	"    self.postMessage({ ok: true, result: results });",
+	"  } catch (err) {",
+	"    self.postMessage({ ok: false, error: err && err.message ? err.message : String(err) });",
+	"  } finally {",
+	"    try { if (db) db.close(); } catch {}",
+	"  }",
+	"};",
+].join('\n');
+
+const queryWorkerUrl = URL.createObjectURL(new Blob([QUERY_WORKER_CODE], { type: 'application/javascript' }));
+const activeQueryWorkers = new Map();
+
+function runQueryAsync(req) {
+	const w = new Worker(queryWorkerUrl);
+	let settled = false;
+	const finish = (payload) => {
+		if (settled) return;
+		settled = true;
+		activeQueryWorkers.delete(req.id);
+		try { w.terminate(); } catch {}
+		process.stdout.write(JSON.stringify({ id: req.id, ...payload }) + '\n');
+	};
+	activeQueryWorkers.set(req.id, {
+		cancel: () => finish({ ok: false, error: 'Query cancelled' }),
+	});
+	w.onmessage = (ev) => {
+		const msg = ev.data || {};
+		if (msg.ok) finish({ ok: true, result: msg.result });
+		else finish({ ok: false, error: msg.error || 'Remote query worker failed' });
+	};
+	w.onerror = (ev) => {
+		finish({ ok: false, error: (ev && ev.message) || 'Remote query worker crashed' });
+	};
+	w.postMessage({
+		dbPath: expandPath(req.path),
+		writable: Boolean(req.rw),
+		statements: req.params?.statements || [],
+		maxRows: req.params?.maxRows,
+	});
+}
+
 const decoder = new TextDecoder();
 let buf = initialBuf || '';
 process.stdout.write(JSON.stringify({ ready: true }) + '\n');
@@ -497,6 +593,21 @@ function drainLines() {
 		if (!line) continue;
 		let req;
 		try { req = JSON.parse(line); } catch { continue; }
+		if (req.op === 'query') {
+			try {
+				runQueryAsync(req);
+			} catch (err) {
+				process.stdout.write(JSON.stringify({ id: req.id, ok: false, error: err && err.message ? err.message : String(err) }) + '\n');
+			}
+			continue;
+		}
+		if (req.op === 'cancel') {
+			const targetId = req.params?.targetId;
+			const entry = targetId ? activeQueryWorkers.get(targetId) : null;
+			if (entry) entry.cancel();
+			process.stdout.write(JSON.stringify({ id: req.id, ok: true, result: { cancelled: Boolean(entry) } }) + '\n');
+			continue;
+		}
 		try {
 			const result = handle(req);
 			process.stdout.write(JSON.stringify({ id: req.id, ok: true, result }) + '\n');

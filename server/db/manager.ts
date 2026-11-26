@@ -257,7 +257,7 @@ export class ConnectionManager {
 	async runQuery(
 		id: string,
 		sql: string,
-		options: { confirmedDestructive?: boolean; maxRows?: number } = {},
+		options: { confirmedDestructive?: boolean; maxRows?: number; queryId?: string } = {},
 	): Promise<QueryResponse> {
 		const { conn, adapter } = this.getAdapterById(id)
 		const stmts = splitSqlStatements(sql).map((s) => s.text)
@@ -288,6 +288,7 @@ export class ConnectionManager {
 		const results = await adapter.executeStatements(stmts, {
 			writable: danger.isWrite && rw.armed,
 			maxRows: options.maxRows,
+			queryId: options.queryId,
 		})
 		const totalDurationMs = Math.round((performance.now() - t0) * 100) / 100
 
@@ -306,6 +307,12 @@ export class ConnectionManager {
 		this.store.touchConnection(conn.id)
 
 		return { results, totalDurationMs, rwArmedUntil }
+	}
+
+	async cancelQuery(id: string, queryId: string): Promise<boolean> {
+		const entry = this.adapters.get(id)
+		if (!entry?.adapter.cancelQuery) return false
+		return entry.adapter.cancelQuery(queryId)
 	}
 
 	async runMutate(id: string, req: MutateRequest): Promise<MutateResponse> {

@@ -24,6 +24,7 @@ export function CellViewer(props: {
 }) {
 	let popEl: HTMLDivElement | undefined
 	let textAreaEl: HTMLTextAreaElement | undefined
+	let viewAreaEl: HTMLTextAreaElement | undefined
 
 	const [pretty, setPretty] = createSignal(true)
 	const [draft, setDraft] = createSignal('')
@@ -34,12 +35,14 @@ export function CellViewer(props: {
 			if (!st) return
 			setPretty(true)
 			setDraft(st.value === null || st.value === undefined ? '' : String(st.value))
-			if (st.mode === 'edit') {
-				queueMicrotask(() => {
+			queueMicrotask(() => {
+				if (st.mode === 'edit') {
 					textAreaEl?.focus()
 					textAreaEl?.setSelectionRange(textAreaEl.value.length, textAreaEl.value.length)
-				})
-			}
+				} else {
+					viewAreaEl?.focus()
+				}
+			})
 		},
 	)
 
@@ -50,6 +53,16 @@ export function CellViewer(props: {
 				e.preventDefault()
 				e.stopPropagation()
 				props.onClose()
+				return
+			}
+			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+				const target = props.state.mode === 'edit' ? textAreaEl : viewAreaEl
+				if (target) {
+					e.preventDefault()
+					e.stopPropagation()
+					target.focus()
+					target.select()
+				}
 			}
 		}
 		const onMouseDown = (e: MouseEvent) => {
@@ -151,7 +164,14 @@ export function CellViewer(props: {
 										when={st().value !== null && st().value !== undefined}
 										fallback={<span class="cell-null mono">NULL</span>}
 									>
-										<pre class="cell-viewer-pre">{displayedText()}</pre>
+										<textarea
+											ref={(el) => (viewAreaEl = el)}
+											readonly
+											class="cell-viewer-pre cell-viewer-ro"
+											rows={Math.max(2, Math.min(14, displayedText().split('\n').length))}
+											value={displayedText()}
+											aria-label={`${st().colName} value`}
+										/>
 									</Show>
 									<Show when={tsHint()}>{(h) => <div class="inspector-hint mono">{h()}</div>}</Show>
 								</div>

@@ -82,10 +82,15 @@ export const api = {
 	getSchema: (id: string) => request<DatabaseSchema>('GET', `/api/connections/${encodeURIComponent(id)}/schema`),
 	browseTable: (id: string, params: BrowseParams) =>
 		request<BrowseResult>('POST', `/api/connections/${encodeURIComponent(id)}/browse`, params),
-	runQuery: (id: string, sql: string, confirmedDestructive = false) =>
+	runQuery: (id: string, sql: string, confirmedDestructive = false, queryId?: string) =>
 		request<QueryResponse>('POST', `/api/connections/${encodeURIComponent(id)}/query`, {
 			sql,
 			confirmedDestructive,
+			queryId,
+		}),
+	cancelQuery: (id: string, queryId: string) =>
+		request<{ ok: true; cancelled: boolean }>('POST', `/api/connections/${encodeURIComponent(id)}/query/cancel`, {
+			queryId,
 		}),
 	mutateTable: (id: string, req: MutateRequest) =>
 		request<MutateResponse>('POST', `/api/connections/${encodeURIComponent(id)}/mutate`, req),

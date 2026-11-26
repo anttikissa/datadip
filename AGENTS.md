@@ -84,6 +84,19 @@ The web client must track local server reachability via `/api/events`
 down (via `WKScriptMessageHandler` `ensureServer` and connect-failure
 recovery).
 
+In the SolidJS web client, every controlled `<select>` whose `<option>`
+or `<optgroup>` children are rendered dynamically (`<For>` / `<Show>`)
+must set `selected={...}` on each `<option>` AND sync `el.value` in a
+`createEffect` tracking both the selected value and the options list,
+because replacing `<option>` DOM nodes resets the browser's
+`selectedIndex` to `0`.
+
+Read-only text viewer popovers (e.g. `CellViewer`) must render selectable
+text in an auto-focused `<textarea readonly>` (and handle `Cmd/Ctrl+A`),
+because `DataDip.app`'s `Edit -> Select All` menu invokes `selectAll:`
+on the `WKWebView` directly and selects the entire document when focus
+is on a non-input element like `<pre>`.
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

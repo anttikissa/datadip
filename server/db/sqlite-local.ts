@@ -15,13 +15,13 @@ import type {
 import {
 	browseSqliteTable,
 	countSqliteReverseFks,
-	executeSqliteStatements,
 	getSqliteSchema,
 	mutateSqliteTable,
 	peekSqliteRow,
 	searchSqliteId,
 } from './sqlite-ops.ts'
 import type { DbAdapter } from './types.ts'
+import { tid } from '../../src/shared/tid.ts'
 
 export function expandTilde(path: string): string {
 	if (path === '~') return homedir()
@@ -34,6 +34,7 @@ export class LocalSqliteAdapter implements DbAdapter {
 	private readonly resolvedPath: string
 	private roDb: Database | null = null
 	private rwDb: Database | null = null
+	private activeWorkers = new Map<string, { worker: Worker; cancel: () => void }>()
 
 	constructor(filePath: string) {
 		this.resolvedPath = expandTilde(filePath)
@@ -78,10 +79,50 @@ export class LocalSqliteAdapter implements DbAdapter {
 
 	async executeStatements(
 		statements: string[],
-		options: { writable: boolean; maxRows?: number },
+		options: { writable: boolean; maxRows?: number; queryId?: string },
 	): Promise<QueryStatementResult[]> {
-		const db = this.open(options.writable)
-		return executeSqliteStatements(db, statements, { maxRows: options.maxRows })
+		if (!existsSync(this.resolvedPath)) {
+			throw new Error(`SQLite database file not found: ${this.resolvedPath}`)
+		}
+		const qid = options.queryId || tid('q')
+		return new Promise<QueryStatementResult[]>((resolve, reject) => {
+			const worker = new Worker(new URL('./sqlite-query-worker.ts', import.meta.url).href)
+			let settled = false
+			const finish = (fn: () => void) => {
+				if (settled) return
+				settled = true
+				this.activeWorkers.delete(qid)
+				try {
+					worker.terminate()
+				} catch {}
+				fn()
+			}
+			this.activeWorkers.set(qid, {
+				worker,
+				cancel: () => finish(() => reject(new Error('Query cancelled'))),
+			})
+			worker.onmessage = (ev: MessageEvent<{ ok: boolean; results?: QueryStatementResult[]; error?: string }>) => {
+				const msg = ev.data
+				if (msg?.ok && msg.results) finish(() => resolve(msg.results!))
+				else finish(() => reject(new Error(msg?.error || 'Worker query failed')))
+			}
+			worker.onerror = (ev) => {
+				finish(() => reject(new Error(ev.message || 'Worker query failed')))
+			}
+			worker.postMessage({
+				path: this.resolvedPath,
+				writable: options.writable,
+				statements,
+				maxRows: options.maxRows,
+			})
+		})
+	}
+
+	async cancelQuery(queryId: string): Promise<boolean> {
+		const entry = this.activeWorkers.get(queryId)
+		if (!entry) return false
+		entry.cancel()
+		return true
 	}
 
 	async mutate(req: MutateRequest): Promise<MutateResponse> {
@@ -101,6 +142,8 @@ export class LocalSqliteAdapter implements DbAdapter {
 	}
 
 	close() {
+		for (const entry of this.activeWorkers.values()) entry.cancel()
+		this.activeWorkers.clear()
 		try {
 			this.roDb?.close()
 		} catch {}

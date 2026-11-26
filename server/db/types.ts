@@ -17,8 +17,9 @@ export interface DbAdapter {
 	browseTable(params: BrowseParams): Promise<BrowseResult>
 	executeStatements(
 		statements: string[],
-		options: { writable: boolean; maxRows?: number },
+		options: { writable: boolean; maxRows?: number; queryId?: string },
 	): Promise<QueryStatementResult[]>
+	cancelQuery?(queryId: string): Promise<boolean>
 	mutate(req: MutateRequest): Promise<MutateResponse>
 	peekRow(table: string, column: string, value: unknown): Promise<Record<string, unknown> | null>
 	countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]>

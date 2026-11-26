@@ -48,9 +48,19 @@ export class SshSqliteAdapter implements DbAdapter {
 
 	executeStatements(
 		statements: string[],
-		options: { writable: boolean; maxRows?: number },
+		options: { writable: boolean; maxRows?: number; queryId?: string },
 	): Promise<QueryStatementResult[]> {
-		return this.rpc<QueryStatementResult[]>('query', { statements, maxRows: options.maxRows }, options.writable)
+		return this.pool
+			.getChannel(this.target)
+			.call<QueryStatementResult[]>(
+				{ op: 'query', path: this.dbPath, rw: options.writable, params: { statements, maxRows: options.maxRows } },
+				600_000,
+				options.queryId,
+			)
+	}
+
+	cancelQuery(queryId: string): Promise<boolean> {
+		return this.pool.getChannel(this.target).cancel(queryId)
 	}
 
 	mutate(req: MutateRequest): Promise<MutateResponse> {

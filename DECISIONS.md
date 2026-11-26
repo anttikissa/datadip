@@ -111,6 +111,19 @@ obvious.
   focus the active connection's Console (`Ctrl+E` stays unbound on macOS
   so Emacs end-of-line still works in inputs); `EXPLAIN QUERY PLAN` uses
   `Cmd+Shift+E`.
+- SQL query execution runs on dedicated Bun `Worker` threads both locally
+  (`server/db/sqlite-query-worker.ts`) and inside the remote SSH Bun
+  worker (`server/db/remote-worker.ts`), so multiple long-running queries
+  against the same database execute truly in parallel over one SSH pipe
+  without head-of-line blocking browsing or other consoles, and can be
+  cancelled mid-flight via `POST /api/connections/:id/query/cancel`.
+- Consoles have a DataGrip-style tab bar (with `×` close, middle-click
+  close, `+` reusing the lowest unused `Console N` number, live running
+  timers, and a Split Console mode to run two consoles side-by-side) and
+  keep per-console execution state independent across navigation.
+  `document.title` (mirrored live via KVO in `DataDip.app`), the sidebar
+  header, the top-bar switcher, and a Console toolbar badge all display
+  the active database prominently.
 - CLI probe/control commands (`url`, `status`, `open`, `stop`, and the
   duplicate server check) read only `server.ason` without opening
   `state.db`.

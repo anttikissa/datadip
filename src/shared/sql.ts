@@ -607,14 +607,23 @@ export function lintSql(sql: string, knownTables?: string[]): SqlDiagnostic[] {
 					if (target.kind !== 'word' && target.kind !== 'ident') continue
 					const name = unquoteIdent(target.text).toLowerCase()
 					if (!tableSet.has(name) && !name.startsWith('sqlite_') && !MAJOR_KEYWORDS.has(name.toUpperCase())) {
-						// Skip CTE names defined in WITH
-						const isCte = stmtTokens.some(
-							(t, j) =>
-								j < i &&
-								(t.kind === 'word' || t.kind === 'ident') &&
-								unquoteIdent(t.text).toLowerCase() === name &&
-								stmtTokens[j + 1]?.text.toUpperCase() === 'AS',
-						)
+						// Skip CTE names defined in WITH [RECURSIVE] name[(col, ...)] AS (...)
+						const isCte = stmtTokens.some((t, j) => {
+							if (j >= i) return false
+							if (t.kind !== 'word' && t.kind !== 'ident') return false
+							if (unquoteIdent(t.text).toLowerCase() !== name) return false
+							let k = j + 1
+							if (stmtTokens[k]?.kind === 'symbol' && stmtTokens[k]!.text === '(') {
+								let depth = 1
+								k++
+								while (k < i && depth > 0) {
+									if (stmtTokens[k]?.kind === 'symbol' && stmtTokens[k]!.text === '(') depth++
+									else if (stmtTokens[k]?.kind === 'symbol' && stmtTokens[k]!.text === ')') depth--
+									k++
+								}
+							}
+							return stmtTokens[k]?.text.toUpperCase() === 'AS'
+						})
 						if (!isCte) {
 							diagnostics.push({
 								from: stmt.from + target.from,
