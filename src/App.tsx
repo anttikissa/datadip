@@ -54,6 +54,8 @@ export function App() {
 	const [route, setRoute] = createSignal<AppRoute>(parseRoute(window.location.pathname, window.location.search))
 	const [connections, setConnections] = createSignal<ConnectionWithStatus[]>([])
 	const [configError, setConfigError] = createSignal<string | null>(null)
+	const [serverOnline, setServerOnline] = createSignal(true)
+	const [reconnectTick, setReconnectTick] = createSignal(0)
 	const [recents, setRecents] = createSignal<RecentTable[]>([])
 	const [schema, setSchema] = createSignal<DatabaseSchema | null>(null)
 	const [schemaLoading, setSchemaLoading] = createSignal(false)
@@ -305,40 +307,88 @@ export function App() {
 		}
 		window.addEventListener('keydown', onKey, true)
 
-		// Live sync from server liveFile watcher on connections.ason
+		// Live sync & server-liveness monitor via SSE /api/events (auto-reconnects & nudges DataDip.app to restart if stopped)
 		let initialEvent = true
-		const es = new EventSource('/api/events')
-		es.addEventListener('connections', (ev) => {
+		let disposed = false
+		let es: EventSource | null = null
+		let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+		const nudgeNativeRestart = () => {
 			try {
-				const payload = parseAson((ev as MessageEvent).data) as unknown as ConnectionsPayload
-				const prev = connections()
-				const next = payload.connections ?? []
-				setConnections(next)
-				setConfigError(payload.configError ?? null)
-				if (!initialEvent) {
-					const activeId = activeConnId()
-					const wasOrphaned = prev.find((c) => c.id === activeId)?.orphaned
-					const nowOrphaned = next.find((c) => c.id === activeId)?.orphaned
-					if (nowOrphaned && !wasOrphaned) {
-						notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
-					} else if (activeId && !next.some((c) => c.id === activeId) && prev.some((c) => c.id === activeId)) {
-						navigate({ kind: 'home' })
-					}
-					void api
-						.listRecents()
-						.then((r) => setRecents(r.recents))
-						.catch(() => {})
+				const w = window as unknown as {
+					webkit?: { messageHandlers?: { datadip?: { postMessage: (msg: string) => void } } }
 				}
-				initialEvent = false
+				w.webkit?.messageHandlers?.datadip?.postMessage('ensureServer')
 			} catch {}
-		})
+		}
+
+		const connectEvents = () => {
+			if (disposed) return
+			if (es) {
+				es.close()
+				es = null
+			}
+			const source = new EventSource('/api/events')
+			es = source
+
+			source.onopen = () => {
+				const wasOffline = !serverOnline()
+				setServerOnline(true)
+				if (wasOffline) {
+					setReconnectTick((n) => n + 1)
+					void refreshConnections()
+					const id = activeConnId()
+					if (id) void loadConnectionData(id)
+					notify('Reconnected to DataDip server', 'ok')
+				}
+			}
+
+			source.addEventListener('connections', (ev) => {
+				try {
+					const payload = parseAson((ev as MessageEvent).data) as unknown as ConnectionsPayload
+					const prev = connections()
+					const next = payload.connections ?? []
+					setConnections(next)
+					setConfigError(payload.configError ?? null)
+					if (!initialEvent) {
+						const activeId = activeConnId()
+						const wasOrphaned = prev.find((c) => c.id === activeId)?.orphaned
+						const nowOrphaned = next.find((c) => c.id === activeId)?.orphaned
+						if (nowOrphaned && !wasOrphaned) {
+							notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
+						} else if (activeId && !next.some((c) => c.id === activeId) && prev.some((c) => c.id === activeId)) {
+							navigate({ kind: 'home' })
+						}
+						void api
+							.listRecents()
+							.then((r) => setRecents(r.recents))
+							.catch(() => {})
+					}
+					initialEvent = false
+				} catch {}
+			})
+
+			source.onerror = () => {
+				if (disposed) return
+				setServerOnline(false)
+				nudgeNativeRestart()
+				source.close()
+				if (es === source) es = null
+				if (reconnectTimer) clearTimeout(reconnectTimer)
+				reconnectTimer = setTimeout(connectEvents, 1200)
+			}
+		}
+
+		connectEvents()
 
 		const timer = setInterval(() => setNowMs(Date.now()), 1000)
 
 		return () => {
+			disposed = true
 			window.removeEventListener('popstate', onPop)
 			window.removeEventListener('keydown', onKey, true)
-			es.close()
+			if (reconnectTimer) clearTimeout(reconnectTimer)
+			es?.close()
 			clearInterval(timer)
 		}
 	})
@@ -555,6 +605,33 @@ export function App() {
 					<IconTheme dark={dark()} />
 				</button>
 			</header>
+
+			{/* Local server offline status banner (driven by SSE /api/events) */}
+			<Show when={!serverOnline()}>
+				<div class="status-banner offline" role="status" aria-live="polite">
+					<span style="display:inline-flex;align-items:center;gap:8px;flex:1;min-width:0">
+						<span class="status-pulse" />
+						<span>
+							<strong>Local DataDip server is offline</strong> —{' '}
+							{(window as unknown as { webkit?: { messageHandlers?: { datadip?: unknown } } }).webkit?.messageHandlers
+								?.datadip
+								? 'restarting server and reconnecting…'
+								: 'run `datadip` or `datadip serve` in your terminal. Reconnecting automatically…'}
+						</span>
+					</span>
+					<button
+						type="button"
+						class="btn sm"
+						onClick={() => {
+							void refreshConnections()
+							const id = activeConnId()
+							if (id) void loadConnectionData(id)
+						}}
+					>
+						Retry Now
+					</button>
+				</div>
+			</Show>
 
 			{/* Malformed connections.ason warning banner */}
 			<Show when={configError()}>
@@ -789,8 +866,14 @@ export function App() {
 				<Show when={route().kind !== 'home' && schemaError()}>
 					<div class="main-pane" style="padding:20px">
 						<div class="error-box" style="margin:0">
-							<div style="font-weight:600;margin-bottom:6px">Connection Failed</div>
-							<div>{schemaError()}</div>
+							<div style="font-weight:600;margin-bottom:6px">
+								{serverOnline() ? 'Connection Failed' : 'Local DataDip Server Offline'}
+							</div>
+							<div>
+								{serverOnline()
+									? schemaError()
+									: 'Waiting for the local DataDip server to come back online. This view will reload automatically.'}
+							</div>
 							<div style="margin-top:12px;display:flex;gap:8px">
 								<button
 									type="button"
@@ -816,11 +899,13 @@ export function App() {
 							route={r()}
 							tableSchema={schema()?.schemas[r().table] ?? null}
 							rwArmed={rwArmed()}
+							reconnectTick={reconnectTick()}
 							onNavigate={(next, opts) => navigate(next, opts)}
 							onOpenInSql={(sqlText) => {
 								void openOrCreateScratchpad(r().connId, sqlText)
 							}}
 							onRequestConfirm={(st) => setConfirmState(st)}
+							onRequestArmRw={() => void setRw(true)}
 							onNotify={notify}
 							onSchemaChanged={() => {
 								const id = activeConnId()

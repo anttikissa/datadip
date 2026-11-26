@@ -60,6 +60,17 @@ obvious.
 - Focus uses `:focus-visible` with a single 2px ring across the app.
 - Auto-Discover follows directory symlinks safely (deduplicating via
   `realpathSync`) so symlinked storage volumes (e.g. `~/disk`) are found.
+- Truncated table cells support four complementary inspection modes:
+  double-click / `Enter` opens an anchored Cell Viewer popover (with
+  JSON pretty-print, Copy, and multi-line editor in Read-Write mode),
+  column header dividers drag to resize and double-click to auto-fit,
+  a toolbar `Wrap` toggle expands rows vertically, and hovering a
+  truncated non-FK cell shows a delayed preview card.
+- Server liveness is tracked continuously via `/api/events` (SSE). When
+  the local server stops, the web UI shows a clear offline banner and
+  auto-reconnects/reloads on recovery; inside `DataDip.app`, both SSE
+  disconnect (`ensureServer` message) and connect-error navigations
+  automatically restart `datadip serve` while ignoring `NSURLErrorCancelled`.
 
 ## Local Data
 

@@ -473,6 +473,11 @@ textarea {
 	padding: 0 8px;
 	font-size: 11.5px;
 }
+.btn.active-toggle {
+	background: var(--bg-selected);
+	border-color: rgba(37, 99, 235, 0.35);
+	color: var(--accent);
+}
 
 .input,
 .select {
@@ -859,6 +864,28 @@ textarea {
 	background: var(--prod-bg);
 	border-bottom-color: var(--prod-border);
 }
+.status-banner.offline {
+	background: var(--prod-bg);
+	border-bottom-color: var(--prod-border);
+}
+
+@keyframes pulseDot {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+.status-pulse {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--prod);
+	flex-shrink: 0;
+	animation: pulseDot 1.3s ease-in-out infinite;
+}
 
 .recent-section-head {
 	padding: 8px 10px 4px;
@@ -1014,11 +1041,35 @@ textarea {
 	background: var(--bg-canvas);
 	border-bottom: 1px solid var(--border-strong);
 	border-right: 1px solid var(--border-subtle);
-	padding: 7px 11px;
+	padding: 7px 14px 7px 11px;
 	text-align: left;
 	font-weight: 600;
 	white-space: nowrap;
 	user-select: none;
+}
+
+.col-resizer {
+	position: absolute;
+	top: 0;
+	right: -3px;
+	bottom: 0;
+	width: 7px;
+	cursor: col-resize;
+	z-index: 3;
+}
+.col-resizer::after {
+	content: '';
+	position: absolute;
+	top: 4px;
+	bottom: 4px;
+	left: 3px;
+	width: 2px;
+	border-radius: 1px;
+	background: transparent;
+	transition: background 120ms var(--ease-out);
+}
+.col-resizer:hover::after {
+	background: var(--accent);
 }
 
 .th-btn {
@@ -1078,6 +1129,18 @@ textarea {
 	white-space: nowrap;
 	vertical-align: middle;
 	cursor: default;
+}
+
+.data-table.wrap-rows td {
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+	vertical-align: top;
+	line-height: 1.45;
+}
+.data-table.wrap-rows td.row-num {
+	white-space: nowrap;
+	vertical-align: top;
 }
 
 .data-table td.cell-active {
@@ -1306,6 +1369,103 @@ textarea {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* --- Truncated Cell Hover Preview & Cell Viewer Popover --- */
+
+.cell-hover-peek {
+	position: fixed;
+	z-index: 88;
+	max-width: 360px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-pop);
+	pointer-events: none;
+	overflow: hidden;
+	animation: dialogIn 110ms var(--ease-out);
+}
+.cell-hover-peek-body {
+	padding: 9px 11px;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 180px;
+	overflow: hidden;
+}
+.cell-hover-peek-foot {
+	padding: 5px 11px;
+	background: var(--bg-canvas);
+	border-top: 1px solid var(--border-subtle);
+	font-size: 10.5px;
+	color: var(--ink-muted);
+}
+
+.cell-viewer {
+	position: fixed;
+	z-index: 95;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-pop);
+	overflow: hidden;
+	animation: dialogIn 130ms var(--ease-out);
+}
+.cell-viewer-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 12px;
+	background: var(--bg-canvas);
+	border-bottom: 1px solid var(--border-subtle);
+	font-size: 12px;
+}
+.cell-viewer-body {
+	padding: 12px;
+	max-height: 360px;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.cell-viewer-pre {
+	margin: 0;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+}
+.cell-viewer-textarea {
+	width: 100%;
+	min-height: 140px;
+	padding: 9px 10px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+	color: var(--ink-primary);
+	font-size: 12.5px;
+	line-height: 1.5;
+	resize: vertical;
+}
+.cell-viewer-textarea:focus {
+	border-color: var(--accent);
+}
+.cell-viewer-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 7px 12px;
+	background: var(--bg-canvas);
+	border-top: 1px solid var(--border-subtle);
+	font-size: 11.5px;
 }
 
 /* --- Schema View --- */

@@ -1,4 +1,4 @@
-// DataDip.app: native macOS WKWebView shell around `datadip serve` with fast startup, error reporting, and swipe navigation.
+// DataDip.app: native macOS WKWebView shell around `datadip serve` with fast startup, auto-restart on disconnect, and swipe navigation.
 import Cocoa
 import WebKit
 
@@ -46,6 +46,10 @@ func shellEnvironment() -> [String: String] {
 final class Tail {
 	private var data = Data()
 	private let lock = NSLock()
+	func clear() {
+		lock.lock(); defer { lock.unlock() }
+		data.removeAll()
+	}
 	func attach(_ p: Process) {
 		let pipe = Pipe()
 		p.standardOutput = pipe
@@ -72,7 +76,7 @@ func escapeHtml(_ s: String) -> String {
 }
 
 func statusPage(_ body: String) -> String {
-	"<html><body style='background:#f4f5f7;color:#161616;font:13px ui-monospace,monospace;padding:2em'>\(body)</body></html>"
+	"<html><body style='background:#f7f7f8;color:#141518;font:13px -apple-system,ui-monospace,monospace;padding:2em;line-height:1.5'>\(body)</body></html>"
 }
 
 func extractHttpUrl(from text: String) -> URL? {
@@ -106,6 +110,28 @@ func readServerAsonUrl() -> URL? {
 	return extractHttpUrl(from: content)
 }
 
+func pathAndQuery(of url: URL?) -> String {
+	guard let url, let scheme = url.scheme, scheme == "http" || scheme == "https" else { return "/" }
+	let p = url.path.isEmpty ? "/" : url.path
+	if let q = url.query, !q.isEmpty { return "\(p)?\(q)" }
+	return p
+}
+
+func urlWithPath(_ base: URL, _ pathQuery: String) -> URL {
+	let baseStr = base.absoluteString.hasSuffix("/") ? String(base.absoluteString.dropLast()) : base.absoluteString
+	let suffix = pathQuery.hasPrefix("/") ? pathQuery : "/\(pathQuery)"
+	return URL(string: baseStr + suffix) ?? base
+}
+
+final class ScriptBridge: NSObject, WKScriptMessageHandler {
+	weak var app: App?
+	init(_ app: App) { self.app = app }
+	func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+		guard let body = message.body as? String, body == "ensureServer" else { return }
+		app?.ensureServerRunning(forceReload: false, pathQuery: nil)
+	}
+}
+
 final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
 	var window: NSWindow!
 	var web: WKWebView!
@@ -113,22 +139,20 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	var serve: Process?
 	let serveOutput = Tail()
 	var origin = ""
+	private let recoverLock = NSLock()
+	private var recovering = false
 
 	func applicationDidFinishLaunching(_ note: Notification) {
 		NSApp.mainMenu = buildMenu()
-		web = makeWebView(WKWebViewConfiguration())
+		let config = WKWebViewConfiguration()
+		config.userContentController.add(ScriptBridge(self), name: "datadip")
+		web = makeWebView(config)
 		window = makeWindow(web)
 		web.loadHTMLString(statusPage("DataDip is starting…"), baseURL: nil)
 		NSApp.activate(ignoringOtherApps: true)
 		DispatchQueue.global().async {
 			self.env = shellEnvironment()
-			// Fast path: join an already-running DataDip server immediately
-			if let existing = readServerAsonUrl(), isHealthy(existing) {
-				self.openUrl(existing)
-				return
-			}
-			DispatchQueue.main.sync { self.startServe() }
-			self.join()
+			self.ensureServerRunning(forceReload: true, pathQuery: "/")
 		}
 	}
 
@@ -153,6 +177,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	}
 
 	func startServe() {
+		serveOutput.clear()
 		let p = datadip(["serve"])
 		serveOutput.attach(p)
 		do {
@@ -163,26 +188,75 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		}
 	}
 
-	func openUrl(_ u: URL) {
+	func openUrl(_ base: URL, pathQuery: String = "/") {
+		let target = urlWithPath(base, pathQuery)
 		DispatchQueue.main.async {
-			self.origin = "\(u.scheme ?? "http")://\(u.host ?? ""):\(u.port ?? 80)"
-			self.web.load(URLRequest(url: u))
+			self.origin = "\(base.scheme ?? "http")://\(base.host ?? ""):\(base.port ?? 80)"
+			self.web.load(URLRequest(url: target))
 		}
 	}
 
 	func showError(_ msg: String) {
+		let log = serveOutput.text.trimmingCharacters(in: .whitespacesAndNewlines)
+		let full = log.isEmpty ? msg : "\(msg)\n\ndatadip serve:\n\(log)"
 		DispatchQueue.main.async {
-			self.web.loadHTMLString(statusPage("<pre>\(escapeHtml(msg))</pre>"), baseURL: nil)
+			self.web.loadHTMLString(statusPage("<pre>\(escapeHtml(full))</pre>"), baseURL: nil)
+		}
+	}
+
+	// Ensures a live server is reachable; restarts `datadip serve` if an external or owned server stopped.
+	func ensureServerRunning(forceReload: Bool, pathQuery: String?) {
+		recoverLock.lock()
+		if recovering {
+			recoverLock.unlock()
+			return
+		}
+		recovering = true
+		recoverLock.unlock()
+
+		DispatchQueue.global().async {
+			defer {
+				self.recoverLock.lock()
+				self.recovering = false
+				self.recoverLock.unlock()
+			}
+			var savedPath = pathQuery ?? "/"
+			var currentOrigin = ""
+			DispatchQueue.main.sync {
+				if pathQuery == nil {
+					savedPath = pathAndQuery(of: self.web.url)
+				}
+				currentOrigin = self.origin
+			}
+
+			// Fast path: join an already-running DataDip server immediately
+			if let existing = readServerAsonUrl(), isHealthy(existing) {
+				let nextOrigin = "\(existing.scheme ?? "http")://\(existing.host ?? ""):\(existing.port ?? 80)"
+				if forceReload || currentOrigin != nextOrigin {
+					self.openUrl(existing, pathQuery: savedPath)
+				}
+				return
+			}
+
+			var needsStart = true
+			DispatchQueue.main.sync {
+				if let p = self.serve, p.isRunning { needsStart = false }
+				if needsStart { self.startServe() }
+			}
+			self.join(forceReload: forceReload, pathQuery: savedPath, currentOrigin: currentOrigin)
 		}
 	}
 
 	// Waits for the server URL from serve stdout or server.ason without spawning polling subprocesses.
-	func join() {
+	func join(forceReload: Bool, pathQuery: String, currentOrigin: String) {
 		let deadline = Date().addingTimeInterval(startWait)
 		var retried = false
 		while Date() < deadline {
 			if let u = extractHttpUrl(from: serveOutput.text) ?? readServerAsonUrl(), isHealthy(u) {
-				openUrl(u)
+				let nextOrigin = "\(u.scheme ?? "http")://\(u.host ?? ""):\(u.port ?? 80)"
+				if forceReload || currentOrigin != nextOrigin {
+					openUrl(u, pathQuery: pathQuery)
+				}
 				return
 			}
 			if let p = serve, !p.isRunning {
@@ -191,18 +265,21 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 					retried = true
 					Thread.sleep(forTimeInterval: 0.2)
 					if let u = readServerAsonUrl(), isHealthy(u) {
-						openUrl(u)
+						let nextOrigin = "\(u.scheme ?? "http")://\(u.host ?? ""):\(u.port ?? 80)"
+						if forceReload || currentOrigin != nextOrigin {
+							openUrl(u, pathQuery: pathQuery)
+						}
 						return
 					}
 					DispatchQueue.main.sync { self.startServe() }
 					continue
 				}
-				showError("DataDip server exited with status \(p.terminationStatus).\n\n\(serveOutput.text)")
+				showError("DataDip server exited with status \(p.terminationStatus).")
 				return
 			}
 			Thread.sleep(forTimeInterval: 0.05)
 		}
-		showError("DataDip did not start within \(Int(startWait)) s.\n\ndatadip serve:\n\(serveOutput.text)")
+		showError("DataDip did not start within \(Int(startWait)) s.")
 	}
 
 	func makeWebView(_ config: WKWebViewConfiguration) -> WKWebView {
@@ -232,17 +309,39 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 
 	@objc func goBack(_ sender: Any?) { web.goBack() }
 	@objc func goForward(_ sender: Any?) { web.goForward() }
-	@objc func reloadPage(_ sender: Any?) { web.reload() }
+	@objc func reloadPage(_ sender: Any?) {
+		if let u = web.url, u.scheme == "http" || u.scheme == "https" {
+			web.reload()
+		} else {
+			ensureServerRunning(forceReload: true, pathQuery: "/")
+		}
+	}
 
 	func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) {
 		if let t = w.title, !t.isEmpty { window.title = t }
 	}
 
 	func webView(_ w: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-		showError("Failed to load DataDip UI:\n\(error.localizedDescription)\n\ndatadip serve:\n\(serveOutput.text)")
+		let nsErr = error as NSError
+		// Ignore superseded/cancelled navigations (e.g. initial "starting..." HTML replaced by live URL load).
+		if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
+		if nsErr.domain == NSURLErrorDomain && (
+			nsErr.code == NSURLErrorCannotConnectToHost ||
+			nsErr.code == NSURLErrorNetworkConnectionLost ||
+			nsErr.code == NSURLErrorTimedOut
+		) {
+			let failingUrl = nsErr.userInfo[NSURLErrorFailingURLErrorKey] as? URL
+			let savedPath = pathAndQuery(of: failingUrl)
+			w.loadHTMLString(statusPage("Local DataDip server stopped — restarting…"), baseURL: nil)
+			ensureServerRunning(forceReload: true, pathQuery: savedPath)
+			return
+		}
+		showError("Failed to load DataDip UI:\n\(error.localizedDescription)")
 	}
 
 	func webView(_ w: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+		let nsErr = error as NSError
+		if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
 		showError("Navigation error:\n\(error.localizedDescription)")
 	}
 

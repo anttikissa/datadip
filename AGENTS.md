@@ -64,6 +64,18 @@ duplicate-server check in `serve`) must read only `server.ason` via
 `readServerInfo()` and never instantiate `DataStore`, open `state.db`,
 or start file watchers.
 
+In `mac/DataDip.swift`, `WKWebView` error delegates
+(`didFailProvisionalNavigation`, `didFail`) must always ignore
+`NSURLErrorCancelled` (`-999`), because replacing the startup status
+HTML with the live URL (or reloading) cancels the prior provisional
+navigation and calling `showError` would abort the real page load.
+
+The web client must track local server reachability via `/api/events`
+(SSE) and display a clear offline status banner that auto-reconnects;
+`DataDip.app` must auto-restart `datadip serve` when the server goes
+down (via `WKScriptMessageHandler` `ensureServer` and connect-failure
+recovery).
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

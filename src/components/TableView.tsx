@@ -30,6 +30,7 @@ import type {
 } from '../shared/types.ts'
 import type { AppRoute } from '../shared/url.ts'
 import type { ConfirmState } from './ConfirmDialog.tsx'
+import { CellViewer, type CellViewerState } from './CellViewer.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
 import { RowInspector } from './RowInspector.tsx'
 
@@ -52,9 +53,11 @@ export function TableView(props: {
 	route: TableRoute
 	tableSchema: TableSchema | null
 	rwArmed: boolean
+	reconnectTick?: number
 	onNavigate: (next: TableRoute, options?: { replace?: boolean; trailLabel?: string }) => void
 	onOpenInSql: (sql: string) => void
 	onRequestConfirm: (state: ConfirmState) => void
+	onRequestArmRw?: () => void
 	onNotify: (msg: string, kind?: 'info' | 'ok' | 'error') => void
 	onSchemaChanged: () => void
 }) {
@@ -73,9 +76,21 @@ export function TableView(props: {
 	const [filterOp, setFilterOp] = createSignal<FilterOp>('eq')
 	const [filterVal, setFilterVal] = createSignal('')
 
-	// Cell cursor & inspector
+	// Cell cursor, inspector, cell viewer, wrap, column resize, and hover preview
 	const [activeCell, setActiveCell] = createSignal<{ row: number; col: number } | null>(null)
 	const [inspectorRowIdx, setInspectorRowIdx] = createSignal<number | null>(null)
+	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
+	const [wrapRows, setWrapRows] = createSignal(false)
+	const [colWidths, setColWidths] = createSignal<Record<string, number>>({})
+	const [hoverPeek, setHoverPeek] = createSignal<{
+		x: number
+		y: number
+		colName: string
+		text: string
+		truncated: boolean
+	} | null>(null)
+	let hoverTimer: ReturnType<typeof setTimeout> | null = null
+	let gridScrollEl: HTMLDivElement | undefined
 
 	// Staged inline edits: rowKey -> { pk, changes }
 	const [staged, setStaged] = createSignal<Map<string, PendingUpdate>>(new Map())
@@ -149,6 +164,7 @@ export function TableView(props: {
 				props.route.offset,
 				props.route.search,
 				reloadTick(),
+				props.reconnectTick ?? 0,
 			] as const,
 		([connId, table, tab]) => {
 			if (tab !== 'data') return
@@ -156,7 +172,9 @@ export function TableView(props: {
 			setLoading(true)
 			setError(null)
 			setEditingCell(null)
+			setCellViewer(null)
 			setPeek(null)
+			setHoverPeek(null)
 
 			api
 				.browseTable(connId, {
@@ -190,12 +208,14 @@ export function TableView(props: {
 		},
 	)
 
-	// Clear staged edits if switching tables or locking RO
+	// Clear staged edits and custom column widths when switching tables
 	createEffect(
 		() => [props.route.connId, props.route.table] as const,
 		() => {
 			setStaged(new Map())
 			setEditingCell(null)
+			setCellViewer(null)
+			setColWidths({})
 			peekCache.clear()
 		},
 	)
@@ -269,11 +289,13 @@ export function TableView(props: {
 				if (!props.rwArmed && fk && row[colName] !== null && row[colName] !== undefined) {
 					e.preventDefault()
 					followFk(fk.toTable, fk.toColumn, row[colName])
-				} else if (props.rwArmed && pkCols().length > 0 && props.tableSchema?.type === 'table') {
+				} else {
 					e.preventDefault()
-					startCellEdit(cur.row, colName, getEffectiveValue(row, cur.row, colName))
+					const td = gridScrollEl?.querySelector<HTMLElement>(`td[data-r="${cur.row}"][data-c="${cur.col}"]`)
+					openCellAction(cur.row, colName, getEffectiveValue(row, cur.row, colName), td ?? undefined)
 				}
 			} else if (e.key === 'Escape') {
+				setCellViewer(null)
 				setInspectorRowIdx(null)
 				setShowColPicker(false)
 				setShowExport(false)
@@ -373,56 +395,155 @@ export function TableView(props: {
 		return Boolean(entry && colName in entry.changes)
 	}
 
-	function startCellEdit(rowIdx: number, colName: string, currentVal: unknown) {
-		if (!props.rwArmed) {
-			props.onNotify('Switch to Read-Write mode to edit cells', 'error')
-			return
+	function anchorFromEl(el?: HTMLElement) {
+		if (el) {
+			const r = el.getBoundingClientRect()
+			return { left: r.left, top: r.top, bottom: r.bottom, right: r.right }
 		}
-		if (props.tableSchema?.type !== 'table' || pkCols().length === 0) {
-			props.onNotify('Inline editing requires a table with a primary key', 'error')
-			return
+		return {
+			left: Math.round(window.innerWidth / 2 - 240),
+			top: 180,
+			bottom: 210,
+			right: Math.round(window.innerWidth / 2 + 240),
 		}
-		setEditingCell({
-			row: rowIdx,
-			colName,
-			draft: currentVal === null || currentVal === undefined ? '' : String(currentVal),
-		})
 	}
 
-	function commitCellDraft(setNull = false) {
-		const ed = editingCell()
+	function canEditTable(): boolean {
+		return props.tableSchema?.type === 'table' && pkCols().length > 0
+	}
+
+	function openCellAction(rowIdx: number, colName: string, currentVal: unknown, el?: HTMLElement) {
+		cancelHoverPeek()
+		const colType = data()?.columnTypes[colName] ?? ''
+		const text = currentVal === null || currentVal === undefined ? '' : String(currentVal)
+		// In Read-Only mode (or on views / tables without PK), double-click opens the Cell Viewer instead of erroring.
+		if (!props.rwArmed || !canEditTable()) {
+			setCellViewer({
+				rowIdx,
+				colName,
+				colType,
+				value: currentVal,
+				mode: 'view',
+				anchor: anchorFromEl(el),
+			})
+			return
+		}
+		// In Read-Write mode, use the multi-line popover editor for long or multi-line values; inline input for short values.
+		if (text.length > 80 || text.includes('\n')) {
+			setCellViewer({
+				rowIdx,
+				colName,
+				colType,
+				value: currentVal,
+				mode: 'edit',
+				anchor: anchorFromEl(el),
+			})
+			return
+		}
+		setEditingCell({ row: rowIdx, colName, draft: text })
+	}
+
+	function stageCellValue(rowIdx: number, colName: string, draft: string, setNull: boolean) {
 		const res = data()
-		if (!ed || !res) return
-		const row = res.rows[ed.row]
+		if (!res) return
+		const row = res.rows[rowIdx]
 		if (!row) return
 		const pk = rowPk(row)
 		if (!pk) return
 
-		const orig = row[ed.colName]
-		const colType = (res.columnTypes[ed.colName] ?? '').toUpperCase()
-		let nextVal: unknown = setNull ? null : ed.draft
-		if (
-			!setNull &&
-			ed.draft !== '' &&
-			(colType.includes('INT') || colType.includes('REAL') || colType.includes('NUM'))
-		) {
-			if (/^-?\d+(\.\d+)?$/.test(ed.draft.trim())) nextVal = Number(ed.draft.trim())
+		const orig = row[colName]
+		const colType = (res.columnTypes[colName] ?? '').toUpperCase()
+		let nextVal: unknown = setNull ? null : draft
+		if (!setNull && draft !== '' && (colType.includes('INT') || colType.includes('REAL') || colType.includes('NUM'))) {
+			if (/^-?\d+(\.\d+)?$/.test(draft.trim())) nextVal = Number(draft.trim())
 		}
 
 		const nextMap = new Map(staged())
-		const key = rowKey(row, ed.row)
+		const key = rowKey(row, rowIdx)
 		const existing = nextMap.get(key) ?? { pk, changes: {} }
 		const changes = { ...existing.changes }
 		if (nextVal === orig || (nextVal === null && orig === null)) {
-			delete changes[ed.colName]
+			delete changes[colName]
 		} else {
-			changes[ed.colName] = nextVal
+			changes[colName] = nextVal
 		}
 		if (Object.keys(changes).length === 0) nextMap.delete(key)
 		else nextMap.set(key, { pk, changes })
 
 		setStaged(nextMap)
 		setEditingCell(null)
+		setCellViewer(null)
+	}
+
+	function commitCellDraft(setNull = false) {
+		const ed = editingCell()
+		if (!ed) return
+		stageCellValue(ed.row, ed.colName, ed.draft, setNull)
+	}
+
+	function startColResize(e: MouseEvent, colName: string) {
+		e.preventDefault()
+		e.stopPropagation()
+		const th = (e.currentTarget as HTMLElement).parentElement
+		if (!th) return
+		const startX = e.clientX
+		const startW = th.getBoundingClientRect().width
+		const onMove = (ev: MouseEvent) => {
+			const nextW = Math.max(64, Math.min(1400, Math.round(startW + (ev.clientX - startX))))
+			setColWidths((prev) => ({ ...prev, [colName]: nextW }))
+		}
+		const onUp = () => {
+			window.removeEventListener('mousemove', onMove)
+			window.removeEventListener('mouseup', onUp)
+		}
+		window.addEventListener('mousemove', onMove)
+		window.addEventListener('mouseup', onUp)
+	}
+
+	function autoFitColumn(e: MouseEvent, colName: string) {
+		e.preventDefault()
+		e.stopPropagation()
+		const res = data()
+		if (!res) return
+		// Approximate monospace char width (~7.4px at 12px) plus padding, capped at 720px.
+		let maxChars = colName.length + 6
+		for (const row of res.rows) {
+			const firstLine = formatCellText(row[colName]).split('\n')[0] ?? ''
+			if (firstLine.length > maxChars) maxChars = firstLine.length
+		}
+		const fitted = Math.max(96, Math.min(720, Math.round(maxChars * 7.6 + 28)))
+		setColWidths((prev) => ({ ...prev, [colName]: fitted }))
+	}
+
+	function colWidthStyle(colName: string): string | undefined {
+		const w = colWidths()[colName]
+		return w ? `width:${w}px;min-width:${w}px;max-width:${w}px` : undefined
+	}
+
+	function startHoverPeek(e: MouseEvent, colName: string, value: unknown) {
+		if (wrapRows() || cellViewer() || editingCell()) return
+		if (value === null || value === undefined) return
+		const td = e.currentTarget as HTMLElement
+		if (td.scrollWidth <= td.clientWidth + 1) return
+		if (hoverTimer) clearTimeout(hoverTimer)
+		const x = e.clientX
+		const y = e.clientY
+		const full = formatCellText(value)
+		hoverTimer = setTimeout(() => {
+			setHoverPeek({
+				x,
+				y,
+				colName,
+				text: full.length > 600 ? full.slice(0, 600) + '…' : full,
+				truncated: full.length > 600,
+			})
+		}, 320)
+	}
+
+	function cancelHoverPeek() {
+		if (hoverTimer) clearTimeout(hoverTimer)
+		hoverTimer = null
+		setHoverPeek(null)
 	}
 
 	function buildPendingSqlPreview(): string[] {
@@ -654,6 +775,19 @@ export function TableView(props: {
 						/>
 					</div>
 
+					{/* Row wrap toggle */}
+					<button
+						type="button"
+						class={['btn sm', { 'active-toggle': wrapRows() }]}
+						aria-pressed={wrapRows() ? 'true' : 'false'}
+						onClick={() => {
+							cancelHoverPeek()
+							setWrapRows((v) => !v)
+						}}
+					>
+						Wrap
+					</button>
+
 					{/* Column picker (fields= in URL) */}
 					<div class="popover-anchor">
 						<button
@@ -857,19 +991,19 @@ export function TableView(props: {
 
 					<div style="flex:1" />
 					<span style="font-size:11px;color:var(--ink-muted)">
-						<span class="kbd">Space</span> inspect · <span class="kbd">hjkl</span> navigate · <span class="kbd">f</span>{' '}
-						columns · Click FK cells to follow
+						<span class="kbd">Space</span> inspect · Double-click view/edit · <span class="kbd">hjkl</span> navigate ·{' '}
+						<span class="kbd">f</span> columns
 					</span>
 				</div>
 
 				{/* Grid + Inspector split */}
 				<div class="grid-wrap">
-					<div class="grid-scroll">
+					<div ref={(el) => (gridScrollEl = el)} class="grid-scroll" onScroll={cancelHoverPeek}>
 						<Show when={error()}>{(msg) => <div class="error-box">{msg()}</div>}</Show>
 
 						<Show when={data()}>
 							{(res) => (
-								<table class="data-table">
+								<table class={['data-table', { 'wrap-rows': wrapRows() }]}>
 									<thead>
 										<tr>
 											<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>
@@ -879,7 +1013,7 @@ export function TableView(props: {
 													const fk = () => fkByCol().get(colName)
 													const isPk = () => pkCols().includes(colName)
 													return (
-														<th>
+														<th style={colWidthStyle(colName)}>
 															<button
 																type="button"
 																class="th-btn"
@@ -895,6 +1029,12 @@ export function TableView(props: {
 																	{(s) => <span style="color:var(--accent)">{s().dir === 'asc' ? '▲' : '▼'}</span>}
 																</Show>
 															</button>
+															<span
+																class="col-resizer"
+																title="Drag to resize · Double-click to auto-fit"
+																onMouseDown={(e) => startColResize(e, colName)}
+																onDblClick={(e) => autoFitColumn(e, colName)}
+															/>
 														</th>
 													)
 												}}
@@ -930,12 +1070,22 @@ export function TableView(props: {
 
 																return (
 																	<td
+																		data-r={rIdx()}
+																		data-c={cIdx()}
+																		style={colWidthStyle(colName)}
 																		class={{
 																			'cell-active': active(),
 																			'cell-dirty': dirty(),
 																		}}
-																		onClick={() => setActiveCell({ row: rIdx(), col: cIdx() })}
-																		onDblClick={() => startCellEdit(rIdx(), colName, val())}
+																		onClick={() => {
+																			cancelHoverPeek()
+																			setActiveCell({ row: rIdx(), col: cIdx() })
+																		}}
+																		onDblClick={(e) => openCellAction(rIdx(), colName, val(), e.currentTarget)}
+																		onMouseEnter={(e) => {
+																			if (!fk()) startHoverPeek(e, colName, val())
+																		}}
+																		onMouseLeave={cancelHoverPeek}
 																	>
 																		<Show
 																			when={isEd()}
@@ -1326,6 +1476,30 @@ export function TableView(props: {
 			</dialog>
 
 			<FkPeekCard state={peek()} />
+
+			<Show when={hoverPeek()}>
+				{(hp) => {
+					const left = () => Math.min(hp().x + 14, window.innerWidth - 380)
+					const top = () => Math.min(hp().y + 14, window.innerHeight - 200)
+					return (
+						<div class="cell-hover-peek" style={`left:${Math.max(12, left())}px;top:${Math.max(12, top())}px`}>
+							<div class="cell-hover-peek-body">{hp().text}</div>
+							<div class="cell-hover-peek-foot">Double-click or press Enter to view &amp; copy</div>
+						</div>
+					)
+				}}
+			</Show>
+
+			<CellViewer
+				state={cellViewer()}
+				canEdit={canEditTable()}
+				rwArmed={props.rwArmed}
+				onClose={() => setCellViewer(null)}
+				onCommitEdit={stageCellValue}
+				onRequestArmRw={props.onRequestArmRw}
+				onSwitchToEdit={() => setCellViewer((cur) => (cur ? { ...cur, mode: 'edit' } : null))}
+				onNotify={props.onNotify}
+			/>
 		</div>
 	)
 }
