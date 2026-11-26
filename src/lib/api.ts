@@ -139,4 +139,7 @@ export const api = {
 		roots?: string[]
 		maxDepth?: number
 	}) => request<{ databases: DiscoveredDb[] }>('POST', '/api/discover', params),
+
+	answerSshPrompt: (id: string, payload: { answer?: string; cancelled?: boolean }) =>
+		request<{ ok: true }>('POST', `/api/ssh/prompts/${encodeURIComponent(id)}`, payload),
 }

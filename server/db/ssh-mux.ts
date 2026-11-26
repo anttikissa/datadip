@@ -1,8 +1,19 @@
 // Multiplexed SSH connection pool running a single persistent remote Bun worker per SSH host.
 // Concurrent queries share one SSH pipe via NDJSON-RPC request IDs, avoiding SSH startup latency.
 import type { Subprocess } from 'bun'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { tid } from '../../src/shared/tid.ts'
 import { REMOTE_WORKER_SOURCE } from './remote-worker.ts'
+
+const THIS_DIR = dirname(fileURLToPath(import.meta.url))
+const ASKPASS_SH = join(THIS_DIR, 'ssh-askpass.sh')
+const ASKPASS_TS = join(THIS_DIR, 'ssh-askpass.ts')
+
+export interface SshAskpassConfig {
+	url: string
+	token: string
+}
 
 export interface SshTarget {
 	host: string
@@ -23,43 +34,81 @@ const BOOTSTRAP =
 class SshHostChannel {
 	readonly key: string
 	readonly target: SshTarget
+	readonly dest: string
+	private readonly getAskpass: () => SshAskpassConfig | null
 	private proc: Subprocess<'pipe', 'pipe', 'pipe'> | null = null
 	private pending = new Map<string, PendingRpc>()
 	private readyPromise: Promise<void> | null = null
 	private stderrTail = ''
+	private connectTimer: ReturnType<typeof setTimeout> | null = null
+	private onConnectTimeout: (() => void) | null = null
+	private promptActive = false
 
-	constructor(key: string, target: SshTarget) {
+	constructor(key: string, target: SshTarget, getAskpass: () => SshAskpassConfig | null) {
 		this.key = key
 		this.target = target
+		this.dest = target.user ? `${target.user}@${target.host}` : target.host
+		this.getAskpass = getAskpass
+	}
+
+	setPromptActive(active: boolean) {
+		this.promptActive = active
+		if (!this.onConnectTimeout) return
+		if (active) {
+			if (this.connectTimer) {
+				clearTimeout(this.connectTimer)
+				this.connectTimer = null
+			}
+		} else if (!this.connectTimer) {
+			this.connectTimer = setTimeout(this.onConnectTimeout, 15_000)
+		}
+	}
+
+	private clearConnectTimer() {
+		if (this.connectTimer) {
+			clearTimeout(this.connectTimer)
+			this.connectTimer = null
+		}
+		this.onConnectTimeout = null
 	}
 
 	private ensureConnected(): Promise<void> {
 		if (this.readyPromise) return this.readyPromise
 		this.stderrTail = ''
 
-		const args = [
-			'-o',
-			'BatchMode=yes',
-			'-o',
-			'ConnectTimeout=10',
-			'-o',
-			'ServerAliveInterval=15',
-			'-o',
-			'ServerAliveCountMax=3',
-			'-T',
-		]
+		const askpass = this.getAskpass()
+		const args: string[] = []
+		if (!askpass) {
+			args.push('-o', 'BatchMode=yes')
+		} else {
+			args.push('-o', 'NumberOfPasswordPrompts=3')
+		}
+		args.push('-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-T')
 		if (this.target.port && this.target.port !== 22) {
 			args.push('-p', String(this.target.port))
 		}
-		const dest = this.target.user ? `${this.target.user}@${this.target.host}` : this.target.host
+		const dest = this.dest
 		// Pass worker via a single sh invocation that resolves bun in PATH or ~/.bun/bin/bun
 		const remoteCmd = `BUN=$(command -v bun || echo "$HOME/.bun/bin/bun"); [ -x "$BUN" ] || { echo "bun not found on remote host" >&2; exit 127; }; exec "$BUN" -e ${JSON.stringify(BOOTSTRAP)}`
 		args.push(dest, remoteCmd)
+
+		const env: Record<string, string | undefined> = { ...process.env }
+		if (askpass) {
+			env.SSH_ASKPASS = ASKPASS_SH
+			env.SSH_ASKPASS_REQUIRE = 'force'
+			env.DISPLAY = env.DISPLAY || ':0'
+			env.DATADIP_BUN = process.execPath
+			env.DATADIP_ASKPASS_SCRIPT = ASKPASS_TS
+			env.DATADIP_ASKPASS_URL = askpass.url
+			env.DATADIP_ASKPASS_TOKEN = askpass.token
+			env.DATADIP_ASKPASS_HOST = dest
+		}
 
 		const proc = Bun.spawn(['ssh', ...args], {
 			stdin: 'pipe',
 			stdout: 'pipe',
 			stderr: 'pipe',
+			env,
 		})
 		this.proc = proc
 
@@ -73,22 +122,26 @@ class SshHostChannel {
 
 		this.readyPromise = new Promise<void>((resolve, reject) => {
 			let settled = false
-			const timeout = setTimeout(() => {
+			this.onConnectTimeout = () => {
 				if (!settled) {
 					settled = true
+					this.clearConnectTimer()
 					this.reset(
 						new Error(`SSH connection to ${dest} timed out${this.stderrTail ? `: ${this.stderrTail.trim()}` : ''}`),
 					)
 					reject(new Error(`SSH connection to ${dest} timed out`))
 				}
-			}, 15_000)
+			}
+			if (!this.promptActive) {
+				this.connectTimer = setTimeout(this.onConnectTimeout, 15_000)
+			}
 
 			// Send worker source as the first line on stdin
 			try {
 				proc.stdin.write(JSON.stringify(REMOTE_WORKER_SOURCE) + '\n')
 				proc.stdin.flush()
 			} catch (err) {
-				clearTimeout(timeout)
+				this.clearConnectTimer()
 				settled = true
 				reject(err instanceof Error ? err : new Error(String(err)))
 				return
@@ -113,7 +166,7 @@ class SshHostChannel {
 								continue
 							}
 							if (msg.ready && !settled) {
-								clearTimeout(timeout)
+								this.clearConnectTimer()
 								settled = true
 								resolve()
 								continue
@@ -130,7 +183,7 @@ class SshHostChannel {
 						}
 					}
 				} finally {
-					clearTimeout(timeout)
+					this.clearConnectTimer()
 					const detail = this.stderrTail.trim()
 					const err = new Error(`SSH session to ${dest} closed${detail ? `: ${detail}` : ''}`)
 					if (!settled) {
@@ -214,6 +267,17 @@ class SshHostChannel {
 
 export class SshMuxPool {
 	private channels = new Map<string, SshHostChannel>()
+	private askpass: SshAskpassConfig | null = null
+
+	setAskpassConfig(cfg: SshAskpassConfig | null) {
+		this.askpass = cfg
+	}
+
+	setHostPromptActive(dest: string, active: boolean) {
+		for (const ch of this.channels.values()) {
+			if (ch.dest === dest) ch.setPromptActive(active)
+		}
+	}
 
 	private keyOf(t: SshTarget): string {
 		return `${t.user ?? ''}@${t.host}:${t.port ?? 22}`
@@ -223,7 +287,7 @@ export class SshMuxPool {
 		const key = this.keyOf(target)
 		let ch = this.channels.get(key)
 		if (!ch) {
-			ch = new SshHostChannel(key, target)
+			ch = new SshHostChannel(key, target, () => this.askpass)
 			this.channels.set(key, ch)
 		}
 		return ch

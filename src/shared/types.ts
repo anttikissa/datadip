@@ -31,6 +31,14 @@ export interface ConnectionsPayload {
 	configError: string | null
 }
 
+export interface SshPromptRequest {
+	id: string
+	host: string
+	prompt: string
+	kind: 'secret' | 'confirm'
+	createdAt: string
+}
+
 export interface TableSummary {
 	name: string
 	type: 'table' | 'view'

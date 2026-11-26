@@ -19,6 +19,14 @@ obvious.
   NDJSON-RPC over stdin/stdout. Concurrent queries share one connection
   without repeated SSH handshakes, and using remote Bun avoids stale
   system `sqlite3` binaries.
+- Interactive SSH auth (`server/db/ssh-prompts.ts`, `ssh-askpass.sh`/`.ts`):
+  OpenSSH runs with `SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` talking
+  back to `/api/internal/ssh-askpass` using a per-process `secretId()`
+  token in memory/env. Key passphrases, SSH passwords, 2FA prompts, and
+  unknown host-key confirmations are pushed to the UI over `/api/events`
+  (`ssh-prompts`) and answered via a native `<dialog>` without ever
+  logging or persisting secrets; connect timeouts pause while waiting on
+  the user.
 
 ## Safety & Production Mode
 

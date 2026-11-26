@@ -7,6 +7,7 @@ import { HomeView } from './components/HomeView.tsx'
 import { Omnibar } from './components/Omnibar.tsx'
 import { RecentModal } from './components/RecentModal.tsx'
 import { ScratchpadView } from './components/ScratchpadView.tsx'
+import { SshPromptModal } from './components/SshPromptModal.tsx'
 import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
 import { clearConsoleRun, getConsoleRun } from './lib/console-runs.ts'
@@ -38,6 +39,7 @@ import type {
 	DatabaseSchema,
 	RecentTable,
 	Scratchpad,
+	SshPromptRequest,
 } from './shared/types.ts'
 import { type AppRoute, formatRoute, parseRoute } from './shared/url.ts'
 
@@ -74,6 +76,7 @@ export function App() {
 
 	// Modals
 	const [confirmState, setConfirmState] = createSignal<ConfirmState | null>(null)
+	const [sshPrompts, setSshPrompts] = createSignal<SshPromptRequest[]>([])
 	const [connModalOpen, setConnModalOpen] = createSignal(false)
 	const [editingConn, setEditingConn] = createSignal<ConnectionConfig | null>(null)
 	const [discoverOpen, setDiscoverOpen] = createSignal(false)
@@ -496,6 +499,13 @@ export function App() {
 							.catch(() => {})
 					}
 					initialEvent = false
+				} catch {}
+			})
+
+			source.addEventListener('ssh-prompts', (ev) => {
+				try {
+					const payload = parseAson((ev as MessageEvent).data) as { prompts?: SshPromptRequest[] }
+					setSshPrompts(payload.prompts ?? [])
 				} catch {}
 			})
 
@@ -1384,6 +1394,22 @@ export function App() {
 
 			{/* Modals */}
 			<ConfirmDialog state={confirmState()} onClose={() => setConfirmState(null)} />
+
+			<SshPromptModal
+				prompt={sshPrompts()[0] ?? null}
+				onSubmit={async (id, ans) => {
+					try {
+						await api.answerSshPrompt(id, { answer: ans })
+					} catch (err) {
+						notify(err instanceof Error ? err.message : String(err), 'error')
+					}
+				}}
+				onCancel={async (id) => {
+					try {
+						await api.answerSshPrompt(id, { cancelled: true })
+					} catch {}
+				}}
+			/>
 
 			<ConnectionModal
 				open={connModalOpen()}

@@ -15,6 +15,7 @@ import { PostgresAdapterStub } from './postgres-stub.ts'
 import { LocalSqliteAdapter } from './sqlite-local.ts'
 import { SshSqliteAdapter } from './sqlite-ssh.ts'
 import { SshMuxPool } from './ssh-mux.ts'
+import { SshPromptBroker } from './ssh-prompts.ts'
 import type { DbAdapter } from './types.ts'
 
 export const PROD_RW_TTL_MS = 10 * 60 * 1000 // 10-minute auto-relock on production databases
@@ -34,6 +35,7 @@ interface AdapterEntry {
 export class ConnectionManager {
 	readonly store: DataStore
 	readonly sshPool = new SshMuxPool()
+	readonly sshPrompts: SshPromptBroker
 	private adapters = new Map<string, AdapterEntry>()
 	private rwStates = new Map<string, RwState>()
 	private subscribers = new Set<(payload: ConnectionsPayload) => void>()
@@ -41,10 +43,24 @@ export class ConnectionManager {
 
 	constructor(store: DataStore) {
 		this.store = store
+		this.sshPrompts = new SshPromptBroker((host, active) => {
+			this.sshPool.setHostPromptActive(host, active)
+		})
 		this.unsubStore = this.store.onConnectionsChange(() => {
 			this.reconcileActiveConnections()
 			this.notifySubscribers()
 		})
+	}
+
+	setServerUrl(url: string) {
+		this.sshPool.setAskpassConfig({
+			url: `${url}/api/internal/ssh-askpass`,
+			token: this.sshPrompts.token,
+		})
+	}
+
+	hasSubscribers(): boolean {
+		return this.subscribers.size > 0
 	}
 
 	private signature(c: ConnectionConfig): string {
@@ -388,6 +404,7 @@ export class ConnectionManager {
 	closeAll() {
 		this.unsubStore()
 		this.subscribers.clear()
+		this.sshPrompts.closeAll()
 		for (const entry of this.adapters.values()) entry.adapter.close()
 		this.adapters.clear()
 		this.sshPool.closeAll()

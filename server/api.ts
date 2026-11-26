@@ -43,7 +43,9 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 						} catch {}
 					}
 					send('connections', manager.getConnectionsPayload())
+					send('ssh-prompts', { prompts: manager.sshPrompts.list() })
 					const unsub = manager.subscribe((payload) => send('connections', payload))
+					const unsubPrompts = manager.sshPrompts.subscribe((prompts) => send('ssh-prompts', { prompts }))
 					const ping = setInterval(() => {
 						try {
 							controller.enqueue(encoder.encode(': ping\n\n'))
@@ -52,6 +54,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					ping.unref?.()
 					cleanup = () => {
 						unsub()
+						unsubPrompts()
 						clearInterval(ping)
 					}
 					req.signal.addEventListener(
@@ -78,6 +81,37 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 					connection: 'keep-alive',
 				},
 			})
+		}
+
+		// Internal SSH_ASKPASS callback (authenticated by per-process secretId token in env)
+		if (path === '/api/internal/ssh-askpass' && method === 'POST') {
+			if (!manager.sshPrompts.verifyToken(req.headers.get('x-datadip-askpass-token'))) {
+				throw new HttpError(403, 'Forbidden')
+			}
+			const body = await readBody<{ host?: string; prompt?: string; askpassMode?: string }>(req)
+			const result = await manager.sshPrompts.requestPrompt(
+				{
+					host: body.host ?? 'remote',
+					prompt: body.prompt ?? 'SSH authentication required',
+					askpassMode: body.askpassMode,
+				},
+				req.signal,
+				{ hasUiClient: () => manager.hasSubscribers() },
+			)
+			return asonResponse(result)
+		}
+
+		// Interactive SSH auth prompts for UI clients
+		if (path === '/api/ssh/prompts' && method === 'GET') {
+			return asonResponse({ prompts: manager.sshPrompts.list() })
+		}
+		const sshPromptMatch = /^\/api\/ssh\/prompts\/([^/]+)$/.exec(path)
+		if (sshPromptMatch && method === 'POST') {
+			const promptId = decodeURIComponent(sshPromptMatch[1]!)
+			const body = await readBody<{ answer?: string; cancelled?: boolean }>(req)
+			const ok = manager.sshPrompts.respond(promptId, body)
+			if (!ok) throw new HttpError(404, 'SSH prompt expired or already answered')
+			return asonResponse({ ok: true })
 		}
 
 		// Preferences

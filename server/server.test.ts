@@ -333,6 +333,77 @@ describe('DataDip server API & safety boundaries', () => {
 		await expect(pending).rejects.toThrow(/cancelled/i)
 	})
 
+	test('SSH_ASKPASS broker authenticates via secret token, relays answers, and handles cancellation', async () => {
+		// Unauthenticated internal askpass request must be rejected
+		const badReq = new Request('http://127.0.0.1:4747/api/internal/ssh-askpass', {
+			method: 'POST',
+			headers: { 'content-type': 'text/plain; charset=utf-8', 'x-datadip-askpass-token': 'wrong' },
+			body: "{ host: 'example.com', prompt: 'Enter passphrase for key:' }",
+		})
+		const badRes = await handleApiRequest(badReq, manager)
+		expect(badRes.status).toBe(403)
+
+		// Register a dummy SSE subscriber so the broker knows a UI client is present
+		const unsub = manager.subscribe(() => {})
+		try {
+			// Start an askpass prompt request (blocks until UI answers)
+			const askReq = new Request('http://127.0.0.1:4747/api/internal/ssh-askpass', {
+				method: 'POST',
+				headers: {
+					'content-type': 'text/plain; charset=utf-8',
+					'x-datadip-askpass-token': manager.sshPrompts.token,
+				},
+				body: "{ host: 'db.example.com', prompt: 'Enter passphrase for key /home/user/.ssh/id_ed25519:' }",
+			})
+			const askPromise = handleApiRequest(askReq, manager)
+
+			await new Promise((r) => setTimeout(r, 20))
+			const listRes = await handleApiRequest(new Request('http://127.0.0.1:4747/api/ssh/prompts'), manager)
+			const listData = parseAson(await listRes.text()) as { prompts: { id: string; kind: string; host: string }[] }
+			expect(listData.prompts).toHaveLength(1)
+			expect(listData.prompts[0]!.kind).toBe('secret')
+			expect(listData.prompts[0]!.host).toBe('db.example.com')
+
+			// Answer via UI endpoint
+			const ansRes = await handleApiRequest(
+				new Request(`http://127.0.0.1:4747/api/ssh/prompts/${listData.prompts[0]!.id}`, {
+					method: 'POST',
+					headers: { 'content-type': 'text/plain; charset=utf-8' },
+					body: "{ answer: 's3cr3t-pass' }",
+				}),
+				manager,
+			)
+			expect(ansRes.status).toBe(200)
+
+			const askRes = await askPromise
+			expect(askRes.status).toBe(200)
+			const askData = parseAson(await askRes.text()) as { ok: boolean; answer?: string }
+			expect(askData.ok).toBe(true)
+			expect(askData.answer).toBe('s3cr3t-pass')
+			expect(manager.sshPrompts.list()).toHaveLength(0)
+
+			// Verify host-key confirm classification + cancellation
+			const confirmReq = new Request('http://127.0.0.1:4747/api/internal/ssh-askpass', {
+				method: 'POST',
+				headers: {
+					'content-type': 'text/plain; charset=utf-8',
+					'x-datadip-askpass-token': manager.sshPrompts.token,
+				},
+				body: "{ host: 'new.example.com', prompt: 'Are you sure you want to continue connecting (yes/no/[fingerprint])?', askpassMode: 'confirm' }",
+			})
+			const confirmPromise = handleApiRequest(confirmReq, manager)
+			await new Promise((r) => setTimeout(r, 20))
+			const p2 = manager.sshPrompts.list()[0]!
+			expect(p2.kind).toBe('confirm')
+			manager.sshPrompts.respond(p2.id, { cancelled: true })
+			const confirmData = parseAson(await (await confirmPromise).text()) as { ok: boolean; cancelled?: boolean }
+			expect(confirmData.ok).toBe(false)
+			expect(confirmData.cancelled).toBe(true)
+		} finally {
+			unsub()
+		}
+	})
+
 	test('readServerInfo reads server.ason without opening state.db', () => {
 		const probeDir = mkdtempSync(join(tmpdir(), 'datadip-probe-'))
 		try {

@@ -110,6 +110,7 @@ async function runServe(opts: CliArgs) {
 
 	const actualPort = server.port ?? boundPort
 	const serverUrl = `http://${opts.host}:${actualPort}`
+	manager.setServerUrl(serverUrl)
 	store.writeServerInfo({
 		pid: process.pid,
 		host: opts.host,
