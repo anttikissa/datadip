@@ -43,7 +43,7 @@ export function ChangelogModal(props: { open: boolean; onClose: () => void }) {
 			}}
 		>
 			<div class="modal-head">
-				<span style="display:inline-flex;align-items:center;gap:8px">
+				<span style="display:inline-flex;align-items:baseline;gap:8px">
 					<span>What&apos;s New in DataDip</span>
 					<span class="tag mono" style="color:var(--accent);border-color:var(--accent)">
 						v{APP_VERSION}
@@ -59,7 +59,7 @@ export function ChangelogModal(props: { open: boolean; onClose: () => void }) {
 					{(rel, idx) => (
 						<section class={['changelog-release', { latest: idx() === 0 }]}>
 							<div class="changelog-release-head">
-								<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+								<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
 									<span class="changelog-ver mono">v{rel.version}</span>
 									<Show when={idx() === 0}>
 										<span class="tag" style="color:var(--ok);border-color:var(--ok)">

@@ -185,7 +185,7 @@ export function RecentModal(props: {
 											onMouseEnter={() => setActiveIdx(idx())}
 											onClick={() => activate(entry)}
 										>
-											<span style="display:flex;align-items:center;gap:8px;min-width:0">
+											<span class="omnibar-item-main">
 												<IconTable />
 												<span class="mono" style="font-weight:600">
 													{rec.tableName}
@@ -195,14 +195,14 @@ export function RecentModal(props: {
 													<span class="tag prod">PROD</span>
 												</Show>
 											</span>
-											<span style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0">
+											<span style="display:inline-flex;align-items:baseline;gap:8px;flex-shrink:0">
 												<span class="mono" style="font-size:11px;color:var(--ink-muted)">
 													{formatRelative(rec.visitedAt)}
 												</span>
 												<button
 													type="button"
 													class="icon-btn ghost"
-													style="width:22px;height:22px"
+													style="width:22px;height:22px;align-self:center"
 													aria-label={`Remove ${rec.tableName} from recents`}
 													onClick={(e) => {
 														e.stopPropagation()
@@ -226,7 +226,7 @@ export function RecentModal(props: {
 											onMouseEnter={() => setActiveIdx(idx())}
 											onClick={() => activate(entry)}
 										>
-											<span style="display:flex;align-items:center;gap:8px;min-width:0">
+											<span class="omnibar-item-main">
 												{c.location === 'ssh' ? <IconServer /> : <IconDisk />}
 												<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
 													{c.name}

@@ -89,6 +89,15 @@ because `WKWebView`'s `Edit -> Select All` invokes `selectAll:` directly
 and selects the entire document when focus is on a non-input element
 like `<pre>`.
 
+Adjacent text on the same horizontal row (especially mixed font sizes,
+weights, or metadata like column names beside types, counts, dates, or
+inline badges) must share a typographic baseline (`align-items: baseline`),
+never `align-items: center`. When a row mixes text with icons, dots,
+checkboxes, or icon buttons, keep `align-items: baseline` on the flex
+container and put `align-self: center` on the non-text graphics/controls
+(and inside pill tags containing an icon, use `align-items: baseline`
+with `svg { align-self: center }` so the tag exports its text baseline).
+
 Always use `isPrimaryMod(e)` (`src/lib/shortcuts.ts`) rather than
 `e.metaKey || e.ctrlKey` for app shortcuts so macOS Emacs editing keys
 (`Ctrl+A/E/K/B/L/P/N`) stay free; never intercept browser-owned

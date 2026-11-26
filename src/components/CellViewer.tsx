@@ -111,7 +111,7 @@ export function CellViewer(props: {
 					aria-label={`Cell ${st().colName}`}
 				>
 					<div class="cell-viewer-head">
-						<div style="display:flex;align-items:center;gap:6px;min-width:0">
+						<div style="display:flex;align-items:baseline;gap:6px;min-width:0">
 							<span class="mono" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
 								{st().colName}
 							</span>

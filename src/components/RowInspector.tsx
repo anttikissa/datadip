@@ -138,7 +138,7 @@ export function RowInspector(props: {
 									return (
 										<div class="inspector-field">
 											<div class="inspector-field-head">
-												<span style="display:inline-flex;align-items:center;gap:5px">
+												<span style="display:inline-flex;align-items:baseline;gap:5px">
 													<strong class="mono">{col.name}</strong>
 													<span class="th-type">{col.type}</span>
 													<Show when={col.primaryKey > 0}>

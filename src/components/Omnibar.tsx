@@ -359,7 +359,7 @@ export function Omnibar(props: {
 							onMouseEnter={() => setActiveIdx(idx())}
 							onClick={() => item.run()}
 						>
-							<span style="display:flex;align-items:center;gap:8px;min-width:0">
+							<span class="omnibar-item-main">
 								<span class={['tag', { prod: item.kind === 'PROD DB' }]}>{item.kind}</span>
 								<span class="mono" style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
 									{item.label}
