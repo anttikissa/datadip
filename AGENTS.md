@@ -4,9 +4,10 @@ A utilitarian database browser, foreign-key navigator, and SQL console
 IDE for local and SSH-remote databases (SQLite first, adapter-ready for
 Postgres). Runs as a localhost web server and native macOS WKWebView app
 (`DataDip.app`). Read DECISIONS.md before changing behavior. Record each
-new decision there, by topic.
+new decision there, by topic. When working on `mac/`, also read
+`mac/AGENTS.md`.
 
-## Code
+## General coding guidance
 
 Climb the lazy ladder: skip code that need not exist; prefer the
 standard library, native platform features (Bun, Web APIs), installed
@@ -17,20 +18,19 @@ accessibility or explicit requirements.
 Use as few dependencies as possible, above all ones that reach users
 (the server at runtime, the client bundle); dev-only type packages
 such as `@types/bun` are fine. No new dependency without the user's
-approval. Propose one only with its exact line count, including all
-transitive dependencies, with the version and the counting method.
+approval.
 
 Avoid defensive, just-in-case code. Rate how often each case occurs:
 always, often, sometimes, rarely, almost never or practically never.
 For a case rated "rarely" or below, ask the user whether to handle it
 before you write code for it.
 
-Every bug fix starts with its class. Find the root cause: the design
-choice or missing rule that made this bug possible, not only the line
-that failed. Search for its other instances on every client and fix
-them, or list them for the user. Then add a rule to this file (or the
-spec) that prevents the whole class, and say in the reply which rule
-you added. If no rule can prevent it, say why.
+Generalize every bug fix. Find the root cause: the design choice or
+missing rule that made this bug possible. Search for its other
+instances, fix them, or list them for the user if the fix is not
+straightforward. Then add a rule to this file (or `mac/AGENTS.md` for
+macOS app rules) that prevents the whole class of bugs. State to the
+user which rule you added. If no rule can prevent it, say why.
 
 Start each source file with a comment that says why the module exists.
 
@@ -53,6 +53,10 @@ system's protocol requires them.
 Stack: Bun, bun:sqlite, TypeScript. Format with `bunx oxfmt`.
 Typecheck with `bun check`.
 
+## Specific coding details
+
+Reference rules for agents (humans can skip this section).
+
 Open every SQLite database with `PRAGMA busy_timeout=5000;` BEFORE
 `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`. Without
 `busy_timeout` set first, concurrent openers crash with
@@ -64,25 +68,13 @@ duplicate-server check in `serve`) must read only `server.ason` via
 `readServerInfo()` and never instantiate `DataStore`, open `state.db`,
 or start file watchers.
 
-In `mac/DataDip.swift`, `WKWebView` error delegates
-(`didFailProvisionalNavigation`, `didFail`) must always ignore
-`NSURLErrorCancelled` (`-999`), because replacing the startup status
-HTML with the live URL (or reloading) cancels the prior provisional
-navigation and calling `showError` would abort the real page load.
-
-In `mac/DataDip.swift`, set `config.preferences.tabFocusesLinks = true`
-on `WKWebViewConfiguration`, because macOS WebKit omits `<button>`,
-`<a>`, `<select>`, and checkboxes from Tab navigation by default when
-macOS Keyboard Navigation is off. In the web client, trap and wrap
-`Tab` / `Shift-Tab` across visible focusable descendants of the topmost
-open `dialog:modal` so focus never escapes to `document.body` or lands
-on the `<dialog>` container itself in WebKit or Safari.
-
 The web client must track local server reachability via `/api/events`
-(SSE) and display a clear offline status banner that auto-reconnects;
-`DataDip.app` must auto-restart `datadip serve` when the server goes
-down (via `WKScriptMessageHandler` `ensureServer` and connect-failure
-recovery).
+(SSE) and display a clear offline status banner that auto-reconnects.
+
+In the web client, trap and wrap `Tab` / `Shift-Tab` across visible
+focusable descendants of the topmost open `dialog:modal` so focus never
+escapes to `document.body` or lands on the `<dialog>` container itself
+in WebKit or Safari.
 
 In the SolidJS web client, every controlled `<select>` whose `<option>`
 or `<optgroup>` children are rendered dynamically (`<For>` / `<Show>`)
@@ -93,16 +85,15 @@ because replacing `<option>` DOM nodes resets the browser's
 
 Read-only text viewer popovers (e.g. `CellViewer`) must render selectable
 text in an auto-focused `<textarea readonly>` (and handle `Cmd/Ctrl+A`),
-because `DataDip.app`'s `Edit -> Select All` menu invokes `selectAll:`
-on the `WKWebView` directly and selects the entire document when focus
-is on a non-input element like `<pre>`.
+because `WKWebView`'s `Edit -> Select All` invokes `selectAll:` directly
+and selects the entire document when focus is on a non-input element
+like `<pre>`.
 
 Always use `isPrimaryMod(e)` (`src/lib/shortcuts.ts`) rather than
 `e.metaKey || e.ctrlKey` for app shortcuts so macOS Emacs editing keys
 (`Ctrl+A/E/K/B/L/P/N`) stay free; never intercept browser-owned
 shortcuts (`Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`) outside `DataDip.app`;
-and never bind editor keys (`Cmd+[`, `Cmd+]`) as `NSMenu` key
-equivalents in `mac/DataDip.swift` or hijack them in capture-phase JS
+and never hijack editor keys (`Cmd+[`, `Cmd+]`) in capture-phase JS
 listeners when `isEditableTarget(e.target)` is true.
 
 ## Tests
