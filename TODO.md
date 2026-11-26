@@ -9,7 +9,7 @@ Collected from 6 developer persona reviews (Startup Founding Eng, Staff Data/Ana
 - [x] **Instant ad-hoc file opening** (`datadip ./app.db`, `POST /api/connections/open-file`, plus Finder double-click, Dock drop, and `Cmd+O` in `DataDip.app`)
 - [x] **Full-result file export** (CSV, TSV, JSON, Markdown, SQL INSERT -- download to disk up to 100k rows, not clipboard-only or capped at current page / 2,000 rows) (`server/export.ts`, `POST /api/connections/:id/export`)
 - [x] **Safe large-table browsing** (skip automatic exact `COUNT(*)` on large SQLite >50 MB & Postgres >50k-row tables, show estimated/unknown totals)
-- [x] **README overhaul & MIT LICENSE** (`LICENSE`, `README.md` with SQLite & PostgreSQL support on line 1, no ASON/internal jargon, `./install` disclosure) -- still todo: screenshots/GIF
+- [x] **README overhaul, screenshots/GIF & MIT LICENSE** (`LICENSE`, `README.md` with SQLite & PostgreSQL support on line 1, live demo GIF + screenshots, no ASON/internal jargon, `./install` disclosure, plus static marketing site in `site/`)
 - [x] **Console result grid resize & sticky first-column freeze** (column drag-resize + double-click auto-fit + `Freeze 1st` toggle in both `TableView` and `ConsoleView`)
 - [x] **Local SQLite live `.db` / `-wal` auto-refresh** (`fs.watch` + SSE `db-changed` + `Live` toggle in `TableView`, paused automatically while edits are staged)
 - [x] **Keyboard shortcuts parity** (completed in `4c48d8d`: fixed `Cmd+[` / `Cmd+]` in editor, macOS Emacs keys, `Cmd+R` data refresh, `Cmd+C`/`Cmd+Shift+C`, `Cmd+S`, `Cmd+F`, `Cmd+P`, `Cmd+.` cancel, `Cmd+T`/`Cmd+W` tabs, console result grid nav)

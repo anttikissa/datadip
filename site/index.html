@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>DataDip — Browse SQLite &amp; PostgreSQL like the web</title>
+		<meta
+			name="description"
+			content="A fast, keyboard-first SQLite and PostgreSQL browser, foreign-key navigator, and SQL console for local files and SSH servers. Read-only by default. Native macOS app, no Electron, MIT open source."
+		/>
+		<meta property="og:title" content="DataDip — Browse SQLite &amp; PostgreSQL like the web" />
+		<meta
+			property="og:description"
+			content="Click foreign keys to jump across tables, use Back/Forward without losing filters, and paste any ID into Cmd+K to find it everywhere. Read-only by default. No Electron."
+		/>
+		<meta property="og:type" content="website" />
+		<meta property="og:image" content="./assets/shot-browser-dark.png" />
+		<link rel="icon" type="image/png" sizes="32x32" href="./assets/icon-32.png" />
+		<link rel="apple-touch-icon" href="./assets/icon-192.png" />
+		<link rel="stylesheet" href="./styles.css" />
+		<script>
+			;(() => {
+				try {
+					const saved = localStorage.getItem('datadip-site:theme')
+					const theme =
+						saved === 'dark' || saved === 'light'
+							? saved
+							: window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+					document.documentElement.setAttribute('data-theme', theme)
+				} catch {}
+			})()
+		</script>
+	</head>
+	<body>
+		<header class="nav">
+			<div class="container nav-inner">
+				<a class="brand" href="#top" aria-label="DataDip home">
+					<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
+					<span class="brand-name">DataDip</span>
+					<span class="version-pill">v0.1.0</span>
+				</a>
+
+				<nav class="nav-links" aria-label="Primary">
+					<a href="#features">Features</a>
+					<a href="#compare">Compare</a>
+					<a href="#safety">Safety</a>
+					<a href="#shortcuts">Shortcuts</a>
+					<a href="#install">Install</a>
+					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
+				</nav>
+
+				<div class="nav-actions">
+					<button
+						type="button"
+						class="btn ghost icon-btn"
+						id="theme-toggle"
+						aria-label="Toggle dark and light theme"
+						title="Toggle theme"
+					>
+						<span class="theme-icon-sun" aria-hidden="true">&#9788;</span>
+						<span class="theme-icon-moon" aria-hidden="true">&#9790;</span>
+					</button>
+					<a class="btn primary sm" href="./downloads/DataDip-0.1.0-arm64.dmg" download>Download DMG</a>
+				</div>
+			</div>
+		</header>
+
+		<main id="top">
+			<!-- Hero -->
+			<section class="hero">
+				<div class="container">
+					<div class="hero-copy">
+						<div class="eyebrow">
+							<span class="dot"></span>
+							SQLite &amp; PostgreSQL &middot; Native macOS (No Electron) &middot; MIT Open Source
+						</div>
+						<h1>Browse your database<br />like the web.</h1>
+						<p class="lead">
+							A fast, keyboard-first database browser, foreign-key navigator, and SQL console for local files and
+							remote SSH servers. Click foreign keys to jump across tables, hit Back without losing filters, and
+							paste any ID into <kbd>&#8984;K</kbd> to find matching rows everywhere.
+						</p>
+
+						<div class="hero-ctas">
+							<a class="btn primary lg" href="./downloads/DataDip-0.1.0-arm64.dmg" download>
+								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
+								Download for macOS (Apple Silicon)
+							</a>
+							<a class="btn secondary lg" href="#install">Build from Source / Linux</a>
+						</div>
+
+						<div class="trust-row">
+							<span>Apple Signed &amp; Notarized DMG (46 MB)</span>
+							<span class="sep">&middot;</span>
+							<span>Read-only by default</span>
+							<span class="sep">&middot;</span>
+							<span>Zero telemetry</span>
+							<span class="sep">&middot;</span>
+							<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">Source on GitHub</a>
+						</div>
+					</div>
+
+					<!-- Interactive Media Showcase -->
+					<div class="stage-wrap">
+						<div class="mac-window">
+							<div class="mac-chrome">
+								<div class="traffic" aria-hidden="true">
+									<span class="tl red"></span>
+									<span class="tl yellow"></span>
+									<span class="tl green"></span>
+								</div>
+								<div class="mac-title mono" id="stage-title">DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)</div>
+								<div class="mac-chrome-actions">
+									<button type="button" class="chip-btn" id="video-toggle" aria-label="Pause demo video">Pause</button>
+									<button type="button" class="chip-btn" id="zoom-btn" hidden>Zoom</button>
+								</div>
+							</div>
+
+							<div class="stage-body">
+								<video
+									id="hero-video"
+									class="stage-media"
+									src="./assets/datadip-demo.mp4"
+									poster="./assets/shot-browser-dark.png"
+									autoplay
+									loop
+									muted
+									playsinline
+								></video>
+								<img
+									id="hero-image"
+									class="stage-media"
+									src="./assets/shot-browser-dark.png"
+									alt="DataDip screenshot"
+									hidden
+								/>
+							</div>
+						</div>
+
+						<div class="stage-tabs" role="tablist" aria-label="Product screenshots">
+							<button
+								type="button"
+								class="stage-tab active"
+								role="tab"
+								aria-selected="true"
+								data-kind="video"
+								data-src="./assets/datadip-demo.mp4"
+								data-title="DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)"
+							>
+								<span class="live-pip"></span> Live Demo
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-browser-dark.png"
+								data-title="Table Browser — Clickable foreign keys, keyset paging, live .db auto-refresh"
+							>
+								Table Browser
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-inspector-light.png"
+								data-title="Row Inspector — Incoming 'Referenced by' reverse foreign-key counts &amp; fields"
+							>
+								Reverse FKs
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-console-dark.png"
+								data-title="SQL Console — Parallel worker execution, clickable FK pills, instant exports"
+							>
+								SQL Console
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-prod-safety.png"
+								data-title="Production Safety — Crimson top bar, 10-min RW timer, staged SQL preview"
+							>
+								Prod Safety
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-omnibar-dark.png"
+								data-title="Omnibar (Cmd+K) — Paste any ID to search PKs and FKs across every table"
+							>
+								Find ID (&#8984;K)
+							</button>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- Supported Engines Strip -->
+			<section class="engines-strip">
+				<div class="container engines-grid">
+					<div class="engine-item">
+						<div class="engine-head">
+							<span class="badge ok">Ready</span>
+							<strong>SQLite (Local)</strong>
+						</div>
+						<p>Native <code>bun:sqlite</code>, read-only handles by default, live <code>.db</code>/<code>-wal</code> auto-refresh, Finder double-click &amp; <code>datadip ./app.db</code>.</p>
+					</div>
+					<div class="engine-item">
+						<div class="engine-head">
+							<span class="badge ok">Ready</span>
+							<strong>PostgreSQL (Direct TLS)</strong>
+						</div>
+						<p>Built-in <code>Bun.SQL</code>, paste any <code>DATABASE_URL</code> (Supabase, Neon, RDS), enforces <code>BEGIN READ ONLY</code>, real <code>CancelRequest</code>.</p>
+					</div>
+					<div class="engine-item">
+						<div class="engine-head">
+							<span class="badge ok">Ready</span>
+							<strong>PostgreSQL over SSH</strong>
+						</div>
+						<p>Local OpenSSH port forwarding (<code>ssh -N -L</code>) honoring <code>~/.ssh/config</code> &amp; <code>ProxyJump</code>. Zero software needed on remote host.</p>
+					</div>
+					<div class="engine-item">
+						<div class="engine-head">
+							<span class="badge ok">Ready</span>
+							<strong>SQLite over SSH</strong>
+						</div>
+						<p>One persistent multiplexed SSH session per host with parallel query workers and in-app <code>SSH_ASKPASS</code> prompts for keys &amp; 2FA.</p>
+					</div>
+				</div>
+			</section>
+
+			<!-- Core Features Grid -->
+			<section id="features" class="section">
+				<div class="container">
+					<div class="section-head">
+						<h2>Built for debugging real production data</h2>
+						<p>No bloated wizard dialogs, no JVM warm-up, no Electron RAM tax. Just the tools you actually reach for during an incident or schema deep dive.</p>
+					</div>
+
+					<div class="bento-grid">
+						<article class="card">
+							<div class="card-kicker mono">01 / NAVIGATION</div>
+							<h3>Web-native foreign-key traversal</h3>
+							<p>
+								Every foreign key is a real link. Hover to peek the target row, click to jump straight to it, and press
+								<kbd>Space</kbd> on any row to see incoming <strong>Referenced by</strong> counts across every table.
+								Every view lives in browser history, so <kbd>&#8984;[</kbd> / <kbd>&#8984;]</kbd> and trackpad swipes
+								return to your exact filters and scroll position.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">02 / SAFETY</div>
+							<h3>Read-only by default, crimson in prod</h3>
+							<p>
+								Every database opens Read-Only at the driver and SQL-transaction layer. Production databases display a
+								persistent crimson bar and auto-relock Read-Write after 10 minutes idle. Inline edits are staged with a
+								parameterized SQL preview before committing, and destructive SQL (<code>DROP</code>, <code>ALTER</code>,
+								<code>DELETE</code>/<code>UPDATE</code> without <code>WHERE</code>) always requires confirmation.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">03 / SQL CONSOLE</div>
+							<h3>Parallel, cancellable SQL consoles</h3>
+							<p>
+								Open tabbed or side-by-side split consoles (<kbd>&#8984;E</kbd>) powered by CodeMirror 6 with live schema
+								autocomplete, SQL linting, formatting (<kbd>&#8984;&#8679;F</kbd>), active-statement execution
+								(<kbd>&#8984;&#8629;</kbd>), and <code>EXPLAIN</code>. Queries run on dedicated workers and cancel
+								cleanly mid-flight with <kbd>&#8984;.</kbd>.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">04 / OMNIBAR</div>
+							<h3>Paste a ticket ID, find it everywhere</h3>
+							<p>
+								Hit <kbd>&#8984;K</kbd> to jump to any table, column, saved console, or connection — or paste an ID from
+								a support ticket or Sentry trace and run <strong>Find ID in DB</strong> to locate matching primary and
+								foreign keys across every table in one shot.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">05 / EXPORTS &amp; SCALE</div>
+							<h3>Large-table guards &amp; full exports</h3>
+							<p>
+								Keyset cursor pagination stays fast deep into tables, and automatic full-table <code>COUNT(*)</code> is
+								skipped on large databases (using <code>pg_class.reltuples</code> / <code>sqlite_stat1</code>). Export
+								full table views or query results up to 100k rows as CSV, TSV, JSON, Markdown, or SQL
+								<code>INSERT</code>.
+							</p>
+						</article>
+
+						<article class="card">
+							<div class="card-kicker mono">06 / LOCAL-FIRST</div>
+							<h3>Live <code>.db</code> auto-refresh &amp; SSH askpass</h3>
+							<p>
+								Local SQLite tables watch <code>.db</code> / <code>-wal</code> files and refresh automatically as your
+								app writes (pausing whenever you have unsaved edits). Over SSH, encrypted key passphrases, 2FA prompts,
+								and unknown host-key checks open in a native in-app dialog and are never logged or saved.
+							</p>
+						</article>
+					</div>
+				</div>
+			</section>
+
+			<!-- Deep-Dive Visual Spotlights -->
+			<section id="safety" class="section alt-bg">
+				<div class="container spotlights">
+					<div class="spotlight">
+						<div class="spotlight-copy">
+							<span class="badge accent">Relational Navigation</span>
+							<h3>Follow relationships in both directions</h3>
+							<p>
+								Click a foreign-key pill to jump from <code>invoices.org_id</code> straight into
+								<code>organizations</code>. Press <kbd>Space</kbd> on any row to inspect formatted fields and see every
+								table referencing that record — with live row counts you can click straight into.
+							</p>
+							<ul class="check-list">
+								<li>Hover any FK cell to peek the target row without leaving your table</li>
+								<li>Pin the first column (<strong>Freeze 1st</strong>) and drag-resize or double-click auto-fit headers</li>
+								<li>Copy cells (<kbd>&#8984;C</kbd>) or full rows with headers as TSV (<kbd>&#8984;&#8679;C</kbd>)</li>
+							</ul>
+						</div>
+						<figure class="spotlight-media">
+							<img
+								src="./assets/shot-inspector-light.png"
+								alt="DataDip Row Inspector showing incoming foreign key counts across tables in light mode"
+								loading="lazy"
+								class="zoomable"
+							/>
+						</figure>
+					</div>
+
+					<div class="spotlight reverse">
+						<div class="spotlight-copy">
+							<span class="badge accent">SQL Console</span>
+							<h3>Clickable foreign keys right inside SQL results</h3>
+							<p>
+								DataDip detects the source table of your query and turns foreign-key columns in the result grid into
+								clickable links. Run multiple queries concurrently without blocking table browsing, split two consoles
+								side by side, and download full results in one click.
+							</p>
+							<ul class="check-list">
+								<li>Active-statement highlight + run single (<kbd>&#8984;&#8629;</kbd>) or run all (<kbd>&#8984;&#8679;&#8629;</kbd>)</li>
+								<li>Real server-side cancellation (<kbd>&#8984;.</kbd>) on SQLite workers and PostgreSQL</li>
+								<li>Persistent query history (<kbd>&#8984;&#8679;H</kbd>) and saved consoles stored locally</li>
+							</ul>
+						</div>
+						<figure class="spotlight-media">
+							<img
+								src="./assets/shot-console-dark.png"
+								alt="DataDip SQL Console running a JOIN query with clickable foreign keys in dark mode"
+								loading="lazy"
+								class="zoomable"
+							/>
+						</figure>
+					</div>
+
+					<div class="spotlight">
+						<div class="spotlight-copy">
+							<span class="badge prod">Production Guardrails</span>
+							<h3>You should never wonder if you are in prod</h3>
+							<p>
+								Flag a connection as Production and DataDip paints a crimson top edge and <code>PRODUCTION</code> badge
+								across every screen. Arming Read-Write shows a live 10-minute auto-relock countdown, and inline grid
+								changes always preview the exact parameterized <code>UPDATE</code> SQL before committing in a single
+								transaction.
+							</p>
+							<ul class="check-list">
+								<li>Driver-level Read-Only handles (<code>{ readonly: true }</code> / <code>BEGIN READ ONLY</code>)</li>
+								<li>Staged inline edits highlighted in amber with SQL preview &amp; one-click Discard</li>
+								<li>Destructive SQL confirmation dialog on every database, not only prod</li>
+							</ul>
+						</div>
+						<figure class="spotlight-media">
+							<img
+								src="./assets/shot-prod-safety.png"
+								alt="DataDip Production Safety bar with Read-Write timer and Commit Pending Edits SQL preview"
+								loading="lazy"
+								class="zoomable"
+							/>
+						</figure>
+					</div>
+
+					<div class="spotlight reverse">
+						<div class="spotlight-copy">
+							<span class="badge accent">Omnibar &middot; &#8984;K</span>
+							<h3>Paste an ID from a support ticket. Jump straight to the row.</h3>
+							<p>
+								Stop writing five <code>SELECT * FROM ... WHERE id = ...</code> queries just to figure out which table
+								owns an opaque ID. Paste it into <kbd>&#8984;K</kbd>, hit <strong>Find ID in DB</strong>, and jump
+								directly to every matching primary or foreign key row.
+							</p>
+							<ul class="check-list">
+								<li>Fuzzy-search tables, columns, saved consoles, and connections</li>
+								<li>Recent Databases &amp; Tables switcher on <kbd>&#8963;R</kbd></li>
+								<li>Live connection config in hand-editable <code>~/.datadip/data/connections.ason</code></li>
+							</ul>
+						</div>
+						<figure class="spotlight-media">
+							<img
+								src="./assets/shot-omnibar-dark.png"
+								alt="DataDip Omnibar finding matching primary and foreign key rows across five tables"
+								loading="lazy"
+								class="zoomable"
+							/>
+						</figure>
+					</div>
+				</div>
+			</section>
+
+			<!-- Competitor Comparison Table -->
+			<section id="compare" class="section">
+				<div class="container">
+					<div class="section-head">
+						<h2>How DataDip compares</h2>
+						<p>An honest breakdown against the database GUIs developers reach for most.</p>
+					</div>
+
+					<div class="table-scroll">
+						<table class="compare-table">
+							<thead>
+								<tr>
+									<th>Capability</th>
+									<th class="col-datadip">
+										<span class="th-brand">
+											<img src="./assets/icon-32.png" alt="" width="16" height="16" />
+											DataDip
+										</span>
+									</th>
+									<th>TablePlus</th>
+									<th>DataGrip</th>
+									<th>DBeaver</th>
+									<th>Beekeeper Studio</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<th>License &amp; Pricing</th>
+									<td class="col-datadip"><strong>Free &middot; MIT Open Source</strong></td>
+									<td>Paid ($99+ license)</td>
+									<td>Paid ($109+/yr)</td>
+									<td>Apache CE / Paid PRO</td>
+									<td>GPL CE / Paid Ultimate</td>
+								</tr>
+								<tr>
+									<th>Runtime &amp; Footprint</th>
+									<td class="col-datadip"><strong>Native macOS WKWebView + Bun (~46 MB)</strong></td>
+									<td>Native (Swift/C++)</td>
+									<td>JVM (JetBrains IDE)</td>
+									<td>JVM (Eclipse RCP)</td>
+									<td>Electron (Chromium)</td>
+								</tr>
+								<tr>
+									<th>Read-Only by Default</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Driver + SQL gate</td>
+									<td>Opt-in per connection</td>
+									<td>Opt-in per connection</td>
+									<td>Opt-in per connection</td>
+									<td>Opt-in per connection</td>
+								</tr>
+								<tr>
+									<th>Prod Auto-Relock &amp; Staged SQL Preview</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Crimson bar + 10m timer</td>
+									<td>Color tag + Safe Mode</td>
+									<td>Color tag</td>
+									<td>Color tag</td>
+									<td>Color tag</td>
+								</tr>
+								<tr>
+									<th>Browser-Style FK Jump + Back/Forward</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> URL history + reverse FKs</td>
+									<td>FK jump (no trail)</td>
+									<td>FK jump</td>
+									<td>FK jump</td>
+									<td>Basic FK jump</td>
+								</tr>
+								<tr>
+									<th>Paste Any ID &rarr; Search All Tables</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Built-in (<code>&#8984;K</code>)</td>
+									<td><span class="cmp no">No</span></td>
+									<td>Full-text search</td>
+									<td>Full-text search</td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
+									<th>Local SQLite Live <code>.db</code> Auto-Refresh</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> <code>fs.watch</code> + SSE</td>
+									<td>Manual refresh</td>
+									<td>Manual refresh</td>
+									<td>Manual refresh</td>
+									<td>Manual refresh</td>
+								</tr>
+								<tr>
+									<th>Instant CLI Open (<code>datadip ./app.db</code>)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> CLI + Finder + <code>&#8984;O</code></td>
+									<td>Finder / URL scheme</td>
+									<td>CLI launcher</td>
+									<td>CLI flags</td>
+									<td>Finder open</td>
+								</tr>
+								<tr>
+									<th>SSH Tunnels &amp; Interactive Auth</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> <code>~/.ssh/config</code> + <code>SSH_ASKPASS</code></td>
+									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
+									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
+									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
+									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
+								</tr>
+								<tr>
+									<th>Database Engines</th>
+									<td class="col-datadip"><strong>SQLite &amp; PostgreSQL</strong></td>
+									<td>15+ engines</td>
+									<td>25+ engines</td>
+									<td>80+ engines</td>
+									<td>10+ engines</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+
+					<p class="honest-note">
+						<strong>Honest scope note:</strong> DataDip focuses deeply on <strong>SQLite</strong> and
+						<strong>PostgreSQL</strong> right now. If you need MySQL, MSSQL, Oracle, or Snowflake today, TablePlus,
+						DataGrip, or DBeaver are better fits.
+					</p>
+				</div>
+			</section>
+
+			<!-- Keyboard Shortcuts -->
+			<section id="shortcuts" class="section alt-bg">
+				<div class="container">
+					<div class="section-head">
+						<h2>Keyboard-first without fighting macOS</h2>
+						<p>Familiar TablePlus &amp; DataGrip bindings while keeping native macOS Emacs keys (<code>Ctrl+A/E/K</code>) and CodeMirror indent/dedent intact.</p>
+					</div>
+
+					<div class="kbd-grid">
+						<div class="kbd-item"><kbd>&#8984;K</kbd><span>Omnibar: jump to table, console, or Find ID across DB</span></div>
+						<div class="kbd-item"><kbd>&#8963;R</kbd><span>Recent databases &amp; tables switcher</span></div>
+						<div class="kbd-item"><kbd>&#8984;E</kbd><span>Open or focus active SQL Console</span></div>
+						<div class="kbd-item"><kbd>&#8984;&#8629;</kbd><span>Run active SQL statement (or follow focused FK cell)</span></div>
+						<div class="kbd-item"><kbd>&#8984;.</kbd><span>Cancel running query immediately</span></div>
+						<div class="kbd-item"><kbd>Space</kbd><span>Toggle Row Inspector with incoming FK counts</span></div>
+						<div class="kbd-item"><kbd>&#8984;[</kbd> <kbd>&#8984;]</kbd><span>Navigate Back / Forward across FK jumps</span></div>
+						<div class="kbd-item"><kbd>&#8984;&#8679;C</kbd><span>Copy focused row with column headers as TSV</span></div>
+						<div class="kbd-item"><kbd>&#8984;S</kbd><span>Commit staged inline edits (with SQL preview)</span></div>
+						<div class="kbd-item"><kbd>&#8984;O</kbd><span>Open a local SQLite file directly in DataDip.app</span></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- Download & Install -->
+			<section id="install" class="section">
+				<div class="container">
+					<div class="section-head">
+						<h2>Get DataDip</h2>
+						<p>Self-contained macOS app with zero dependencies, or run from source on macOS and Linux.</p>
+					</div>
+
+					<div class="install-grid">
+						<div class="install-card featured">
+							<div class="install-head">
+								<span class="badge ok">Recommended &middot; macOS 13.3+</span>
+								<h3>macOS App (Apple Silicon)</h3>
+							</div>
+							<p>
+								Self-contained <code>DataDip.app</code> bundling the native <code>WKWebView</code> shell and compiled
+								Bun server. No git clone, no Bun install, and no Xcode needed. Signed with Developer ID and notarized
+								by Apple.
+							</p>
+
+							<a class="btn primary lg full" href="./downloads/DataDip-0.1.0-arm64.dmg" download>
+								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
+								Download DataDip-0.1.0-arm64.dmg (46 MB)
+							</a>
+
+							<div class="checksum-box">
+								<div class="checksum-label">
+									<span>SHA-256</span>
+									<button
+										type="button"
+										class="copy-btn"
+										data-copy="f75252d8dd4748dd0c54e0d955fe138e918d1154425cca705fd06fbdda0466b5"
+									>
+										Copy
+									</button>
+								</div>
+								<code class="mono checksum-val">f75252d8dd4748dd0c54e0d955fe138e918d1154425cca705fd06fbdda0466b5</code>
+							</div>
+
+							<p class="install-foot">
+								Drag <code>DataDip.app</code> into <code>/Applications</code>. Use
+								<strong>DataDip &rarr; Install 'datadip' CLI&hellip;</strong> to enable
+								<code>datadip ./app.db</code> in your terminal, or open <code>.db</code>/<code>.sqlite</code> files
+								straight from Finder.
+							</p>
+						</div>
+
+						<div class="install-card">
+							<div class="install-head">
+								<span class="badge accent">macOS &amp; Linux</span>
+								<h3>Build &amp; Run from Source</h3>
+							</div>
+							<p>
+								Runs as a local HTTP server (<code>127.0.0.1:4747</code>) in any browser, plus builds
+								<code>~/Applications/DataDip.app</code> on macOS if <code>swiftc</code> is installed.
+							</p>
+
+							<div class="code-block">
+								<div class="code-head">
+									<span class="mono">shell</span>
+									<button
+										type="button"
+										class="copy-btn"
+										data-copy="git clone https://github.com/anttikissa/datadip.git && cd datadip && ./install"
+									>
+										Copy
+									</button>
+								</div>
+								<pre><code>git clone https://github.com/anttikissa/datadip.git
+cd datadip
+./install</code></pre>
+							</div>
+
+							<div class="code-block">
+								<div class="code-head">
+									<span class="mono">usage</span>
+									<button type="button" class="copy-btn" data-copy="datadip ./app.db">Copy</button>
+								</div>
+								<pre><code>datadip              # start server &amp; open UI
+datadip ./app.db     # open a SQLite file directly
+datadip stop         # stop background server</code></pre>
+							</div>
+
+							<p class="install-foot">
+								<code>./install</code> installs Bun if missing, builds the web client, links
+								<code>~/.local/bin/datadip</code>, and stores local config &amp; history in
+								<code>~/.datadip/data</code>.
+							</p>
+						</div>
+					</div>
+				</div>
+			</section>
+		</main>
+
+		<footer class="footer">
+			<div class="container footer-inner">
+				<div class="footer-left">
+					<img src="./assets/icon-32.png" alt="" width="18" height="18" />
+					<strong>DataDip</strong>
+					<span class="sep">&middot;</span>
+					<span>MIT License</span>
+					<span class="sep">&middot;</span>
+					<span>Zero cookies, zero analytics</span>
+				</div>
+				<div class="footer-right">
+					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
+					<a href="https://github.com/anttikissa/datadip/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
+					<a href="https://github.com/anttikissa/datadip/blob/main/DECISIONS.md" target="_blank" rel="noreferrer">Architecture</a>
+				</div>
+			</div>
+		</footer>
+
+		<!-- Lightbox for full-res screenshot inspection -->
+		<dialog id="lightbox" class="lightbox" aria-label="Full-size screenshot">
+			<div class="lightbox-bar">
+				<span id="lightbox-caption" class="mono"></span>
+				<button type="button" class="btn secondary sm" id="lightbox-close">Close (Esc)</button>
+			</div>
+			<img id="lightbox-img" alt="" />
+		</dialog>
+
+		<script src="./app.js" defer></script>
+	</body>
+</html>

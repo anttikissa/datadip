@@ -4,6 +4,21 @@ A fast, keyboard-first **SQLite & PostgreSQL** browser, foreign-key navigator, a
 
 Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[` / `Cmd+]`, trackpad swipe) to return without losing your filters, and paste any ID into `Cmd+K` to find matching rows across tables. Read-only by default. No Electron.
 
+![DataDip walkthrough: foreign-key navigation, Row Inspector, Cmd+K ID search, SQL Console, and Production Safety](site/assets/datadip-demo.gif)
+
+<details>
+<summary>More screenshots (Row Inspector, SQL Console, Production Safety, Omnibar ID Search)</summary>
+
+| Row Inspector & Reverse FKs | SQL Console with Clickable FKs |
+|---|---|
+| ![Row Inspector showing incoming foreign-key counts](site/assets/shot-inspector-light.png) | ![SQL Console executing a JOIN with clickable FKs](site/assets/shot-console-dark.png) |
+
+| Production Safety & Staged SQL Preview | Omnibar Cross-Table ID Search (`Cmd+K`) |
+|---|---|
+| ![Crimson Production bar and Commit Pending Edits SQL preview](site/assets/shot-prod-safety.png) | ![Omnibar finding an ID across every table](site/assets/shot-omnibar-dark.png) |
+
+</details>
+
 ## Supported Engines & Platforms
 
 | Engine / Transport | Status | Notes |
