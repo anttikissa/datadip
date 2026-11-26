@@ -1,5 +1,5 @@
 // Local SQLite database auto-discovery scanner matching the remote SSH worker's heuristics and header check.
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { expandTilde } from './sqlite-local.ts'
@@ -60,12 +60,22 @@ export function discoverLocalSqliteDbs(
 	maxDepth = 4,
 ): { path: string; sizeBytes: number; modifiedAt: string }[] {
 	const found: { path: string; sizeBytes: number; modifiedAt: string }[] = []
-	const seen = new Set<string>()
+	const seenFiles = new Set<string>()
+	const seenDirs = new Set<string>()
 	const depthLimit = Math.max(1, Math.min(6, maxDepth))
 	const startRoots = (roots && roots.length > 0 ? roots : [homedir()]).map(expandTilde)
 
 	function walk(dir: string, depth: number) {
 		if (depth > depthLimit || found.length >= 100) return
+		let realDir: string
+		try {
+			realDir = realpathSync(dir)
+		} catch {
+			return
+		}
+		if (seenDirs.has(realDir)) return
+		seenDirs.add(realDir)
+
 		let entries
 		try {
 			entries = readdirSync(dir, { withFileTypes: true })
@@ -75,18 +85,33 @@ export function discoverLocalSqliteDbs(
 		for (const ent of entries) {
 			if (found.length >= 100) return
 			const full = join(dir, ent.name)
-			if (ent.isDirectory()) {
+			let isDir = ent.isDirectory()
+			let isFile = ent.isFile()
+			if (ent.isSymbolicLink()) {
+				try {
+					const st = statSync(full)
+					isDir = st.isDirectory()
+					isFile = st.isFile()
+				} catch {
+					continue
+				}
+			}
+			if (isDir) {
 				if (SKIP_DIRS.has(ent.name)) continue
 				if (ent.name.startsWith('.') && ent.name !== '.data' && !ent.name.startsWith('.hal')) continue
 				walk(full, depth + 1)
-			} else if (ent.isFile()) {
+			} else if (isFile) {
 				if (/\.(sqlite|sqlite3|db)$/i.test(ent.name) && !ent.name.endsWith('-wal') && !ent.name.endsWith('-shm')) {
-					if (seen.has(full)) continue
+					let realFile = full
+					try {
+						realFile = realpathSync(full)
+					} catch {}
+					if (seenFiles.has(realFile)) continue
 					if (!isSqliteFile(full)) continue
-					seen.add(full)
+					seenFiles.add(realFile)
 					try {
 						const st = statSync(full)
-						found.push({ path: full, sizeBytes: st.size, modifiedAt: st.mtime.toISOString() })
+						found.push({ path: realFile, sizeBytes: st.size, modifiedAt: st.mtime.toISOString() })
 					} catch {}
 				}
 			}

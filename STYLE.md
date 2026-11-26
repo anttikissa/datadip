@@ -1,12 +1,11 @@
 # Style
 
-Utilitarian IBM Carbon-inspired technical aesthetic with a subtle Sequel
-Pro nod in the app icon.
+Clean, native-feeling macOS developer tool aesthetic: calm neutral
+surfaces, crisp hairlines, generous whitespace, and zero webfont lag.
 
 ## App icon
 
-- Machined steel disk platters stacked on a porcelain dish, topped with
-  warm honey-amber glaze and a pat of butter (`public/icon.svg`).
+- Production icon (`public/icon.svg` / `public/icon-1024.png`).
 - The dev environment's icon adds an orange ring, `oklch(0.72 0.17 55)`
   (`#f3821d`), so a dev tab never passes for production
   (`public/icon-dev.svg`).
@@ -16,35 +15,34 @@ Pro nod in the app icon.
 ## Palette
 
 - Light theme (default):
-  - Canvas: `#f4f5f7`
+  - Canvas: `#f7f7f8`
   - Surface: `#ffffff`
-  - Elevated / subtle: `#eef0f3`
-  - Border / hairline: `#cfd5de` (strong) / `#e1e5ec` (subtle)
-  - Primary ink: `#161616`
-  - Secondary ink: `#525866`
-  - Accent (IBM Blue): `#0f62fe` (hover `#0353e9`)
-  - Foreign Key link: `#0050e6`
-  - Production alert: `#da1e28` (tint `#fff1f1`)
-  - Write-armed warning: `#b25000` (tint `#fff4e5`)
-  - Staged edit highlight: `#fff3cd` (border `#d97706`)
+  - Subtle / elevated: `#f0f1f4`
+  - Border / hairline: `rgba(17, 24, 39, 0.08)` (subtle) / `rgba(17, 24, 39, 0.14)` (strong)
+  - Primary ink: `#141518`
+  - Secondary ink: `#5a606c`
+  - Muted ink: `#888e9b`
+  - Accent: `#2563eb` (hover `#1d4ed8`)
+  - Foreign Key link: `#1d4ed8` (tint `rgba(37, 99, 235, 0.08)`)
+  - Production alert: `#dc2626` (tint `#fef2f2`)
+  - Write-armed warning: `#b45309` (tint `#fef3c7`)
+  - Staged edit highlight: `#fef9c3` (border `#d97706`)
 - Dark theme:
-  - Canvas: `#111318`
-  - Surface: `#181b22`
-  - Elevated / subtle: `#222631`
-  - Border / hairline: `#343a49` (strong) / `#262b37` (subtle)
-  - Primary ink: `#eef1f6` (font weight 300 for body per dark-type rule)
-  - Secondary ink: `#9aa3b2`
-  - Accent: `#4589ff`
-  - Production alert: `#fa4d56` (tint `#2d1216`)
-  - Write-armed warning: `#ff832b` (tint `#2b1c0e`)
+  - Canvas: `#0e0f12`
+  - Surface: `#15171c`
+  - Subtle / elevated: `#1d2027`
+  - Border / hairline: `rgba(255, 255, 255, 0.08)` (subtle) / `rgba(255, 255, 255, 0.14)` (strong)
+  - Primary ink: `#eef0f4` (lighter weight `350` for dark-on-light irradiation balance)
+  - Secondary ink: `#9ca3b0`
+  - Accent: `#6095ff`
+  - Production alert: `#f87171` (tint `#2a1215`)
+  - Write-armed warning: `#fbbf24` (tint `#291e0b`)
 
 ## Typography & Geometry
 
-- UI font: `'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif`
-- Data & SQL font: `'IBM Plex Mono', ui-monospace, 'SF Mono', monospace`
-  with `font-variant-numeric: tabular-nums`.
-- Shape family: sharp utilitarian (`2px` radius on buttons/inputs/cards,
-  `0px` on grid cells; pills only for status badges).
-- Focus: `:focus-visible` only, `2px solid var(--accent)` with
-  `outline-offset: 1px`.
+- UI font: `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif` (offline-ready native system UI).
+- Data & SQL font: `'Berkeley Mono', 'SF Mono', ui-monospace, Menlo, monospace` with `font-variant-numeric: tabular-nums`.
+- Shape family: modern macOS rounded (`6px` buttons/inputs/sidebar items, `10px` cards/popovers, `12px` modals/command palettes, `999px` badges/pills; `0px` on spreadsheet grid cells).
+- Motion: `150ms cubic-bezier(0.23, 1, 0.32, 1)` transitions on hover/press (`scale(0.98)` on active buttons) and modal fade/scale entry; respects `prefers-reduced-motion`.
+- Focus: `:focus-visible` only, `2px solid var(--accent)` with `outline-offset: 2px`.
 - Marks: crisp 16px stroke SVGs centered in their viewBox.

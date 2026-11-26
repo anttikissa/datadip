@@ -46,13 +46,20 @@ obvious.
 ## UI & Defaults
 
 - English only, ISO 8601 timestamps (`YYYY-MM-DD HH:mm:ss` / UTC).
+- Native system UI font (`-apple-system`, `SF Pro Text`) paired with
+  `'Berkeley Mono', 'SF Mono', ui-monospace` for tables and SQL, with
+  no external Google Fonts dependency so `DataDip.app` renders
+  instantly offline.
 - Light theme by default with an optional dark theme toggle persisted in
-  local state.
+  local state (using slightly lighter body weight in dark mode to offset
+  irradiation).
 - CodeMirror 6 provides SQL editing with SQLite syntax highlighting,
   live schema autocomplete, custom SQLite linting, active-statement
   highlighting, and SQL formatting.
 - Dialogs use native `<dialog>` elements (never `alert`/`confirm`).
 - Focus uses `:focus-visible` with a single 2px ring across the app.
+- Auto-Discover follows directory symlinks safely (deduplicating via
+  `realpathSync`) so symlinked storage volumes (e.g. `~/disk`) are found.
 
 ## Local Data
 

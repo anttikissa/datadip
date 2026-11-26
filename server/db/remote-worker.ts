@@ -414,29 +414,46 @@ function isSqliteFile(filePath) {
 
 function discoverDbs(roots, maxDepth) {
 	const found = [];
-	const seen = new Set();
+	const seenFiles = new Set();
+	const seenDirs = new Set();
 	const depthLimit = Math.max(1, Math.min(6, maxDepth || 4));
 	const startRoots = (roots && roots.length ? roots : [os.homedir(), '/var/lib']).map(expandPath);
 
 	function walk(dir, depth) {
 		if (depth > depthLimit || found.length >= 100) return;
+		let realDir;
+		try { realDir = fs.realpathSync(dir); } catch { return; }
+		if (seenDirs.has(realDir)) return;
+		seenDirs.add(realDir);
+
 		let entries;
 		try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 		for (const ent of entries) {
 			if (found.length >= 100) return;
 			const full = path.join(dir, ent.name);
-			if (ent.isDirectory()) {
+			let isDir = ent.isDirectory();
+			let isFile = ent.isFile();
+			if (ent.isSymbolicLink()) {
+				try {
+					const st = fs.statSync(full);
+					isDir = st.isDirectory();
+					isFile = st.isFile();
+				} catch { continue; }
+			}
+			if (isDir) {
 				if (SKIP_DIRS.has(ent.name)) continue;
 				if (ent.name.startsWith('.') && ent.name !== '.data' && !ent.name.startsWith('.hal')) continue;
 				walk(full, depth + 1);
-			} else if (ent.isFile()) {
+			} else if (isFile) {
 				if (/\.(sqlite|sqlite3|db)$/i.test(ent.name) && !ent.name.endsWith('-wal') && !ent.name.endsWith('-shm')) {
-					if (seen.has(full)) continue;
+					let realFile = full;
+					try { realFile = fs.realpathSync(full); } catch {}
+					if (seenFiles.has(realFile)) continue;
 					if (!isSqliteFile(full)) continue;
-					seen.add(full);
+					seenFiles.add(realFile);
 					try {
 						const st = fs.statSync(full);
-						found.push({ path: full, sizeBytes: st.size, modifiedAt: st.mtime.toISOString() });
+						found.push({ path: realFile, sizeBytes: st.size, modifiedAt: st.mtime.toISOString() });
 					} catch {}
 				}
 			}
