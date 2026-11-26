@@ -39,6 +39,19 @@ Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[
 - **Full-result file exports**: Download table views or SQL query results to disk as CSV, TSV, JSON, Markdown, or SQL `INSERT` statements (not limited to the visible page).
 - **Large-table friendly**: Uses keyset pagination and skips automatic full-table `COUNT(*)` scans on large databases (using `pg_class.reltuples` on Postgres and `sqlite_stat1` on large SQLite files).
 
+## Download (macOS Apple Silicon)
+
+Download the signed and Apple-notarized **`DataDip-0.1.0-arm64.dmg`** from [GitHub Releases](https://github.com/anttikissa/datadip/releases/latest) (macOS 13.3+, self-contained, no Bun or Xcode required).
+
+1. Open the `.dmg` and drag **DataDip.app** into `/Applications`.
+2. Double-click `.db` / `.sqlite` files in Finder, drop them on the Dock icon, or press `Cmd+O`.
+3. Optionally choose **DataDip -> Install 'datadip' CLI...** from the menu bar to enable `datadip ./app.db` in your terminal.
+
+```text
+SHA-256 (DataDip-0.1.0-arm64.dmg):
+f75252d8dd4748dd0c54e0d955fe138e918d1154425cca705fd06fbdda0466b5
+```
+
 ## Install & Run (from source)
 
 Prerequisites: macOS or Linux with `git` (and Xcode Command Line Tools / `swiftc` if you want the optional macOS `DataDip.app`).

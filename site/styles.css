@@ -304,6 +304,7 @@ kbd {
 .eyebrow .dot {
 	width: 7px;
 	height: 7px;
+	flex-shrink: 0;
 	border-radius: 50%;
 	background: var(--ok);
 }
@@ -479,6 +480,7 @@ kbd {
 .live-pip {
 	width: 7px;
 	height: 7px;
+	flex-shrink: 0;
 	border-radius: 50%;
 	background: var(--ok);
 }
