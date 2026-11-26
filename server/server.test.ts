@@ -501,20 +501,57 @@ describe('DataDip server API & safety boundaries', () => {
 			parsePostgresUrl,
 			buildPostgresConnectConfig,
 			redactPostgresUrl,
+			resolvePgTableRowCount,
 			quotePgTable,
 			normalizePgCell,
 			PostgresAdapter,
 		} = await import('./db/postgres.ts')
+		const { maskConnectionPath } = await import('../src/shared/url.ts')
+		const { formatRowCount } = await import('../src/lib/format.ts')
 		const parsed = parsePostgresUrl('postgres://alice:s3cr3t@db.example.com:5433/prod_app?sslmode=require')
 		expect(parsed.hostname).toBe('db.example.com')
 		expect(parsed.port).toBe(5433)
 		expect(parsed.database).toBe('prod_app')
 		expect(parsed.sslMode).toBe('require')
-		expect(redactPostgresUrl(parsed.rawUrl)).not.toContain('s3cr3t')
+		expect(redactPostgresUrl(parsed.rawUrl)).toBe('postgres://alice:••••@db.example.com:5433/prod_app?sslmode=require')
+		expect(maskConnectionPath(parsed.rawUrl)).toBe('postgres://alice:••••@db.example.com:5433/prod_app?sslmode=require')
 		expect(quotePgTable('users')).toBe('"public"."users"')
 		expect(quotePgTable('billing.invoices')).toBe('"billing"."invoices"')
 		expect(normalizePgCell({ a: 1 })).toBe('{"a":1}')
 		expect(normalizePgCell(42n)).toBe('42')
+
+		// Small Postgres tables use exact bounded counts; large ones use live stats + floored lower-bound formatting
+		expect(
+			resolvePgTableRowCount({ kind: 'table', exactProbeCount: 19, liveTup: 8, relTup: 8, hasStats: true }),
+		).toEqual({
+			rowCount: 19,
+			rowCountEstimated: false,
+		})
+		expect(
+			resolvePgTableRowCount({ kind: 'table', exactProbeCount: 0, liveTup: 0, relTup: null, hasStats: false }),
+		).toEqual({
+			rowCount: 0,
+			rowCountEstimated: false,
+		})
+		expect(
+			resolvePgTableRowCount({ kind: 'table', exactProbeCount: 1001, liveTup: 14166, relTup: 8000, hasStats: true }),
+		).toEqual({
+			rowCount: 14166,
+			rowCountEstimated: true,
+		})
+		expect(resolvePgTableRowCount({ kind: 'table', liveTup: 1924812, relTup: 1800000, hasStats: true })).toEqual({
+			rowCount: 1924812,
+			rowCountEstimated: true,
+		})
+		expect(resolvePgTableRowCount({ kind: 'view', liveTup: null, relTup: null, hasStats: false })).toEqual({
+			rowCount: null,
+			rowCountEstimated: false,
+		})
+		expect(formatRowCount(19, false)).toBe('19')
+		expect(formatRowCount(1000, true)).toBe('1,000+')
+		expect(formatRowCount(14166, true)).toBe('14,100+')
+		expect(formatRowCount(1924812, true)).toBe('1,920,000+')
+		expect(formatRowCount(8, true)).toBe('~8')
 
 		// Bare URLs default to sslmode=prefer (matching libpq), while explicit disable/require are respected
 		const bare = parsePostgresUrl('postgresql://postgres:pw@db.example.com:5432/postgres')

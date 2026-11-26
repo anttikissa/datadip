@@ -14,7 +14,7 @@ import { SshPromptModal } from './components/SshPromptModal.tsx'
 import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
 import { clearConsoleRun, getConsoleRun } from './lib/console-runs.ts'
-import { copyToClipboard, formatCountdown } from './lib/format.ts'
+import { copyToClipboard, formatCountdown, formatRowCount } from './lib/format.ts'
 import { isEditableTarget, isMac, isNativeApp, isPrimaryMod, modKeyLabel, recentsKeyLabel } from './lib/shortcuts.ts'
 import {
 	IconAlert,
@@ -1320,7 +1320,12 @@ export function App() {
 											{t.type === 'view' ? <IconView /> : <IconTable />}
 											<span class="sidebar-item-label mono">{t.name}</span>
 											<Show when={t.rowCount !== null}>
-												<span class="sidebar-count">{t.rowCount!.toLocaleString()}</span>
+												<span
+													class="sidebar-count"
+													title={t.rowCountEstimated ? 'Estimated row count from PostgreSQL stats' : undefined}
+												>
+													{formatRowCount(t.rowCount, t.rowCountEstimated)}
+												</span>
 											</Show>
 										</button>
 									)
@@ -1366,7 +1371,12 @@ export function App() {
 													<IconTable />
 													<span class="sidebar-item-label mono">{t.name}</span>
 													<Show when={t.rowCount !== null}>
-														<span class="sidebar-count">{t.rowCount!.toLocaleString()}</span>
+														<span
+															class="sidebar-count"
+															title={t.rowCountEstimated ? 'Estimated row count from PostgreSQL stats' : undefined}
+														>
+															{formatRowCount(t.rowCount, t.rowCountEstimated)}
+														</span>
 													</Show>
 												</button>
 											)
@@ -1486,6 +1496,19 @@ export function App() {
 							onSchemaChanged={() => {
 								const id = activeConnId()
 								if (id) void loadConnectionData(id)
+							}}
+							onExactRowCount={(tableName, count) => {
+								setSchema((prev) => {
+									if (!prev) return prev
+									let changed = false
+									const tables = prev.tables.map((t) => {
+										if (t.name !== tableName) return t
+										if (t.rowCount === count && !t.rowCountEstimated) return t
+										changed = true
+										return { ...t, rowCount: count, rowCountEstimated: false }
+									})
+									return changed ? { ...prev, tables } : prev
+								})
 							}}
 						/>
 					)}

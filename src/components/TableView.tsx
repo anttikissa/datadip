@@ -8,6 +8,7 @@ import {
 	exportRowsSqlInsert,
 	exportRowsTsv,
 	formatCellText,
+	formatRowCount,
 } from '../lib/format.ts'
 import {
 	IconArrowRight,
@@ -65,6 +66,7 @@ export function TableView(props: {
 	onRequestArmRw?: () => void
 	onNotify: (msg: string, kind?: 'info' | 'ok' | 'error') => void
 	onSchemaChanged: () => void
+	onExactRowCount?: (table: string, count: number) => void
 }) {
 	const [data, setData] = createSignal<BrowseResult | null>(null)
 	const [loading, setLoading] = createSignal(false)
@@ -200,6 +202,14 @@ export function TableView(props: {
 				.then((res) => {
 					if (cancelled) return
 					setData(res)
+					if (
+						res.totalCount !== null &&
+						!res.totalCountEstimated &&
+						props.route.filters.length === 0 &&
+						!props.route.search
+					) {
+						props.onExactRowCount?.(table, res.totalCount)
+					}
 					setActiveCell((prev) => {
 						if (res.rows.length === 0 || res.columns.length === 0) return null
 						if (!prev) return { row: 0, col: 0 }
@@ -1499,7 +1509,7 @@ export function TableView(props: {
 								? 'Loading…'
 								: `${data()?.rows.length ?? 0} shown` +
 									(data()?.totalCount !== null && data()?.totalCount !== undefined
-										? ` / ${data()!.totalCount!.toLocaleString()} total`
+										? ` / ${formatRowCount(data()!.totalCount, data()!.totalCountEstimated)} total`
 										: '')}
 						</span>
 						<Show when={data()}>{(res) => <span>{res().durationMs} ms</span>}</Show>

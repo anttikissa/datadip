@@ -184,12 +184,15 @@ function formatFilterToken(f: FilterSpec): string {
 	return `${f.column}:${f.op}:${f.value}`
 }
 
+const PASSWORD_MASK_SENTINEL = '__DATADIP_MASKED_PW__'
+
 export function maskConnectionPath(path: string): string {
 	if (!/^postgres(?:ql)?:\/\//i.test(path.trim())) return path
 	try {
 		const u = new URL(path.trim())
-		if (u.password) u.password = '••••'
-		return u.toString()
+		if (!u.password) return u.toString()
+		u.password = PASSWORD_MASK_SENTINEL
+		return u.toString().replace(PASSWORD_MASK_SENTINEL, '••••')
 	} catch {
 		return path.replace(/(:\/\/[^:@/\s]+):[^@/\s]+@/, '$1:••••@')
 	}

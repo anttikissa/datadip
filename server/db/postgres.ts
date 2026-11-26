@@ -44,6 +44,10 @@ const PG_FK_ACTION: Record<string, string> = {
 }
 
 const LARGE_TABLE_ESTIMATE_THRESHOLD = 50_000
+const SMALL_TABLE_MAX_BYTES = 512 * 1024
+const EXACT_COUNT_CAP = 1000
+const MAX_EXACT_COUNT_TABLES = 100
+const PASSWORD_MASK_SENTINEL = '__DATADIP_MASKED_PW__'
 
 export function parsePostgresUrl(input: string): ParsedPostgresUrl {
 	const trimmed = input.trim()
@@ -102,11 +106,42 @@ export function redactPostgresUrl(input: string): string {
 	try {
 		const parsed = parsePostgresUrl(input)
 		const u = new URL(parsed.rawUrl)
-		if (u.password) u.password = '••••'
-		return u.toString()
+		if (!u.password) return u.toString()
+		u.password = PASSWORD_MASK_SENTINEL
+		return u.toString().replace(PASSWORD_MASK_SENTINEL, '••••')
 	} catch {
 		return input
 	}
+}
+
+export function resolvePgTableRowCount(input: {
+	kind: 'table' | 'view'
+	exactProbeCount?: number
+	liveTup: number | null
+	relTup: number | null
+	hasStats: boolean
+}): { rowCount: number | null; rowCountEstimated: boolean } {
+	if (input.kind !== 'table') return { rowCount: null, rowCountEstimated: false }
+
+	const statEstimate =
+		input.hasStats || (input.liveTup !== null && input.liveTup > 0)
+			? (input.liveTup ?? input.relTup)
+			: (input.relTup ?? input.liveTup)
+
+	if (input.exactProbeCount !== undefined) {
+		if (input.exactProbeCount <= EXACT_COUNT_CAP) {
+			return { rowCount: input.exactProbeCount, rowCountEstimated: false }
+		}
+		return {
+			rowCount: Math.max(EXACT_COUNT_CAP, statEstimate ?? EXACT_COUNT_CAP),
+			rowCountEstimated: true,
+		}
+	}
+
+	if (statEstimate !== null && statEstimate >= 0) {
+		return { rowCount: statEstimate, rowCountEstimated: true }
+	}
+	return { rowCount: null, rowCountEstimated: false }
 }
 
 export function quotePgIdent(name: string): string {
@@ -297,6 +332,7 @@ export class PostgresAdapter implements DbAdapter {
 	private readonly tunnel: SshTcpTunnel | null
 	private sql: SQL | null = null
 	private connectPromise: Promise<SQL> | null = null
+	private cachedSchema: DatabaseSchema | null = null
 	private activeQueries = new Map<string, () => void>()
 
 	constructor(connectionUrl: string, ssh?: { target: SshTarget; getAskpass: () => SshAskpassConfig | null }) {
@@ -355,6 +391,13 @@ export class PostgresAdapter implements DbAdapter {
 		}
 	}
 
+	private async getCachedSchema(requiredTable?: string): Promise<DatabaseSchema> {
+		if (this.cachedSchema && (!requiredTable || this.cachedSchema.schemas[requiredTable])) {
+			return this.cachedSchema
+		}
+		return this.getSchema()
+	}
+
 	async getSchema(): Promise<DatabaseSchema> {
 		const t0 = performance.now()
 		const sql = await this.getClient()
@@ -366,7 +409,10 @@ export class PostgresAdapter implements DbAdapter {
 					schema_name: string
 					table_name: string
 					relkind: string
-					row_estimate: string | number | null
+					live_tup: string | number | null
+					rel_tup: string | number | null
+					has_stats: boolean
+					rel_bytes: string | number | null
 				}[]
 			>(`
 				SELECT
@@ -374,9 +420,23 @@ export class PostgresAdapter implements DbAdapter {
 					n.nspname AS schema_name,
 					c.relname AS table_name,
 					c.relkind::text AS relkind,
-					CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE NULL END AS row_estimate
+					s.n_live_tup::bigint AS live_tup,
+					CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE NULL END AS rel_tup,
+					COALESCE(
+						s.last_analyze IS NOT NULL
+						OR s.last_autoanalyze IS NOT NULL
+						OR s.n_tup_ins > 0
+						OR s.n_tup_del > 0,
+						false
+					) AS has_stats,
+					CASE
+						WHEN c.relkind = 'r' AND pg_catalog.has_table_privilege(c.oid, 'SELECT')
+						THEN pg_catalog.pg_relation_size(c.oid)::bigint
+						ELSE NULL
+					END AS rel_bytes
 				FROM pg_class c
 				JOIN pg_namespace n ON n.oid = c.relnamespace
+				LEFT JOIN pg_catalog.pg_stat_all_tables s ON s.relid = c.oid
 				WHERE c.relkind IN ('r', 'p', 'v', 'm')
 				  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
 				  AND n.nspname NOT LIKE 'pg_toast%'
@@ -579,6 +639,39 @@ export class PostgresAdapter implements DbAdapter {
 			triggersByTable.set(tr.table, list)
 		}
 
+		// Count small readable regular tables accurately in a single bounded round-trip (<=512 KB heap, capped at 1,001 rows).
+		const smallTargets: { oid: number; qTable: string }[] = []
+		for (const r of relRows) {
+			if (smallTargets.length >= MAX_EXACT_COUNT_TABLES) break
+			if (r.relkind !== 'r' || r.rel_bytes === null || r.rel_bytes === undefined) continue
+			if (Number(r.rel_bytes) <= SMALL_TABLE_MAX_BYTES) {
+				smallTargets.push({
+					oid: r.oid,
+					qTable: `${quotePgIdent(r.schema_name)}.${quotePgIdent(r.table_name)}`,
+				})
+			}
+		}
+		const exactCountsByOid = new Map<number, number>()
+		if (smallTargets.length > 0) {
+			try {
+				const probeSql = smallTargets
+					.map(
+						(t) =>
+							`SELECT ${t.oid}::int AS oid, (SELECT COUNT(*)::int FROM (SELECT 1 FROM ${t.qTable} LIMIT ${EXACT_COUNT_CAP + 1}) _c) AS c`,
+					)
+					.join('\nUNION ALL\n')
+				const probeRows = await sql.begin('READ ONLY', async (tx) => {
+					await tx.unsafe("SET LOCAL statement_timeout = '3000'")
+					return tx.unsafe<{ oid: number; c: number | string }[]>(probeSql)
+				})
+				for (const pr of probeRows) {
+					exactCountsByOid.set(Number(pr.oid), Number(pr.c))
+				}
+			} catch {
+				// Fall back to pg_stat_all_tables / pg_class estimates if any table fails probing
+			}
+		}
+
 		const tables: TableSummary[] = []
 		const schemas: Record<string, TableSchema> = {}
 
@@ -591,8 +684,13 @@ export class PostgresAdapter implements DbAdapter {
 				.sort((a, b) => a.primaryKey - b.primaryKey)
 				.map((c) => c.name)
 			const indexes = idxByRel.get(r.oid) ?? []
-			const rowCount =
-				kind === 'table' && r.row_estimate !== null && r.row_estimate !== undefined ? Number(r.row_estimate) : null
+			const { rowCount, rowCountEstimated } = resolvePgTableRowCount({
+				kind,
+				exactProbeCount: exactCountsByOid.get(r.oid),
+				liveTup: r.live_tup !== null && r.live_tup !== undefined ? Number(r.live_tup) : null,
+				relTup: r.rel_tup !== null && r.rel_tup !== undefined ? Number(r.rel_tup) : null,
+				hasStats: Boolean(r.has_stats),
+			})
 
 			let ddl = ''
 			if (kind === 'view') {
@@ -611,7 +709,12 @@ export class PostgresAdapter implements DbAdapter {
 				ddl = `CREATE TABLE ${quotePgTable(key)} (\n${colDefs.join(',\n')}\n);`
 			}
 
-			tables.push({ name: key, type: kind, rowCount })
+			tables.push({
+				name: key,
+				type: kind,
+				rowCount,
+				...(rowCountEstimated ? { rowCountEstimated: true } : {}),
+			})
 			schemas[key] = {
 				name: key,
 				type: kind,
@@ -651,18 +754,20 @@ export class PostgresAdapter implements DbAdapter {
 			}
 		}
 
-		return {
+		const result: DatabaseSchema = {
 			tables,
 			schemas,
 			triggers,
 			durationMs: Math.round((performance.now() - t0) * 100) / 100,
 		}
+		this.cachedSchema = result
+		return result
 	}
 
 	async browseTable(params: BrowseParams): Promise<BrowseResult> {
 		const t0 = performance.now()
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema(params.table)
 		const tableSchema = schema.schemas[params.table]
 		const tableSummary = schema.tables.find((t) => t.name === params.table)
 		if (!tableSchema) throw new Error(`Table or view not found: ${params.table}`)
@@ -695,8 +800,10 @@ export class PostgresAdapter implements DbAdapter {
 
 		// Avoid expensive COUNT(*) scans on large tables (>50k est rows)
 		let totalCount: number | null = null
+		let totalCountEstimated = false
 		if (isLargeTable) {
 			totalCount = clauses.length === 0 ? estRows : null
+			totalCountEstimated = totalCount !== null
 		} else {
 			try {
 				const countSql =
@@ -705,6 +812,7 @@ export class PostgresAdapter implements DbAdapter {
 				totalCount = cRows[0]?.c !== undefined ? Number(cRows[0].c) : 0
 			} catch {
 				totalCount = estRows
+				totalCountEstimated = totalCount !== null
 			}
 		}
 
@@ -792,6 +900,7 @@ export class PostgresAdapter implements DbAdapter {
 			columnTypes,
 			rows,
 			totalCount,
+			...(totalCountEstimated ? { totalCountEstimated: true } : {}),
 			hasNext,
 			hasPrev,
 			nextCursor,
@@ -894,7 +1003,7 @@ export class PostgresAdapter implements DbAdapter {
 	async mutate(req: MutateRequest): Promise<MutateResponse> {
 		const t0 = performance.now()
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema(req.table)
 		const tableSchema = schema.schemas[req.table]
 		if (!tableSchema) throw new Error(`Table not found: ${req.table}`)
 		if (tableSchema.type !== 'table') throw new Error(`Cannot mutate view: ${req.table}`)
@@ -999,7 +1108,7 @@ export class PostgresAdapter implements DbAdapter {
 
 	async peekRow(table: string, column: string, value: unknown): Promise<Record<string, unknown> | null> {
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema(table)
 		const tableSchema = schema.schemas[table]
 		if (!tableSchema) return null
 		const col = tableSchema.columns.find((c) => c.name === column)
@@ -1014,7 +1123,7 @@ export class PostgresAdapter implements DbAdapter {
 
 	async countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]> {
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema(table)
 		const tableSchema = schema.schemas[table]
 		if (!tableSchema) return []
 		const counts: ReverseFkCount[] = []
@@ -1047,7 +1156,7 @@ export class PostgresAdapter implements DbAdapter {
 		const trimmed = value.trim()
 		if (!trimmed) return []
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema()
 		const matches: IdMatch[] = []
 
 		for (const tableSchema of Object.values(schema.schemas)) {
@@ -1088,7 +1197,7 @@ export class PostgresAdapter implements DbAdapter {
 	async profileColumn(table: string, column: string): Promise<ColumnProfile> {
 		const t0 = performance.now()
 		const sql = await this.getClient()
-		const schema = await this.getSchema()
+		const schema = await this.getCachedSchema(table)
 		const tableSchema = schema.schemas[table]
 		if (!tableSchema) throw new Error(`Table or view not found: ${table}`)
 		const col = tableSchema.columns.find((c) => c.name === column)
@@ -1196,6 +1305,7 @@ export class PostgresAdapter implements DbAdapter {
 		const client = this.sql
 		this.sql = null
 		this.connectPromise = null
+		this.cachedSchema = null
 		if (client) {
 			void client.close({ timeout: 0 }).catch(() => {})
 		}

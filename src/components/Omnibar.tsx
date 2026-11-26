@@ -1,7 +1,7 @@
 // Cmd+K / Cmd+P Omnibar for jumping to tables, columns, consoles, connections, actions, or searching an ID across tables.
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
-import { formatCellText } from '../lib/format.ts'
+import { formatCellText, formatRowCount } from '../lib/format.ts'
 import { IconSearch } from '../lib/icons.tsx'
 import type { ConnectionWithStatus, Console, DatabaseSchema, IdMatch } from '../shared/types.ts'
 import { maskConnectionPath } from '../shared/url.ts'
@@ -91,7 +91,7 @@ export function Omnibar(props: {
 						id: `t:${t.name}`,
 						kind: t.type === 'view' ? 'VIEW' : 'TABLE',
 						label: t.name,
-						detail: t.rowCount !== null ? `${t.rowCount.toLocaleString()} rows` : '',
+						detail: t.rowCount !== null ? `${formatRowCount(t.rowCount, t.rowCountEstimated)} rows` : '',
 						run: () => {
 							props.onSelectTable(connId, t.name)
 							props.onClose()

@@ -10,18 +10,21 @@ obvious.
   (`DataDip.app`). All API traffic lives under `/api/*` using ASON so v2
   can add remote deployment, authentication, and AI query features
   without reshaping the client.
-- Self-contained macOS distribution (`mac/build-dmg`, `mac/entitlements.plist`):
-  bundles the `swiftc`-compiled `DataDip` shell, `bun build --compile`
-  standalone `Contents/MacOS/datadip-server` (including the SQLite query
-  worker and `__ssh_askpass` subcommand), Vite `Contents/Resources/dist/`,
-  `ssh-askpass.sh`, and `AppIcon.icns` into a single drag-to-Applications
-  `DataDip.app` and signed/notarized `arm64` `.dmg` (`dev.datadip.app`),
-  requiring zero git clone, system Bun, or `swiftc` for end users. Data
-  stays in `~/.datadip/data` so CLI (`DataDip -> Install 'datadip' CLI…`)
-  and `.app` share one config. `DataDip.app` registers `.db`/`.sqlite`/
-  `.sqlite3`/`.db3` document types for Finder double-click, Dock drop,
-  and `Cmd+O` file open. Dev builds via `mac/build` continue to launch
-  from the local checkout when `Contents/MacOS/datadip-server` is absent.
+- Self-contained macOS distribution (`mac/build-dmg`, `mac/render-dmg-bg.swift`,
+  `mac/entitlements.plist`): bundles the `swiftc`-compiled `DataDip`
+  shell, `bun build --compile` standalone `Contents/MacOS/datadip-server`
+  (including the SQLite query worker and `__ssh_askpass` subcommand),
+  Vite `Contents/Resources/dist/`, `ssh-askpass.sh`, and `AppIcon.icns`
+  into a single drag-to-Applications `DataDip.app` and signed/notarized
+  `arm64` `.dmg` (`dev.datadip.app`) with a CoreGraphics-rendered HiDPI
+  Retina TIFF background (`tiffutil -cathidpicheck`), custom volume icon,
+  and Finder icon-view layout, requiring zero git clone, system Bun, or
+  `swiftc` for end users. Data stays in `~/.datadip/data` so CLI
+  (`DataDip -> Install 'datadip' CLI…`) and `.app` share one config.
+  `DataDip.app` registers `.db`/`.sqlite`/`.sqlite3`/`.db3` document
+  types for Finder double-click, Dock drop, and `Cmd+O` file open. Dev
+  builds via `mac/build` continue to launch from the local checkout when
+  `Contents/MacOS/datadip-server` is absent.
 - Adapter abstraction (`server/db/types.ts`): all table listing, schema
   inspection, browsing, querying, mutations, FK peeks, and reverse-FK
   counts flow through `DbAdapter` for SQLite (local and SSH) and
@@ -255,3 +258,15 @@ obvious.
 - CLI probe/control commands (`url`, `status`, `open`, `stop`, and the
   duplicate server check) read only `server.ason` without opening
   `state.db`.
+- PostgreSQL table row counts (`server/db/postgres.ts`,
+  `src/lib/format.ts`): avoid presenting stale `pg_class.reltuples` as
+  exact counts. In `getSchema()`, probe up to 100 small readable regular
+  tables (`pg_relation_size <= 512 KB`) in a single batched `UNION ALL`
+  query with `LIMIT 1001` (exact for `<= 1,000` rows, zero risk of
+  scanning large tables). Larger tables use `pg_stat_all_tables.n_live_tup`
+  (falling back to `pg_class.reltuples`), flagged `rowCountEstimated: true`,
+  and formatted as floored lower-bound steps (`1,000+`, `14,100+`,
+  `1,920,000+`). Opening an unfiltered table syncs its exact `totalCount`
+  back to the sidebar, and `PostgresAdapter` caches its latest schema
+  for internal lookups (`browseTable`, `peekRow`, `mutate`, etc.) so
+  browsing remote Postgres avoids redundant metadata round-trips.

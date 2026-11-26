@@ -104,6 +104,19 @@ explicit `tls` object to `new SQL(...)` when TLS is explicitly
 required (e.g. SNI over SSH tunnels), because setting `tls` disables
 `sslmode=prefer` plaintext fallback in `Bun.SQL`.
 
+Never assign non-ASCII characters (such as `'••••'`) directly to
+`URL.password` before calling `url.toString()`, because the WHATWG URL
+serializer percent-encodes them (e.g. `%E2%80%A2`). Assign an ASCII
+sentinel to `u.password` and replace it after `u.toString()`.
+
+Never display raw `pg_class.reltuples` as an unqualified table row count
+in PostgreSQL: autovacuum leaves small tables stale or `-1` until
+`ANALYZE` runs. Probe small readable regular tables (`<= 512 KB`) in one
+batched bounded query (`LIMIT 1001`) for exact counts, fall back to
+`pg_stat_all_tables.n_live_tup` (then `reltuples`) for larger tables,
+and mark estimated counts explicitly (`rowCountEstimated` -> `14,100+`,
+`1,920,000+`).
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

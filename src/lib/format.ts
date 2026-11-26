@@ -31,6 +31,17 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+// Formats exact counts verbatim ("19") and estimated large counts as clean lower-bound steps ("14,100+", "1,920,000+").
+export function formatRowCount(count: number | null | undefined, estimated?: boolean): string {
+	if (count === null || count === undefined) return ''
+	const n = Math.max(0, Math.floor(count))
+	if (!estimated) return n.toLocaleString()
+	if (n < 1000) return `~${n.toLocaleString()}`
+	const step = 10 ** Math.max(2, Math.floor(Math.log10(n)) - 2)
+	const floored = Math.floor(n / step) * step
+	return `${floored.toLocaleString()}+`
+}
+
 export function formatCellText(val: unknown): string {
 	if (val === null || val === undefined) return 'NULL'
 	if (typeof val === 'string') return val

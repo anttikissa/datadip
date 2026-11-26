@@ -12,6 +12,13 @@ export interface SshHostOption {
 	port?: number
 }
 
+export interface VirtualForeignKey {
+	fromTable: string
+	fromColumn: string
+	toTable: string
+	toColumn: string
+}
+
 export interface ConnectionConfig {
 	id: string
 	name: string
@@ -27,6 +34,7 @@ export interface ConnectionConfig {
 	tags?: string[]
 	color?: ConnectionColor
 	pinned?: boolean
+	virtualForeignKeys?: VirtualForeignKey[]
 	createdAt: string
 	lastVisitedAt?: string
 }
@@ -56,6 +64,7 @@ export interface TableSummary {
 	name: string
 	type: 'table' | 'view'
 	rowCount: number | null
+	rowCountEstimated?: boolean
 	isInternal?: boolean
 }
 
@@ -80,12 +89,14 @@ export interface ForeignKeyInfo {
 	toColumn: string
 	onUpdate: string
 	onDelete: string
+	virtual?: boolean
 }
 
 export interface ReverseForeignKeyInfo {
 	fromTable: string
 	fromColumn: string
 	toColumn: string
+	virtual?: boolean
 }
 
 export interface IndexInfo {
@@ -182,6 +193,7 @@ export interface BrowseResult {
 	columnTypes: Record<string, string>
 	rows: Record<string, unknown>[]
 	totalCount: number | null
+	totalCountEstimated?: boolean
 	hasNext: boolean
 	hasPrev: boolean
 	nextCursor: string | null
@@ -238,6 +250,7 @@ export interface ReverseFkCount {
 	fromColumn: string
 	toColumn: string
 	count: number
+	virtual?: boolean
 }
 
 export interface IdMatch {

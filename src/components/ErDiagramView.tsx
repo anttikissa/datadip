@@ -1,5 +1,6 @@
 // Interactive pure-SVG Schema / ER Diagram with pan, zoom, draggable table cards, FK edge highlighting, and click-to-browse.
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
+import { formatRowCount } from '../lib/format.ts'
 import { IconSearch } from '../lib/icons.tsx'
 import type { DatabaseSchema, TableSchema } from '../shared/types.ts'
 
@@ -69,8 +70,8 @@ export function ErDiagramView(props: { schema: DatabaseSchema | null; onOpenTabl
 	})
 
 	const rowCountByTable = createMemo(() => {
-		const map = new Map<string, number | null>()
-		for (const t of props.schema?.tables ?? []) map.set(t.name, t.rowCount)
+		const map = new Map<string, { count: number | null; estimated?: boolean }>()
+		for (const t of props.schema?.tables ?? []) map.set(t.name, { count: t.rowCount, estimated: t.rowCountEstimated })
 		return map
 	})
 
@@ -364,9 +365,9 @@ export function ErDiagramView(props: { schema: DatabaseSchema | null; onOpenTabl
 											<text x="11" y="21" class="er-title">
 												{ts.name.length > 22 ? ts.name.slice(0, 21) + '…' : ts.name}
 											</text>
-											<Show when={rows() !== null && rows() !== undefined}>
+											<Show when={rows()?.count !== null && rows()?.count !== undefined}>
 												<text x={CARD_W - 10} y="21" text-anchor="end" class="er-count">
-													{rows()!.toLocaleString()}
+													{formatRowCount(rows()!.count, rows()!.estimated)}
 												</text>
 											</Show>
 
