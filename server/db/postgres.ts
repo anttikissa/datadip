@@ -62,8 +62,40 @@ export function parsePostgresUrl(input: string): ParsedPostgresUrl {
 	}
 	const database = decodeURIComponent(u.pathname.replace(/^\/+/, '')) || 'postgres'
 	const username = u.username ? decodeURIComponent(u.username) : undefined
-	const sslMode = u.searchParams.get('sslmode') ?? (u.searchParams.get('ssl') === 'true' ? 'require' : undefined)
+	const rawSslMode = u.searchParams.get('sslmode')?.trim().toLowerCase()
+	const rawSsl = u.searchParams.get('ssl')?.trim().toLowerCase()
+	const sslMode =
+		rawSslMode ||
+		(rawSsl === 'true' || rawSsl === '1' ? 'require' : rawSsl === 'false' || rawSsl === '0' ? 'disable' : undefined)
 	return { rawUrl: withScheme, hostname, port, database, username, sslMode }
+}
+
+// Match libpq default (sslmode=prefer) because Bun.SQL otherwise sends plaintext without SSLRequest,
+// causing managed Postgres hosts (Supabase, RDS, Render, etc.) to reject bare DATABASE_URLs with "no encryption".
+export function buildPostgresConnectConfig(
+	parsed: ParsedPostgresUrl,
+	tunnelLocalPort?: number,
+): { url: string; tls?: SQL.PostgresOrMySQLOptions['tls'] } {
+	const u = new URL(parsed.rawUrl)
+	if (!u.searchParams.has('sslmode') && !u.searchParams.has('ssl')) {
+		u.searchParams.set('sslmode', 'prefer')
+	}
+
+	let tls: SQL.PostgresOrMySQLOptions['tls'] = undefined
+	if (tunnelLocalPort !== undefined) {
+		u.hostname = '127.0.0.1'
+		u.port = String(tunnelLocalPort)
+		// Preserve real Postgres hostname for TLS SNI & verification when TLS is explicitly required.
+		// Only pass `tls` for required modes because passing a `tls` object disables `sslmode=prefer` plaintext fallback in Bun.SQL.
+		if (parsed.sslMode === 'require' || parsed.sslMode === 'verify-ca' || parsed.sslMode === 'verify-full') {
+			tls =
+				parsed.sslMode === 'verify-full' || parsed.sslMode === 'verify-ca'
+					? { serverName: parsed.hostname }
+					: { serverName: parsed.hostname, rejectUnauthorized: false }
+		}
+	}
+
+	return tls ? { url: u.toString(), tls } : { url: u.toString() }
 }
 
 export function redactPostgresUrl(input: string): string {
@@ -283,31 +315,23 @@ export class PostgresAdapter implements DbAdapter {
 		if (this.connectPromise) return this.connectPromise
 
 		this.connectPromise = (async () => {
-			const u = new URL(this.parsed.rawUrl)
-			let tlsOpt: SQL.PostgresOrMySQLOptions['tls'] = undefined
-
-			if (this.tunnel) {
-				const localPort = await this.tunnel.ensureOpen()
-				u.hostname = '127.0.0.1'
-				u.port = String(localPort)
-				// Preserve real RDS/Postgres hostname for TLS SNI & verification through the local SSH tunnel.
-				if (this.parsed.sslMode && this.parsed.sslMode !== 'disable') {
-					tlsOpt =
-						this.parsed.sslMode === 'verify-full' || this.parsed.sslMode === 'verify-ca'
-							? { serverName: this.parsed.hostname }
-							: { serverName: this.parsed.hostname, rejectUnauthorized: false }
-				}
-			}
+			const localPort = this.tunnel ? await this.tunnel.ensureOpen() : undefined
+			const connCfg = buildPostgresConnectConfig(this.parsed, localPort)
 
 			const client = new SQL({
-				url: u.toString(),
+				url: connCfg.url,
 				adapter: 'postgres',
 				max: 6,
 				idleTimeout: 30,
 				connectionTimeout: 15,
-				...(tlsOpt ? { tls: tlsOpt } : {}),
+				...(connCfg.tls ? { tls: connCfg.tls } : {}),
 			})
-			await client.connect()
+			try {
+				await client.connect()
+			} catch (err) {
+				await client.close().catch(() => {})
+				throw err
+			}
 			this.sql = client
 			return client
 		})().catch((err) => {

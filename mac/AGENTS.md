@@ -31,3 +31,8 @@ Specific rules for `DataDip.app` (`mac/DataDip.swift`) and its
 - Sign `Contents/MacOS/datadip-server` with `--options runtime` and
   `mac/entitlements.plist` (Bun JavaScriptCore JIT entitlements) before
   signing `DataDip.app` so Apple notarization and Hardened Runtime pass.
+- Before joining an already-running local server from `server.ason`,
+  compare `/api/health`'s reported `version` against `Bundle.main`'s
+  `CFBundleShortVersionString`; if they differ, stop the stale server
+  and launch the bundled one so app upgrades never stay stuck on an
+  older background server.

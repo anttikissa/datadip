@@ -2625,6 +2625,10 @@ dialog.omnibar-dialog::backdrop {
 	background: var(--fk-bg);
 	color: var(--fk-link);
 }
+.changelog-tag.tag-fix {
+	background: var(--ok-bg);
+	color: var(--ok);
+}
 .changelog-tag.tag-safety {
 	background: var(--prod-bg);
 	color: var(--prod);

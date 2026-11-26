@@ -1260,6 +1260,10 @@ kbd {
 	background: var(--accent-soft);
 	color: var(--accent);
 }
+.cl-tag.tag-fix {
+	background: var(--ok-soft);
+	color: var(--ok);
+}
 .cl-tag.tag-safety {
 	background: var(--prod-soft);
 	color: var(--prod);

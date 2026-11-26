@@ -3,12 +3,12 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>DataDip v0.2.0 — Browse SQLite &amp; PostgreSQL like the web</title>
+		<title>DataDip v0.2.1 — Browse SQLite &amp; PostgreSQL like the web</title>
 		<meta
 			name="description"
-			content="DataDip v0.2.0: fast, keyboard-first SQLite and PostgreSQL browser, foreign-key navigator, interactive ER diagram, 1-key column profiler, and SQL console. Read-only by default. Native macOS app, no Electron, MIT open source."
+			content="DataDip v0.2.1: fast, keyboard-first SQLite and PostgreSQL browser, foreign-key navigator, interactive ER diagram, 1-key column profiler, and SQL console. Read-only by default. Native macOS app, no Electron, MIT open source."
 		/>
-		<meta property="og:title" content="DataDip v0.2.0 — Browse SQLite &amp; PostgreSQL like the web" />
+		<meta property="og:title" content="DataDip v0.2.1 — Browse SQLite &amp; PostgreSQL like the web" />
 		<meta
 			property="og:description"
 			content="New in v0.2.0: Interactive ER Diagram, 1-Key Column Profiling, Client Workspaces, Locked Read-Only Replicas, CSV/JSON Import, and SQLite PRAGMA/WAL Inspector. Signed macOS app, MIT open source."
@@ -41,7 +41,7 @@
 						<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
 						<span class="brand-name">DataDip</span>
 					</a>
-					<a class="version-pill" href="#changelog" title="View v0.2.0 changelog">v0.2.0</a>
+					<a class="version-pill" href="#changelog" title="View v0.2.1 changelog">v0.2.1</a>
 				</div>
 
 				<nav class="nav-links" aria-label="Primary">
@@ -64,7 +64,7 @@
 						<span class="theme-icon-sun" aria-hidden="true">&#9788;</span>
 						<span class="theme-icon-moon" aria-hidden="true">&#9790;</span>
 					</button>
-					<a class="btn primary sm" href="./downloads/DataDip-0.2.0-arm64.dmg" download>Download DMG</a>
+					<a class="btn primary sm" href="./downloads/DataDip-0.2.1-arm64.dmg" download>Download DMG</a>
 				</div>
 			</div>
 		</header>
@@ -75,9 +75,9 @@
 				<div class="container">
 					<div class="hero-copy">
 						<a class="release-banner" href="#whats-new">
-							<span class="release-pill mono">v0.2.0</span>
+							<span class="release-pill mono">v0.2.1</span>
 							<span class="release-text">
-								Grand Release: Interactive ER Diagram, 1-Key Column Profiling, Workspaces, &amp; Locked Prod Replicas
+								ER Diagram, 1-Key Column Profiling, Workspaces, Locked Prod Replicas &amp; Auto-TLS Postgres
 							</span>
 							<span class="release-arrow" aria-hidden="true">&rarr;</span>
 						</a>
@@ -91,9 +91,9 @@
 						</p>
 
 						<div class="hero-ctas">
-							<a class="btn primary lg" href="./downloads/DataDip-0.2.0-arm64.dmg" download>
+							<a class="btn primary lg" href="./downloads/DataDip-0.2.1-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download v0.2.0 for macOS (Apple Silicon)
+								Download v0.2.1 for macOS (Apple Silicon)
 							</a>
 							<a class="btn secondary lg" href="#install">Build from Source / Linux</a>
 						</div>
@@ -798,7 +798,7 @@
 					<div class="section-head">
 						<h2>Changelog</h2>
 						<p>
-							Every release is also browsable right inside DataDip via the <code>v0.2.0</code> pill in the top bar or
+							Every release is also browsable right inside DataDip via the <code>v0.2.1</code> pill in the top bar or
 							<kbd>&#8984;K</kbd> &rarr; <em>Changelog</em>.
 						</p>
 					</div>
@@ -807,6 +807,7 @@
 						<div class="cl-filters" role="group" aria-label="Filter changelog by category">
 							<button type="button" class="cl-filter active" data-filter="all" aria-pressed="true">All</button>
 							<button type="button" class="cl-filter" data-filter="new" aria-pressed="false">New</button>
+							<button type="button" class="cl-filter" data-filter="fix" aria-pressed="false">Fixes</button>
 							<button type="button" class="cl-filter" data-filter="safety" aria-pressed="false">Safety</button>
 							<button type="button" class="cl-filter" data-filter="sql" aria-pressed="false">SQL</button>
 							<button type="button" class="cl-filter" data-filter="sqlite" aria-pressed="false">SQLite</button>
@@ -823,12 +824,53 @@
 					</div>
 
 					<div class="cl-timeline">
-						<!-- v0.2.0 -->
+						<!-- v0.2.1 -->
 						<article class="cl-release latest">
 							<div class="cl-release-head">
 								<div class="cl-ver-group">
-									<span class="cl-ver mono">v0.2.0</span>
+									<span class="cl-ver mono">v0.2.1</span>
 									<span class="badge ok">LATEST</span>
+									<span class="cl-date mono">2026-11-26</span>
+								</div>
+								<div class="cl-links">
+									<a href="./downloads/DataDip-0.2.1-arm64.dmg" download>Download DMG</a>
+									<span class="sep">&middot;</span>
+									<a href="https://github.com/anttikissa/datadip/releases/tag/v0.2.1" target="_blank" rel="noreferrer">
+										GitHub Release &nearr;
+									</a>
+								</div>
+							</div>
+							<h3 class="cl-headline">PostgreSQL TLS Auto-Negotiation (Supabase / RDS / Cloud) &amp; Upgrade Server Refresh</h3>
+							<p class="cl-summary">
+								Critical hotfix making bare cloud PostgreSQL connection strings work out of the box and ensuring
+								<code>DataDip.app</code> upgrades never stay attached to an older background server.
+							</p>
+							<ul class="cl-list">
+								<li class="cl-item" data-tag="fix">
+									<span class="cl-tag tag-fix mono">FIX</span>
+									<div>
+										<strong>PostgreSQL defaults to <code>sslmode=prefer</code></strong> — Matches <code>libpq</code> by
+										sending PostgreSQL <code>SSLRequest</code> when no <code>sslmode</code>/<code>ssl</code> param is set:
+										negotiates TLS automatically on Supabase, RDS, Neon, and Render while falling back to plaintext for
+										local non-SSL servers.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="macos">
+									<span class="cl-tag tag-macos mono">MACOS</span>
+									<div>
+										<strong>Auto-restart stale background servers on upgrade</strong> — <code>DataDip.app</code> checks
+										<code>/api/health</code> version against its bundle before joining an existing server, stopping older
+										background versions automatically.
+									</div>
+								</li>
+							</ul>
+						</article>
+
+						<!-- v0.2.0 -->
+						<article class="cl-release">
+							<div class="cl-release-head">
+								<div class="cl-ver-group">
+									<span class="cl-ver mono">v0.2.0</span>
 									<span class="cl-date mono">2026-11-26</span>
 								</div>
 								<div class="cl-links">
@@ -1004,7 +1046,7 @@
 			<section id="install" class="section alt-bg">
 				<div class="container">
 					<div class="section-head">
-						<h2>Get DataDip v0.2.0</h2>
+						<h2>Get DataDip v0.2.1</h2>
 						<p>Self-contained macOS app with zero dependencies, or run from source on macOS and Linux.</p>
 					</div>
 
@@ -1020,9 +1062,9 @@
 								by Apple.
 							</p>
 
-							<a class="btn primary lg full" href="./downloads/DataDip-0.2.0-arm64.dmg" download>
+							<a class="btn primary lg full" href="./downloads/DataDip-0.2.1-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download DataDip-0.2.0-arm64.dmg (46 MB)
+								Download DataDip-0.2.1-arm64.dmg (46 MB)
 							</a>
 
 							<div class="checksum-box">
@@ -1032,12 +1074,12 @@
 										type="button"
 										class="copy-btn"
 										id="dmg-sha-btn"
-										data-copy="4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64"
+										data-copy="1bd575aacebf6a49f2c0df7ae42155b778824e5c02016f677db322e17e6e9a24"
 									>
 										Copy
 									</button>
 								</div>
-								<code class="mono checksum-val" id="dmg-sha-val">4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64</code>
+								<code class="mono checksum-val" id="dmg-sha-val">1bd575aacebf6a49f2c0df7ae42155b778824e5c02016f677db322e17e6e9a24</code>
 							</div>
 
 							<p class="install-foot">
@@ -1101,7 +1143,7 @@ datadip stop         # stop background server</code></pre>
 					<img src="./assets/icon-32.png" alt="" width="18" height="18" />
 					<strong>DataDip</strong>
 					<span class="sep">&middot;</span>
-					<span>v0.2.0</span>
+					<span>v0.2.1</span>
 					<span class="sep">&middot;</span>
 					<span>MIT License</span>
 					<span class="sep">&middot;</span>

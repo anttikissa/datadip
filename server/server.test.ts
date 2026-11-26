@@ -496,8 +496,15 @@ describe('DataDip server API & safety boundaries', () => {
 		expect(writeRes.status).toBe(403)
 	})
 
-	test('PostgreSQL URL parser, redaction, and identifier helpers work cleanly', async () => {
-		const { parsePostgresUrl, redactPostgresUrl, quotePgTable, normalizePgCell } = await import('./db/postgres.ts')
+	test('PostgreSQL URL parser, redaction, TLS default, and identifier helpers work cleanly', async () => {
+		const {
+			parsePostgresUrl,
+			buildPostgresConnectConfig,
+			redactPostgresUrl,
+			quotePgTable,
+			normalizePgCell,
+			PostgresAdapter,
+		} = await import('./db/postgres.ts')
 		const parsed = parsePostgresUrl('postgres://alice:s3cr3t@db.example.com:5433/prod_app?sslmode=require')
 		expect(parsed.hostname).toBe('db.example.com')
 		expect(parsed.port).toBe(5433)
@@ -508,6 +515,59 @@ describe('DataDip server API & safety boundaries', () => {
 		expect(quotePgTable('billing.invoices')).toBe('"billing"."invoices"')
 		expect(normalizePgCell({ a: 1 })).toBe('{"a":1}')
 		expect(normalizePgCell(42n)).toBe('42')
+
+		// Bare URLs default to sslmode=prefer (matching libpq), while explicit disable/require are respected
+		const bare = parsePostgresUrl('postgresql://postgres:pw@db.example.com:5432/postgres')
+		expect(bare.sslMode).toBeUndefined()
+		expect(buildPostgresConnectConfig(bare)).toEqual({
+			url: 'postgresql://postgres:pw@db.example.com:5432/postgres?sslmode=prefer',
+		})
+		const disabled = parsePostgresUrl('postgres://postgres:pw@127.0.0.1:5432/postgres?sslmode=disable')
+		expect(disabled.sslMode).toBe('disable')
+		expect(buildPostgresConnectConfig(disabled).url).toContain('sslmode=disable')
+		// SSH tunnel preserves real hostname SNI when TLS is required, without disabling prefer fallback when unset
+		expect(buildPostgresConnectConfig(bare, 55432)).toEqual({
+			url: 'postgresql://postgres:pw@127.0.0.1:55432/postgres?sslmode=prefer',
+		})
+		expect(buildPostgresConnectConfig(parsed, 55432)).toEqual({
+			url: 'postgres://alice:s3cr3t@127.0.0.1:55432/prod_app?sslmode=require',
+			tls: { serverName: 'db.example.com', rejectUnauthorized: false },
+		})
+
+		// Live wire-protocol check: bare URL sends PostgreSQL SSLRequest (00000008 04d2162f) and falls back cleanly on 'N'
+		const { createServer } = await import('node:net')
+		let sawSslRequest = false
+		let sawStartupAfterDecline = false
+		const mockPg = createServer((sock) => {
+			sock.once('data', (first) => {
+				if (first.toString('hex') === '0000000804d2162f') {
+					sawSslRequest = true
+					sock.write('N')
+					sock.once('data', () => {
+						sawStartupAfterDecline = true
+						const body = Buffer.from('SFATAL\0C28P01\0Mmock-pg-reached\0\0')
+						const hdr = Buffer.alloc(5)
+						hdr[0] = 0x45
+						hdr.writeInt32BE(body.length + 4, 1)
+						sock.write(Buffer.concat([hdr, body]))
+						sock.end()
+					})
+				} else {
+					sock.end()
+				}
+			})
+		})
+		await new Promise<void>((res) => mockPg.listen(0, '127.0.0.1', () => res()))
+		const mockPort = (mockPg.address() as { port: number }).port
+		const adapter = new PostgresAdapter(`postgresql://postgres:pw@127.0.0.1:${mockPort}/postgres`)
+		try {
+			await expect(adapter.ping()).rejects.toThrow('mock-pg-reached')
+		} finally {
+			adapter.close()
+			mockPg.close()
+		}
+		expect(sawSslRequest).toBe(true)
+		expect(sawStartupAfterDecline).toBe(true)
 	})
 
 	test('enforces alwaysReadOnly, persists workspace metadata, and supports cross-DB searchable history', async () => {

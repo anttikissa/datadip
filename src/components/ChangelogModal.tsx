@@ -5,6 +5,7 @@ import { APP_VERSION, CHANGELOG, type ChangelogTag } from '../shared/changelog.t
 
 const TAG_LABELS: Record<ChangelogTag, string> = {
 	new: 'NEW',
+	fix: 'FIX',
 	safety: 'SAFETY',
 	sql: 'SQL',
 	sqlite: 'SQLITE',

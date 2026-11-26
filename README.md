@@ -48,15 +48,15 @@ Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[
 
 ## Download (macOS Apple Silicon)
 
-Download the signed and Apple-notarized **`DataDip-0.2.0-arm64.dmg`** from [GitHub Releases](https://github.com/anttikissa/datadip/releases/latest) (macOS 13.3+, self-contained, no Bun or Xcode required).
+Download the signed and Apple-notarized **`DataDip-0.2.1-arm64.dmg`** from [GitHub Releases](https://github.com/anttikissa/datadip/releases/latest) (macOS 13.3+, self-contained, no Bun or Xcode required).
 
 1. Open the `.dmg` and drag **DataDip.app** into `/Applications`.
 2. Double-click `.db` / `.sqlite` files in Finder, drop them on the Dock icon, or press `Cmd+O`.
 3. Optionally choose **DataDip -> Install 'datadip' CLI...** from the menu bar to enable `datadip ./app.db` in your terminal.
 
 ```text
-SHA-256 (DataDip-0.2.0-arm64.dmg):
-4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64
+SHA-256 (DataDip-0.2.1-arm64.dmg):
+1bd575aacebf6a49f2c0df7ae42155b778824e5c02016f677db322e17e6e9a24
 ```
 
 ## Install & Run (from source)

@@ -1,8 +1,8 @@
 // Structured release changelog shared by the in-app What's New modal and version badge.
 
-export const APP_VERSION = '0.2.0'
+export const APP_VERSION = '0.2.1'
 
-export type ChangelogTag = 'new' | 'safety' | 'sql' | 'sqlite' | 'macos'
+export type ChangelogTag = 'new' | 'fix' | 'safety' | 'sql' | 'sqlite' | 'macos'
 
 export interface ChangelogItem {
 	tag: ChangelogTag
@@ -20,6 +20,27 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+	{
+		version: '0.2.1',
+		date: '2026-11-26',
+		headline: 'PostgreSQL TLS Auto-Negotiation (Supabase / RDS / Cloud) & Upgrade Server Refresh',
+		summary:
+			'Critical hotfix making bare cloud PostgreSQL connection strings work out of the box and ensuring DataDip.app upgrades never stay attached to an older background server.',
+		items: [
+			{
+				tag: 'fix',
+				title: 'PostgreSQL defaults to sslmode=prefer (fixes Supabase / cloud Postgres)',
+				detail:
+					'Matches libpq by sending PostgreSQL SSLRequest when no sslmode/ssl query param is set: upgrades to TLS automatically for Supabase, RDS, Neon, and Render while seamlessly falling back to plaintext for local non-SSL Postgres.',
+			},
+			{
+				tag: 'macos',
+				title: 'Auto-restart stale background servers on DataDip.app upgrade',
+				detail:
+					'DataDip.app now checks /api/health version against the app bundle before joining an existing server, stopping any older background version automatically.',
+			},
+		],
+	},
 	{
 		version: '0.2.0',
 		date: '2026-11-26',

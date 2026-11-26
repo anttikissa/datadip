@@ -96,6 +96,14 @@ shortcuts (`Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`) outside `DataDip.app`;
 and never hijack editor keys (`Cmd+[`, `Cmd+]`) in capture-phase JS
 listeners when `isEditableTarget(e.target)` is true.
 
+PostgreSQL connections via `Bun.SQL` must default to `sslmode=prefer`
+when neither `sslmode` nor `ssl` is present in the URL, matching
+`libpq` (send `SSLRequest` first, upgrade to TLS when supported, and
+fall back to plaintext when the server replies `'N'`). Only pass an
+explicit `tls` object to `new SQL(...)` when TLS is explicitly
+required (e.g. SNI over SSH tunnels), because setting `tls` disables
+`sslmode=prefer` plaintext fallback in `Bun.SQL`.
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

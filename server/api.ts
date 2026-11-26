@@ -1,5 +1,6 @@
 // HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, consoles, and discovery.
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
+import { APP_VERSION } from '../src/shared/changelog.ts'
 import type { BrowseParams, ConnectionConfig, DiscoverPreset, MutateRequest } from '../src/shared/types.ts'
 import { type ConnectionManager, HttpError } from './db/manager.ts'
 import { listSshConfigHosts } from './db/ssh-config.ts'
@@ -29,7 +30,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 	try {
 		// Health & meta
 		if (path === '/api/health' && method === 'GET') {
-			return asonResponse({ ok: true, version: '0.2.0', now: new Date().toISOString() })
+			return asonResponse({ ok: true, version: APP_VERSION, now: new Date().toISOString() })
 		}
 
 		// Live Server-Sent Events stream for connections.ason hot-reload & orphaned state

@@ -3,6 +3,7 @@ import Cocoa
 import WebKit
 
 let info = Bundle.main.infoDictionary ?? [:]
+let appVersion = info["CFBundleShortVersionString"] as? String
 let bundledServer: String? = {
 	let path = "\(Bundle.main.bundlePath)/Contents/MacOS/datadip-server"
 	return FileManager.default.isExecutableFile(atPath: path) ? path : nil
@@ -94,18 +95,36 @@ func extractHttpUrl(from text: String) -> URL? {
 	return nil
 }
 
-func isHealthy(_ url: URL) -> Bool {
-	guard let health = URL(string: "\(url.absoluteString)/api/health") else { return false }
+struct HealthStatus {
+	let ok: Bool
+	let version: String?
+}
+
+func probeHealth(_ url: URL) -> HealthStatus {
+	guard let health = URL(string: "\(url.absoluteString)/api/health") else { return HealthStatus(ok: false, version: nil) }
 	var req = URLRequest(url: health)
 	req.timeoutInterval = 1.0
 	let sem = DispatchSemaphore(value: 0)
-	var ok = false
-	URLSession.shared.dataTask(with: req) { _, resp, _ in
-		if let http = resp as? HTTPURLResponse, http.statusCode == 200 { ok = true }
+	var status = HealthStatus(ok: false, version: nil)
+	URLSession.shared.dataTask(with: req) { data, resp, _ in
+		if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+			var ver: String? = nil
+			if let data, let text = String(data: data, encoding: .utf8),
+			   let regex = try? NSRegularExpression(pattern: "\\bversion\\s*:\\s*'([^']+)'"),
+			   let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+			   let r = Range(match.range(at: 1), in: text) {
+				ver = String(text[r])
+			}
+			status = HealthStatus(ok: true, version: ver)
+		}
 		sem.signal()
 	}.resume()
 	_ = sem.wait(timeout: .now() + 1.2)
-	return ok
+	return status
+}
+
+func isHealthy(_ url: URL) -> Bool {
+	probeHealth(url).ok
 }
 
 func readServerAsonUrl() -> URL? {
@@ -339,7 +358,16 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		}
 	}
 
-	// Ensures a live server is reachable; restarts `datadip serve` if an external or owned server stopped.
+	func stopExternalServer() {
+		let p = datadip(["stop"])
+		p.standardOutput = FileHandle.nullDevice
+		p.standardError = FileHandle.nullDevice
+		if (try? p.run()) != nil {
+			p.waitUntilExit()
+		}
+	}
+
+	// Ensures a live server is reachable; restarts `datadip serve` if an external or owned server stopped or is a stale version.
 	func ensureServerRunning(forceReload: Bool, pathQuery: String?) {
 		recoverLock.lock()
 		if recovering {
@@ -364,13 +392,21 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 				currentOrigin = self.origin
 			}
 
-			// Fast path: join an already-running DataDip server immediately
-			if let existing = readServerAsonUrl(), isHealthy(existing) {
-				let nextOrigin = "\(existing.scheme ?? "http")://\(existing.host ?? ""):\(existing.port ?? 80)"
-				if forceReload || currentOrigin != nextOrigin {
-					self.openUrl(existing, pathQuery: savedPath)
+			// Fast path: join an already-running DataDip server only if its version matches this app bundle.
+			if let existing = readServerAsonUrl() {
+				let health = probeHealth(existing)
+				if health.ok {
+					let versionMismatch = appVersion != nil && health.version != appVersion
+					if versionMismatch {
+						self.stopExternalServer()
+					} else {
+						let nextOrigin = "\(existing.scheme ?? "http")://\(existing.host ?? ""):\(existing.port ?? 80)"
+						if forceReload || currentOrigin != nextOrigin {
+							self.openUrl(existing, pathQuery: savedPath)
+						}
+						return
+					}
 				}
-				return
 			}
 
 			var needsStart = true

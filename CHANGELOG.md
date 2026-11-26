@@ -2,6 +2,14 @@
 
 All notable changes to DataDip are documented here.
 
+## [0.2.1] - 2026-11-26
+
+**PostgreSQL TLS Auto-Negotiation & Upgrade Server Refresh**
+
+### Fixed
+- **PostgreSQL `sslmode=prefer` default**: bare `DATABASE_URL`s without `?sslmode=...` (such as Supabase, RDS, Neon, and Render) now match `libpq` by sending PostgreSQL `SSLRequest` first and negotiating TLS automatically, while seamlessly falling back to plaintext for local non-SSL servers.
+- **Stale background server reuse on `DataDip.app` upgrade**: `DataDip.app` now compares `/api/health`'s reported `version` against `CFBundleShortVersionString` before joining an existing server and restarts any older background server automatically.
+
 ## [0.2.0] - 2026-11-26
 
 **ER Diagram, 1-Key Column Profiling, Workspaces, & Locked Production Guardrails**

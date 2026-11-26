@@ -29,12 +29,14 @@ obvious.
   zero external dependencies).
 - PostgreSQL adapter (`server/db/postgres.ts`) & OpenSSH TCP tunnel
   (`server/db/ssh-tunnel.ts`): uses Bun's native `Bun.SQL` client with
-  `BEGIN READ ONLY` enforcement in Read-Only mode, `pg_class.reltuples`
-  row estimates (no automatic `COUNT(*)` on large tables >50k rows),
-  server-side `query.cancel()`, and `ssh -N -L` local port forwarding
-  reusing `SSH_ASKPASS` while preserving real-endpoint TLS `serverName`
-  (no remote Bun required). Connection URL passwords are always masked
-  in the UI (`maskConnectionPath`).
+  `sslmode=prefer` default (matching `libpq` so bare cloud `DATABASE_URL`s
+  like Supabase/RDS negotiate TLS while local plaintext Postgres still
+  falls back cleanly), `BEGIN READ ONLY` enforcement in Read-Only mode,
+  `pg_class.reltuples` row estimates (no automatic `COUNT(*)` on large
+  tables >50k rows), server-side `query.cancel()`, and `ssh -N -L` local
+  port forwarding reusing `SSH_ASKPASS` while preserving real-endpoint
+  TLS `serverName` when TLS is required (no remote Bun required).
+  Connection URL passwords are always masked in the UI (`maskConnectionPath`).
 - Large-table browsing guard: both SQLite (`>50 MB` files) and
   PostgreSQL (`>50k` estimated rows) skip automatic full-table `COUNT(*)`
   scans during table browsing, using `sqlite_stat1` / `pg_class.reltuples`
