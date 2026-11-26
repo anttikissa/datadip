@@ -137,7 +137,7 @@ export function DiscoverModal(props: {
 							onChange={(e) => {
 								const next = e.currentTarget.value as 'local' | 'ssh'
 								setLocation(next)
-								setRoots(next === 'ssh' ? '~, /var/lib' : '~/sync')
+								setRoots(next === 'ssh' ? '~, /var/lib' : '~/projects')
 								setMarkProd(next === 'ssh')
 							}}
 						>

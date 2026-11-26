@@ -65,7 +65,7 @@ obvious.
   when macOS system Keyboard Navigation is off.
 - Focus uses `:focus-visible` with a single 2px ring across the app.
 - Auto-Discover follows directory symlinks safely (deduplicating via
-  `realpathSync`) so symlinked storage volumes (e.g. `~/disk`) are found.
+  `realpathSync`) so symlinked storage volumes are found.
 - Truncated table cells support four complementary inspection modes:
   double-click / `Enter` opens an anchored Cell Viewer popover (with
   JSON pretty-print, Copy, and multi-line editor in Read-Write mode),
