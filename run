@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DataDip CLI entrypoint. Defaults to opening the app in the browser; passes through serve/url/status/open.
+# DataDip CLI entrypoint. Defaults to opening the app in the browser; passes through serve/url/status/open/stop.
 set -euo pipefail
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do

@@ -37,6 +37,7 @@ scratchpad IDE for local and SSH-remote databases.
 ```sh
 ./install
 datadip            # start server and open in browser
+datadip stop       # stop the background server
 datadip serve      # run server in foreground (default 127.0.0.1:4747)
 open -a DataDip    # launch the native macOS app
 ```

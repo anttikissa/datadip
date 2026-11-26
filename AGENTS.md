@@ -59,7 +59,7 @@ Open every SQLite database with `PRAGMA busy_timeout=5000;` BEFORE
 `SQLITE_BUSY_RECOVERY` during WAL initialization/recovery; without
 WAL+NORMAL, the default mode waits for disk on every write.
 
-CLI probe and control commands (`url`, `status`, `open`, and the
+CLI probe and control commands (`url`, `status`, `open`, `stop`, and the
 duplicate-server check in `serve`) must read only `server.ason` via
 `readServerInfo()` and never instantiate `DataStore`, open `state.db`,
 or start file watchers.

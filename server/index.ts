@@ -11,7 +11,7 @@ const DIST_DIR = join(ROOT_DIR, 'dist')
 const PUBLIC_DIR = join(ROOT_DIR, 'public')
 
 interface CliArgs {
-	command: 'serve' | 'url' | 'status' | 'open'
+	command: 'serve' | 'url' | 'status' | 'open' | 'stop'
 	host: string
 	port: number
 	dataDir?: string
@@ -24,7 +24,7 @@ function parseArgs(argv: string[]): CliArgs {
 	let dataDir: string | undefined
 
 	const args = [...argv]
-	if (args[0] && ['serve', 'url', 'status', 'open'].includes(args[0])) {
+	if (args[0] && ['serve', 'url', 'status', 'open', 'stop'].includes(args[0])) {
 		command = args.shift() as CliArgs['command']
 	}
 
@@ -185,12 +185,48 @@ async function runOpen(opts: CliArgs) {
 		process.exit(1)
 	}
 	console.log(url)
+	console.log('Run `datadip stop` to stop the server.')
 	const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
 	Bun.spawnSync([opener, url])
+}
+
+function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch {
+		return false
+	}
+}
+
+async function runStop(opts: CliArgs) {
+	const info = readServerInfo(opts.dataDir)
+	if (!info || !(await isServerAlive(info.url))) {
+		console.log('DataDip server is not running')
+		process.exit(0)
+	}
+	try {
+		process.kill(info.pid, 'SIGTERM')
+	} catch (err) {
+		console.error(
+			`Failed to stop DataDip server (pid ${info.pid}): ${err instanceof Error ? err.message : String(err)}`,
+		)
+		process.exit(1)
+	}
+	const deadline = Date.now() + 3000
+	while (Date.now() < deadline && isPidAlive(info.pid)) {
+		await Bun.sleep(50)
+	}
+	if (isPidAlive(info.pid)) {
+		console.error(`DataDip server (pid ${info.pid}) did not exit within 3s`)
+		process.exit(1)
+	}
+	console.log(`Stopped DataDip server (pid ${info.pid})`)
 }
 
 const opts = parseArgs(process.argv.slice(2))
 if (opts.command === 'serve') await runServe(opts)
 else if (opts.command === 'url') await runUrl(opts)
 else if (opts.command === 'status') await runStatus(opts)
+else if (opts.command === 'stop') await runStop(opts)
 else await runOpen(opts)

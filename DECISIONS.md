@@ -76,5 +76,6 @@ obvious.
 - `Ctrl+R` opens the Recent Databases & Tables modal (WebStorm/IDEA
   style, distinct from `Cmd+R` page reload) with MRU switching and
   instant filtering.
-- CLI probe/control commands (`url`, `status`, `open`, and the duplicate
-  server check) read only `server.ason` without opening `state.db`.
+- CLI probe/control commands (`url`, `status`, `open`, `stop`, and the
+  duplicate server check) read only `server.ason` without opening
+  `state.db`.
