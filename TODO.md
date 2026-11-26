@@ -6,7 +6,7 @@ Collected from 6 developer persona reviews (Startup Founding Eng, Staff Data/Ana
 
 - [x] **Real PostgreSQL adapter** (`Bun.SQL`, zero external deps) + `DATABASE_URL` one-paste connection parsing + full FK/reverse-FK/hover-peek/schema/EXPLAIN/cancel support (`server/db/postgres.ts`)
 - [x] **OpenSSH TCP port-forwarding tunnels** (`ssh -N -L` with `~/.ssh/config` `ProxyJump` + `SSH_ASKPASS`, no remote Bun needed for TCP DBs) (`server/db/ssh-tunnel.ts`)
-- [x] **Instant ad-hoc CLI file opening** (`datadip ./app.db`, `POST /api/connections/open-file`) -- still todo: Finder double-click, Dock drop, `Cmd+O` file picker
+- [x] **Instant ad-hoc file opening** (`datadip ./app.db`, `POST /api/connections/open-file`, plus Finder double-click, Dock drop, and `Cmd+O` in `DataDip.app`)
 - [x] **Full-result file export** (CSV, TSV, JSON, Markdown, SQL INSERT -- download to disk up to 100k rows, not clipboard-only or capped at current page / 2,000 rows) (`server/export.ts`, `POST /api/connections/:id/export`)
 - [x] **Safe large-table browsing** (skip automatic exact `COUNT(*)` on large SQLite >50 MB & Postgres >50k-row tables, show estimated/unknown totals)
 - [x] **README overhaul & MIT LICENSE** (`LICENSE`, `README.md` with SQLite & PostgreSQL support on line 1, no ASON/internal jargon, `./install` disclosure) -- still todo: screenshots/GIF
@@ -14,7 +14,7 @@ Collected from 6 developer persona reviews (Startup Founding Eng, Staff Data/Ana
 - [x] **Local SQLite live `.db` / `-wal` auto-refresh** (`fs.watch` + SSE `db-changed` + `Live` toggle in `TableView`, paused automatically while edits are staged)
 - [x] **Keyboard shortcuts parity** (completed in `4c48d8d`: fixed `Cmd+[` / `Cmd+]` in editor, macOS Emacs keys, `Cmd+R` data refresh, `Cmd+C`/`Cmd+Shift+C`, `Cmd+S`, `Cmd+F`, `Cmd+P`, `Cmd+.` cancel, `Cmd+T`/`Cmd+W` tabs, console result grid nav)
 - [x] **System dark mode default** (honor `prefers-color-scheme: dark` when no explicit theme preference is saved)
-- [ ] **Distribution** (`brew install --cask datadip`, signed & notarized `.dmg`, self-contained app bundle without source checkout / `swiftc`)
+- [x] **Signed & notarized self-contained macOS `.dmg`** (`mac/build-dmg`, bundled `bun build --compile` server + Vite assets, `Install 'datadip' CLI...`, zero git clone / Bun / `swiftc` needed) -- still todo: `brew install --cask datadip`, GitHub Releases automation
 
 ---
 

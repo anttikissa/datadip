@@ -53,6 +53,7 @@ bun install
 bun run serve         # API server on :4747
 bun run dev           # Vite HMR client on :4748
 ./test                # typecheck + unit tests
+./mac/build-dmg       # build self-contained signed macOS .app & .dmg (--notarize <profile> to notarize)
 ```
 
 ## License

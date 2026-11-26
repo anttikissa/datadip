@@ -20,3 +20,14 @@ Specific rules for `DataDip.app` (`mac/DataDip.swift`) and its
   `WKWebView` directly, which selects the entire document when focus is
   on a non-input element like `<pre>` (read-only viewer popovers in the
   web client use `<textarea readonly>` for this reason).
+- When bundling the server with `bun build --compile` (`mac/build-dmg`),
+  `import.meta.url` inside the compiled executable resolves under
+  `/$bunfs/root/`, while additional worker entrypoints keep their path
+  relative to the common source root (e.g.
+  `/$bunfs/root/db/sqlite-query-worker.js`). Never assume relative
+  `new URL('./...', import.meta.url)` resolves identically in dev and
+  compiled modes; branch on `import.meta.url.includes('/$bunfs/')` and
+  smoke-test the signed binary directly.
+- Sign `Contents/MacOS/datadip-server` with `--options runtime` and
+  `mac/entitlements.plist` (Bun JavaScriptCore JIT entitlements) before
+  signing `DataDip.app` so Apple notarization and Hardened Runtime pass.

@@ -1,7 +1,50 @@
 // In-memory broker for interactive OpenSSH SSH_ASKPASS prompts (key passphrases, passwords, 2FA, host-key checks).
 // Secrets are relayed directly to the waiting ssh process and are never logged or written to disk.
+import { existsSync, realpathSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { secretId, tid } from '../../src/shared/tid.ts'
 import type { SshPromptRequest } from '../../src/shared/types.ts'
+
+const IS_COMPILED = import.meta.url.includes('/$bunfs/')
+const THIS_DIR = IS_COMPILED ? '' : dirname(fileURLToPath(import.meta.url))
+
+function resolveAskpassHelper(): { scriptSh: string; scriptTs?: string } {
+	if (!IS_COMPILED) {
+		return {
+			scriptSh: join(THIS_DIR, 'ssh-askpass.sh'),
+			scriptTs: join(THIS_DIR, 'ssh-askpass.ts'),
+		}
+	}
+	const candidates: string[] = []
+	if (process.env.DATADIP_ASSETS_DIR) {
+		candidates.push(join(process.env.DATADIP_ASSETS_DIR, 'ssh-askpass.sh'))
+	}
+	let execDir = dirname(process.execPath)
+	try {
+		execDir = dirname(realpathSync(process.execPath))
+	} catch {}
+	candidates.push(resolve(execDir, '..', 'Resources', 'ssh-askpass.sh'))
+	const found = candidates.find((p) => existsSync(p)) ?? candidates[0]!
+	return { scriptSh: found }
+}
+
+export function applySshAskpassEnv(
+	env: Record<string, string | undefined>,
+	askpass: { url: string; token: string },
+	host: string,
+) {
+	const helper = resolveAskpassHelper()
+	env.SSH_ASKPASS = helper.scriptSh
+	env.SSH_ASKPASS_REQUIRE = 'force'
+	env.DISPLAY = env.DISPLAY || ':0'
+	env.DATADIP_BUN = process.execPath
+	if (helper.scriptTs) env.DATADIP_ASKPASS_SCRIPT = helper.scriptTs
+	else delete env.DATADIP_ASKPASS_SCRIPT
+	env.DATADIP_ASKPASS_URL = askpass.url
+	env.DATADIP_ASKPASS_TOKEN = askpass.token
+	env.DATADIP_ASKPASS_HOST = host
+}
 
 export type SshPromptResult =
 	| { ok: true; answer: string; cancelled?: false }

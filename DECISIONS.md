@@ -10,6 +10,18 @@ obvious.
   (`DataDip.app`). All API traffic lives under `/api/*` using ASON so v2
   can add remote deployment, authentication, and AI query features
   without reshaping the client.
+- Self-contained macOS distribution (`mac/build-dmg`, `mac/entitlements.plist`):
+  bundles the `swiftc`-compiled `DataDip` shell, `bun build --compile`
+  standalone `Contents/MacOS/datadip-server` (including the SQLite query
+  worker and `__ssh_askpass` subcommand), Vite `Contents/Resources/dist/`,
+  `ssh-askpass.sh`, and `AppIcon.icns` into a single drag-to-Applications
+  `DataDip.app` and signed/notarized `arm64` `.dmg` (`dev.datadip.app`),
+  requiring zero git clone, system Bun, or `swiftc` for end users. Data
+  stays in `~/.datadip/data` so CLI (`DataDip -> Install 'datadip' CLI…`)
+  and `.app` share one config. `DataDip.app` registers `.db`/`.sqlite`/
+  `.sqlite3`/`.db3` document types for Finder double-click, Dock drop,
+  and `Cmd+O` file open. Dev builds via `mac/build` continue to launch
+  from the local checkout when `Contents/MacOS/datadip-server` is absent.
 - Adapter abstraction (`server/db/types.ts`): all table listing, schema
   inspection, browsing, querying, mutations, FK peeks, and reverse-FK
   counts flow through `DbAdapter` for SQLite (local and SSH) and

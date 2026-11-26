@@ -23,6 +23,11 @@ import {
 import type { DbAdapter } from './types.ts'
 import { tid } from '../../src/shared/tid.ts'
 
+const IS_COMPILED = import.meta.url.includes('/$bunfs/')
+const QUERY_WORKER_URL = IS_COMPILED
+	? new URL('./db/sqlite-query-worker.js', import.meta.url).href
+	: new URL('./sqlite-query-worker.ts', import.meta.url).href
+
 export function expandTilde(path: string): string {
 	if (path === '~') return homedir()
 	if (path.startsWith('~/')) return homedir() + path.slice(1)
@@ -86,7 +91,7 @@ export class LocalSqliteAdapter implements DbAdapter {
 		}
 		const qid = options.queryId || tid('q')
 		return new Promise<QueryStatementResult[]>((resolve, reject) => {
-			const worker = new Worker(new URL('./sqlite-query-worker.ts', import.meta.url).href)
+			const worker = new Worker(QUERY_WORKER_URL)
 			let settled = false
 			const finish = (fn: () => void) => {
 				if (settled) return

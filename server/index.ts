@@ -1,15 +1,40 @@
 // DataDip CLI and HTTP server serving /api/* (ASON) and the built Vite web client.
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { handleApiRequest } from './api.ts'
 import { ConnectionManager } from './db/manager.ts'
+import { runSshAskpass } from './db/ssh-askpass.ts'
 import { DataStore, readServerInfo } from './store.ts'
 
-const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const DIST_DIR = join(ROOT_DIR, 'dist')
-const PUBLIC_DIR = join(ROOT_DIR, 'public')
+const IS_COMPILED = import.meta.url.includes('/$bunfs/')
+const ROOT_DIR = IS_COMPILED ? '' : resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+function resolveAssetsDirs(): { distDir: string; publicDir: string } {
+	const envAssets = process.env.DATADIP_ASSETS_DIR
+	if (envAssets) {
+		const envDist = join(envAssets, 'dist')
+		return {
+			distDir: existsSync(envDist) ? envDist : envAssets,
+			publicDir: existsSync(join(envAssets, 'public')) ? join(envAssets, 'public') : envAssets,
+		}
+	}
+	if (IS_COMPILED) {
+		let execDir = dirname(process.execPath)
+		try {
+			execDir = dirname(realpathSync(process.execPath))
+		} catch {}
+		const resDir = resolve(execDir, '..', 'Resources')
+		return {
+			distDir: join(resDir, 'dist'),
+			publicDir: resDir,
+		}
+	}
+	return { distDir: join(ROOT_DIR, 'dist'), publicDir: join(ROOT_DIR, 'public') }
+}
+
+const { distDir: DIST_DIR, publicDir: PUBLIC_DIR } = resolveAssetsDirs()
 
 interface CliArgs {
 	command: 'serve' | 'url' | 'status' | 'open' | 'stop'
@@ -169,15 +194,17 @@ async function runOpen(opts: CliArgs) {
 		url = info.url
 	} else {
 		// Start server detached
-		const args = [
-			process.execPath,
-			join(ROOT_DIR, 'server', 'index.ts'),
-			'serve',
-			'--host',
-			opts.host,
-			'--port',
-			String(opts.port),
-		]
+		const args = IS_COMPILED
+			? [process.execPath, 'serve', '--host', opts.host, '--port', String(opts.port)]
+			: [
+					process.execPath,
+					join(ROOT_DIR, 'server', 'index.ts'),
+					'serve',
+					'--host',
+					opts.host,
+					'--port',
+					String(opts.port),
+				]
 		if (opts.dataDir) args.push('--data', opts.dataDir)
 		const child = Bun.spawn(args, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
 		child.unref()
@@ -248,6 +275,10 @@ async function runStop(opts: CliArgs) {
 		process.exit(1)
 	}
 	console.log(`Stopped DataDip server (pid ${info.pid})`)
+}
+
+if (process.argv[2] === '__ssh_askpass') {
+	await runSshAskpass(process.argv.slice(3))
 }
 
 const opts = parseArgs(process.argv.slice(2))

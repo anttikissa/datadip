@@ -3,6 +3,10 @@ import Cocoa
 import WebKit
 
 let info = Bundle.main.infoDictionary ?? [:]
+let bundledServer: String? = {
+	let path = "\(Bundle.main.bundlePath)/Contents/MacOS/datadip-server"
+	return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+}()
 let checkout = info["DataDipCheckout"] as? String ?? "\(NSHomeDirectory())/.datadip"
 let bun = info["DataDipBun"] as? String ?? "\(NSHomeDirectory())/.bun/bin/bun"
 let startWait: TimeInterval = 15
@@ -151,6 +155,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	var titleObs: NSKeyValueObservation?
 	private let recoverLock = NSLock()
 	private var recovering = false
+	private var pendingOpenFile: String?
 
 	func applicationDidFinishLaunching(_ note: Notification) {
 		NSApp.mainMenu = buildMenu()
@@ -183,10 +188,18 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 
 	func datadip(_ args: [String]) -> Process {
 		let p = Process()
-		p.executableURL = URL(fileURLWithPath: bun)
-		p.arguments = ["\(checkout)/server/index.ts"] + args + dataArgs()
-		p.environment = env
-		p.currentDirectoryURL = URL(fileURLWithPath: checkout)
+		var runEnv = env
+		if let serverBin = bundledServer {
+			p.executableURL = URL(fileURLWithPath: serverBin)
+			p.arguments = args + dataArgs()
+			runEnv["DATADIP_ASSETS_DIR"] = Bundle.main.resourcePath ?? "\(Bundle.main.bundlePath)/Contents/Resources"
+			p.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
+		} else {
+			p.executableURL = URL(fileURLWithPath: bun)
+			p.arguments = ["\(checkout)/server/index.ts"] + args + dataArgs()
+			p.currentDirectoryURL = URL(fileURLWithPath: checkout)
+		}
+		p.environment = runEnv
 		p.standardInput = FileHandle.nullDevice
 		return p
 	}
@@ -207,7 +220,114 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		let target = urlWithPath(base, pathQuery)
 		DispatchQueue.main.async {
 			self.origin = "\(base.scheme ?? "http")://\(base.host ?? ""):\(base.port ?? 80)"
+			if let pending = self.pendingOpenFile {
+				self.pendingOpenFile = nil
+				self.openDatabaseFile(pending)
+				return
+			}
 			self.web.load(URLRequest(url: target))
+		}
+	}
+
+	func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+		openDatabaseFile(filename)
+		return true
+	}
+
+	func application(_ application: NSApplication, open urls: [URL]) {
+		for url in urls where url.isFileURL {
+			openDatabaseFile(url.path)
+		}
+	}
+
+	func openDatabaseFile(_ path: String) {
+		DispatchQueue.main.async { [weak self] in
+			guard let self else { return }
+			guard !self.origin.isEmpty, let endpoint = URL(string: "\(self.origin)/api/connections/open-file") else {
+				self.pendingOpenFile = path
+				return
+			}
+			let escaped = path
+				.replacingOccurrences(of: "\\", with: "\\\\")
+				.replacingOccurrences(of: "'", with: "\\'")
+			var req = URLRequest(url: endpoint)
+			req.httpMethod = "POST"
+			req.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
+			req.httpBody = Data("{ path: '\(escaped)' }".utf8)
+			req.timeoutInterval = 10
+
+			let currentOrigin = self.origin
+			URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+				guard let self else { return }
+				let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+				let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+				if status >= 200 && status < 300,
+				   let regex = try? NSRegularExpression(pattern: "\\bid\\s*:\\s*'([^']+)'"),
+				   let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+				   let idRange = Range(match.range(at: 1), in: text),
+				   let baseUrl = URL(string: currentOrigin) {
+					let connId = String(text[idRange])
+					let encoded = connId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? connId
+					self.openUrl(baseUrl, pathQuery: "/c/\(encoded)")
+					DispatchQueue.main.async {
+						self.window.makeKeyAndOrderFront(nil)
+						NSApp.activate(ignoringOtherApps: true)
+					}
+					return
+				}
+				var msg = err?.localizedDescription ?? "Could not open database file."
+				if let regex = try? NSRegularExpression(pattern: "\\berror\\s*:\\s*'([^']+)'"),
+				   let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+				   let errRange = Range(match.range(at: 1), in: text) {
+					msg = String(text[errRange])
+				}
+				DispatchQueue.main.async {
+					let alert = NSAlert()
+					alert.messageText = "Cannot Open Database"
+					alert.informativeText = "\(path)\n\n\(msg)"
+					alert.alertStyle = .warning
+					alert.runModal()
+				}
+			}.resume()
+		}
+	}
+
+	@objc func openDatabaseDialog(_ sender: Any?) {
+		let panel = NSOpenPanel()
+		panel.title = "Open SQLite Database"
+		panel.canChooseFiles = true
+		panel.canChooseDirectories = false
+		panel.allowsMultipleSelection = false
+		if panel.runModal() == .OK, let url = panel.url {
+			openDatabaseFile(url.path)
+		}
+	}
+
+	@objc func installCli(_ sender: Any?) {
+		guard let serverBin = bundledServer else { return }
+		let binDir = "\(NSHomeDirectory())/.local/bin"
+		let linkPath = "\(binDir)/datadip"
+		let fm = FileManager.default
+		do {
+			try fm.createDirectory(atPath: binDir, withIntermediateDirectories: true)
+			if fm.fileExists(atPath: linkPath) || (try? fm.attributesOfItem(atPath: linkPath)) != nil {
+				try fm.removeItem(atPath: linkPath)
+			}
+			try fm.createSymbolicLink(atPath: linkPath, withDestinationPath: serverBin)
+			let pathEnv = env["PATH"] ?? ""
+			let inPath = pathEnv.split(separator: ":").contains { String($0) == binDir }
+			let alert = NSAlert()
+			alert.messageText = "Installed 'datadip' CLI"
+			alert.informativeText = inPath
+				? "Linked ~/.local/bin/datadip -> \(serverBin)\n\nRun 'datadip ./app.db' from any terminal."
+				: "Linked ~/.local/bin/datadip -> \(serverBin)\n\nAdd ~/.local/bin to your PATH to run 'datadip ./app.db' from any terminal."
+			alert.runModal()
+		} catch {
+			let alert = NSAlert()
+			alert.messageText = "CLI Install Failed"
+			alert.informativeText = error.localizedDescription
+			alert.alertStyle = .warning
+			alert.runModal()
 		}
 	}
 
@@ -414,14 +534,21 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 			item.submenu = m
 			bar.addItem(item)
 		}
-		sub("DataDip", [
+		var appItems: [(String, Selector?, String)] = [
 			("About DataDip", #selector(showAbout(_:)), ""),
+		]
+		if bundledServer != nil {
+			appItems.append(("Install 'datadip' CLI…", #selector(installCli(_:)), ""))
+		}
+		appItems += [
 			("-", nil, ""),
 			("Hide DataDip", #selector(NSApplication.hide(_:)), "h"),
 			("-", nil, ""),
 			("Quit DataDip", #selector(NSApplication.terminate(_:)), "q"),
-		])
+		]
+		sub("DataDip", appItems)
 		sub("File", [
+			("Open Database File…", #selector(openDatabaseDialog(_:)), "o"),
 			("New Console Tab", #selector(newConsoleTab(_:)), "t"),
 			("-", nil, ""),
 			("Close Tab", #selector(closeTabOrWindow(_:)), "w"),

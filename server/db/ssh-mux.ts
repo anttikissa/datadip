@@ -1,14 +1,9 @@
 // Multiplexed SSH connection pool running a single persistent remote Bun worker per SSH host.
 // Concurrent queries share one SSH pipe via NDJSON-RPC request IDs, avoiding SSH startup latency.
 import type { Subprocess } from 'bun'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { tid } from '../../src/shared/tid.ts'
 import { REMOTE_WORKER_SOURCE } from './remote-worker.ts'
-
-const THIS_DIR = dirname(fileURLToPath(import.meta.url))
-const ASKPASS_SH = join(THIS_DIR, 'ssh-askpass.sh')
-const ASKPASS_TS = join(THIS_DIR, 'ssh-askpass.ts')
+import { applySshAskpassEnv } from './ssh-prompts.ts'
 
 export interface SshAskpassConfig {
 	url: string
@@ -94,14 +89,7 @@ class SshHostChannel {
 
 		const env: Record<string, string | undefined> = { ...process.env }
 		if (askpass) {
-			env.SSH_ASKPASS = ASKPASS_SH
-			env.SSH_ASKPASS_REQUIRE = 'force'
-			env.DISPLAY = env.DISPLAY || ':0'
-			env.DATADIP_BUN = process.execPath
-			env.DATADIP_ASKPASS_SCRIPT = ASKPASS_TS
-			env.DATADIP_ASKPASS_URL = askpass.url
-			env.DATADIP_ASKPASS_TOKEN = askpass.token
-			env.DATADIP_ASKPASS_HOST = dest
+			applySshAskpassEnv(env, askpass, dest)
 		}
 
 		const proc = Bun.spawn(['ssh', ...args], {
