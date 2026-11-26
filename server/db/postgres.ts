@@ -6,6 +6,8 @@ import type {
 	BrowseParams,
 	BrowseResult,
 	ColumnInfo,
+	ColumnProfile,
+	DatabaseInfo,
 	DatabaseSchema,
 	FilterSpec,
 	ForeignKeyInfo,
@@ -18,6 +20,7 @@ import type {
 	ReverseFkCount,
 	TableSchema,
 	TableSummary,
+	TriggerInfo,
 } from '../../src/shared/types.ts'
 import type { SshAskpassConfig, SshTarget } from './ssh-mux.ts'
 import { SshTcpTunnel } from './ssh-tunnel.ts'
@@ -332,7 +335,7 @@ export class PostgresAdapter implements DbAdapter {
 		const t0 = performance.now()
 		const sql = await this.getClient()
 
-		const [relRows, colRows, pkRows, fkRows, idxRows, viewDefRows] = await Promise.all([
+		const [relRows, colRows, pkRows, fkRows, idxRows, viewDefRows, trigRows] = await Promise.all([
 			sql.unsafe<
 				{
 					oid: number
@@ -479,6 +482,20 @@ export class PostgresAdapter implements DbAdapter {
 				  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
 				  AND n.nspname NOT LIKE 'pg_toast%'
 			`),
+			sql.unsafe<{ schema_name: string; table_name: string; trigger_name: string; def: string }[]>(`
+				SELECT
+					n.nspname AS schema_name,
+					c.relname AS table_name,
+					t.tgname AS trigger_name,
+					pg_catalog.pg_get_triggerdef(t.oid, true) AS def
+				FROM pg_trigger t
+				JOIN pg_class c ON c.oid = t.tgrelid
+				JOIN pg_namespace n ON n.oid = c.relnamespace
+				WHERE NOT t.tgisinternal
+				  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+				  AND n.nspname NOT LIKE 'pg_toast%'
+				ORDER BY n.nspname, c.relname, t.tgname
+			`),
 		])
 
 		const pkByRel = new Map<number, Map<number, number>>()
@@ -526,6 +543,18 @@ export class PostgresAdapter implements DbAdapter {
 		const viewDefByOid = new Map<number, string>()
 		for (const v of viewDefRows) viewDefByOid.set(v.oid, v.viewdef)
 
+		const triggers: TriggerInfo[] = trigRows.map((tr) => ({
+			name: tr.trigger_name,
+			table: formatTableKey(tr.schema_name, tr.table_name),
+			sql: tr.def,
+		}))
+		const triggersByTable = new Map<string, TriggerInfo[]>()
+		for (const tr of triggers) {
+			const list = triggersByTable.get(tr.table) ?? []
+			list.push(tr)
+			triggersByTable.set(tr.table, list)
+		}
+
 		const tables: TableSummary[] = []
 		const schemas: Record<string, TableSchema> = {}
 
@@ -568,6 +597,7 @@ export class PostgresAdapter implements DbAdapter {
 				reverseForeignKeys: [],
 				indexes,
 				primaryKeyColumns: pkCols,
+				triggers: triggersByTable.get(key) ?? [],
 			}
 		}
 
@@ -600,6 +630,7 @@ export class PostgresAdapter implements DbAdapter {
 		return {
 			tables,
 			schemas,
+			triggers,
 			durationMs: Math.round((performance.now() - t0) * 100) / 100,
 		}
 	}
@@ -1028,6 +1059,111 @@ export class PostgresAdapter implements DbAdapter {
 		}
 
 		return matches
+	}
+
+	async profileColumn(table: string, column: string): Promise<ColumnProfile> {
+		const t0 = performance.now()
+		const sql = await this.getClient()
+		const schema = await this.getSchema()
+		const tableSchema = schema.schemas[table]
+		if (!tableSchema) throw new Error(`Table or view not found: ${table}`)
+		const col = tableSchema.columns.find((c) => c.name === column)
+		if (!col) throw new Error(`Column not found: ${table}.${column}`)
+
+		const qTable = quotePgTable(tableSchema.name)
+		const qCol = quotePgIdent(col.name)
+
+		return sql.begin('READ ONLY', async (tx) => {
+			await tx.unsafe("SET LOCAL statement_timeout = '10000'")
+			const aggRows = await tx.unsafe<
+				{
+					total: string | number
+					non_null: string | number
+					distinct_cnt: string | number
+					min_val: unknown
+					max_val: unknown
+				}[]
+			>(
+				`SELECT
+					COUNT(*)::bigint AS total,
+					COUNT(${qCol})::bigint AS non_null,
+					COUNT(DISTINCT ${qCol})::bigint AS distinct_cnt,
+					MIN(CAST(${qCol} AS TEXT)) AS min_val,
+					MAX(CAST(${qCol} AS TEXT)) AS max_val
+				 FROM ${qTable}`,
+			)
+			const agg = aggRows[0]
+			const totalRows = Number(agg?.total ?? 0)
+			const nonNullCount = Number(agg?.non_null ?? 0)
+			const nullCount = Math.max(0, totalRows - nonNullCount)
+			const nullPct = totalRows > 0 ? Math.round((nullCount / totalRows) * 1000) / 10 : 0
+			const distinctCount = Number(agg?.distinct_cnt ?? 0)
+
+			const topRows = await tx.unsafe<{ val: unknown; cnt: string | number }[]>(
+				`SELECT CAST(${qCol} AS TEXT) AS val, COUNT(*)::bigint AS cnt
+				 FROM ${qTable}
+				 GROUP BY ${qCol}
+				 ORDER BY cnt DESC
+				 LIMIT 10`,
+			)
+
+			const fmtVal = (v: unknown): string | null => {
+				const norm = normalizePgCell(v)
+				return norm === null || norm === undefined ? null : String(norm)
+			}
+
+			return {
+				table: tableSchema.name,
+				column: col.name,
+				columnType: col.type,
+				totalRows,
+				nonNullCount,
+				nullCount,
+				nullPct,
+				distinctCount,
+				min: fmtVal(agg?.min_val),
+				max: fmtVal(agg?.max_val),
+				topValues: topRows.map((r) => ({ value: fmtVal(r.val), count: Number(r.cnt) })),
+				durationMs: Math.round((performance.now() - t0) * 100) / 100,
+			}
+		})
+	}
+
+	async getInfo(): Promise<DatabaseInfo> {
+		const t0 = performance.now()
+		const sql = await this.getClient()
+		const rows = await sql.unsafe<
+			{
+				version: string
+				db: string
+				usr: string
+				size_bytes: string | number | null
+				encoding: string
+				ro: string
+			}[]
+		>(`
+			SELECT
+				version() AS version,
+				current_database() AS db,
+				current_user AS usr,
+				pg_database_size(current_database())::bigint AS size_bytes,
+				pg_encoding_to_char(encoding) AS encoding,
+				current_setting('default_transaction_read_only') AS ro
+			FROM pg_database
+			WHERE datname = current_database()
+		`)
+		const r = rows[0]
+		const shortVer = /^PostgreSQL\s+([^\s,]+)/i.exec(r?.version ?? '')?.[1] ?? r?.version ?? ''
+		return {
+			driver: 'postgres',
+			version: shortVer,
+			currentDatabase: r?.db,
+			currentUser: r?.usr,
+			databaseSizeBytes: r?.size_bytes !== null && r?.size_bytes !== undefined ? Number(r.size_bytes) : null,
+			encoding: r?.encoding,
+			readOnly: r?.ro === 'on',
+			durationMs: Math.round((performance.now() - t0) * 100) / 100,
+		}
 	}
 
 	close() {

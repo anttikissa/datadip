@@ -1,9 +1,9 @@
-// Auto-discover wizard scanning local or SSH host directories for SQLite databases.
+// Auto-discover wizard scanning local directories, macOS iOS Simulators / App Containers, or SSH hosts for SQLite databases.
 import { createEffect, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { formatBytes, formatIsoShort } from '../lib/format.ts'
 import { IconClose, IconCompass } from '../lib/icons.tsx'
-import type { DiscoveredDb } from '../shared/types.ts'
+import type { DiscoveredDb, DiscoverPreset, SshHostOption } from '../shared/types.ts'
 
 export function DiscoverModal(props: {
 	open: boolean
@@ -13,8 +13,10 @@ export function DiscoverModal(props: {
 }) {
 	let dialogEl: HTMLDialogElement | undefined
 	const [location, setLocation] = createSignal<'local' | 'ssh'>('ssh')
+	const [preset, setPreset] = createSignal<DiscoverPreset>('default')
 	const [sshHost, setSshHost] = createSignal('')
 	const [sshUser, setSshUser] = createSignal('')
+	const [sshHosts, setSshHosts] = createSignal<SshHostOption[]>([])
 	const [roots, setRoots] = createSignal('~, /var/lib')
 	const [maxDepth, setMaxDepth] = createSignal('4')
 	const [markProd, setMarkProd] = createSignal(true)
@@ -32,6 +34,10 @@ export function DiscoverModal(props: {
 			if (open) {
 				if (!sshHost() && props.defaultSshHost) setSshHost(props.defaultSshHost)
 				setError(null)
+				void api
+					.listSshHosts()
+					.then((res) => setSshHosts(res.hosts))
+					.catch(() => setSshHosts([]))
 				if (!dialogEl.open) dialogEl.showModal()
 			} else if (dialogEl.open) {
 				dialogEl.close()
@@ -39,7 +45,8 @@ export function DiscoverModal(props: {
 		},
 	)
 
-	async function runScan() {
+	async function runScan(overridePreset?: DiscoverPreset) {
+		const activePreset = overridePreset ?? preset()
 		setError(null)
 		setFound([])
 		setSelected(new Set<string>())
@@ -57,8 +64,10 @@ export function DiscoverModal(props: {
 				location: location(),
 				sshHost: location() === 'ssh' ? sshHost().trim() : undefined,
 				sshUser: location() === 'ssh' ? sshUser().trim() || undefined : undefined,
-				roots: rootList.length > 0 ? rootList : undefined,
+				roots:
+					location() === 'local' && activePreset !== 'default' ? undefined : rootList.length > 0 ? rootList : undefined,
 				maxDepth: Number(maxDepth()) || 4,
+				preset: location() === 'local' ? activePreset : undefined,
 			})
 			setFound(res.databases)
 			const initial = new Set<string>()
@@ -137,6 +146,7 @@ export function DiscoverModal(props: {
 							onChange={(e) => {
 								const next = e.currentTarget.value as 'local' | 'ssh'
 								setLocation(next)
+								setPreset('default')
 								setRoots(next === 'ssh' ? '~, /var/lib' : '~/projects')
 								setMarkProd(next === 'ssh')
 							}}
@@ -154,13 +164,62 @@ export function DiscoverModal(props: {
 							<input
 								id="disc-host"
 								class="input mono"
+								list="disc-ssh-hosts"
 								placeholder="db.example.com"
 								value={sshHost()}
 								onInput={(e) => setSshHost(e.currentTarget.value)}
 							/>
+							<datalist id="disc-ssh-hosts">
+								<For each={sshHosts()}>{(h) => <option value={h.alias} />}</For>
+							</datalist>
 						</div>
 					</Show>
 				</div>
+
+				<Show when={location() === 'local'}>
+					<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+						<span class="field-label" style="margin-right:4px">
+							Quick Presets:
+						</span>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': preset() === 'default' }]}
+							onClick={() => {
+								setPreset('default')
+								setRoots('~')
+								setMaxDepth('4')
+							}}
+						>
+							Home / Projects
+						</button>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': preset() === 'ios-simulators' }]}
+							onClick={() => {
+								setPreset('ios-simulators')
+								setRoots('~/Library/Developer/CoreSimulator/Devices')
+								setMaxDepth('7')
+								setMarkProd(false)
+								void runScan('ios-simulators')
+							}}
+						>
+							iOS Simulators
+						</button>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': preset() === 'mac-containers' }]}
+							onClick={() => {
+								setPreset('mac-containers')
+								setRoots('~/Library/Containers')
+								setMaxDepth('6')
+								setMarkProd(false)
+								void runScan('mac-containers')
+							}}
+						>
+							macOS App Containers
+						</button>
+					</div>
+				</Show>
 
 				<div class="field-row">
 					<div class="field-group">
@@ -208,7 +267,7 @@ export function DiscoverModal(props: {
 						<input type="checkbox" checked={markProd()} onChange={(e) => setMarkProd(e.currentTarget.checked)} />
 						Mark imported databases as Production
 					</label>
-					<button class="btn primary" type="button" disabled={scanning()} onClick={runScan}>
+					<button class="btn primary" type="button" disabled={scanning()} onClick={() => void runScan()}>
 						{scanning() ? 'Scanning…' : 'Scan for Databases'}
 					</button>
 				</div>

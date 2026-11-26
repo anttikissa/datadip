@@ -32,7 +32,9 @@ import type {
 import type { AppRoute } from '../shared/url.ts'
 import type { ConfirmState } from './ConfirmDialog.tsx'
 import { CellViewer, type CellViewerState } from './CellViewer.tsx'
+import { ColumnProfileModal } from './ColumnProfileModal.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
+import { ImportModal } from './ImportModal.tsx'
 import { RowInspector } from './RowInspector.tsx'
 
 type TableRoute = Extract<AppRoute, { kind: 'table' }>
@@ -101,9 +103,11 @@ export function TableView(props: {
 	const [staged, setStaged] = createSignal<Map<string, PendingUpdate>>(new Map())
 	const [editingCell, setEditingCell] = createSignal<{ row: number; colName: string; draft: string } | null>(null)
 
-	// Insert row modal
+	// Insert row, Import CSV/JSON, and Column Profile modals
 	const [insertOpen, setInsertOpen] = createSignal(false)
 	const [insertDraft, setInsertDraft] = createSignal<Record<string, string>>({})
+	const [importOpen, setImportOpen] = createSignal(false)
+	const [profileCol, setProfileCol] = createSignal<string | null>(null)
 	let insertDialogEl: HTMLDialogElement | undefined
 	let searchInputEl: HTMLInputElement | undefined
 
@@ -420,6 +424,12 @@ export function TableView(props: {
 				setInspectorRowIdx((prev) => (prev === cur.row ? null : cur.row))
 			} else if (noMods && !e.shiftKey && key === 'c') {
 				copyActiveCell()
+			} else if (noMods && !e.shiftKey && key === 'p') {
+				const colName = res.columns[cur.col]
+				if (colName) {
+					e.preventDefault()
+					setProfileCol(colName)
+				}
 			} else if (noMods && e.key === 'Enter') {
 				const colName = res.columns[cur.col]
 				const row = res.rows[cur.row]
@@ -761,6 +771,25 @@ export function TableView(props: {
 		})
 	}
 
+	function openDuplicateRow(row: Record<string, unknown>) {
+		const ts = props.tableSchema
+		if (!ts) return
+		const draft: Record<string, string> = {}
+		const singleIntPk =
+			ts.primaryKeyColumns.length === 1 &&
+			ts.columns
+				.find((c) => c.name === ts.primaryKeyColumns[0])
+				?.type.toUpperCase()
+				.includes('INT')
+		for (const col of ts.columns) {
+			if (singleIntPk && col.name === ts.primaryKeyColumns[0]) continue
+			const val = row[col.name]
+			if (val !== null && val !== undefined) draft[col.name] = String(val)
+		}
+		setInsertDraft(draft)
+		setInsertOpen(true)
+	}
+
 	async function handleInsertRow(e: SubmitEvent) {
 		e.preventDefault()
 		const payload: Record<string, unknown> = {}
@@ -1098,6 +1127,9 @@ export function TableView(props: {
 					</div>
 
 					<Show when={props.rwArmed && props.tableSchema?.type === 'table'}>
+						<button type="button" class="btn sm" onClick={() => setImportOpen(true)}>
+							Import
+						</button>
 						<button
 							type="button"
 							class="btn sm primary"
@@ -1223,9 +1255,10 @@ export function TableView(props: {
 
 					<div style="flex:1" />
 					<span style="font-size:11px;color:var(--ink-muted)">
-						<span class="kbd">Space</span> inspect · <span class="kbd">{modKeyLabel('C')}</span> copy ·{' '}
-						<span class="kbd">{modKeyLabel('C', true)}</span> row TSV · <span class="kbd">{modKeyLabel('↵')}</span> FK ·{' '}
-						<span class="kbd">f</span> columns · <span class="kbd">r</span> refresh
+						<span class="kbd">Space</span> inspect · <span class="kbd">p</span> profile ·{' '}
+						<span class="kbd">{modKeyLabel('C')}</span> copy · <span class="kbd">{modKeyLabel('C', true)}</span> row TSV
+						· <span class="kbd">{modKeyLabel('↵')}</span> FK · <span class="kbd">f</span> columns ·{' '}
+						<span class="kbd">r</span> refresh
 					</span>
 				</div>
 
@@ -1247,21 +1280,35 @@ export function TableView(props: {
 													const isPk = () => pkCols().includes(colName)
 													return (
 														<th style={colWidthStyle(colName)}>
-															<button
-																type="button"
-																class="th-btn"
-																onClick={(e) => handleSortClick(colName, e.shiftKey)}
-															>
-																<span>{colName}</span>
-																<span class="th-type">{res().columnTypes[colName]}</span>
-																<Show when={isPk()}>
-																	<span class="th-badge pk">PK</span>
-																</Show>
-																<Show when={fk()}>{(f) => <span class="th-badge fk">→ {f().toTable}</span>}</Show>
-																<Show when={sortSpec()}>
-																	{(s) => <span style="color:var(--accent)">{s().dir === 'asc' ? '▲' : '▼'}</span>}
-																</Show>
-															</button>
+															<div class="th-inner">
+																<button
+																	type="button"
+																	class="th-btn"
+																	onClick={(e) => handleSortClick(colName, e.shiftKey)}
+																>
+																	<span>{colName}</span>
+																	<span class="th-type">{res().columnTypes[colName]}</span>
+																	<Show when={isPk()}>
+																		<span class="th-badge pk">PK</span>
+																	</Show>
+																	<Show when={fk()}>{(f) => <span class="th-badge fk">→ {f().toTable}</span>}</Show>
+																	<Show when={sortSpec()}>
+																		{(s) => <span style="color:var(--accent)">{s().dir === 'asc' ? '▲' : '▼'}</span>}
+																	</Show>
+																</button>
+																<button
+																	type="button"
+																	class="th-profile-btn"
+																	title={`Profile ${colName} (p)`}
+																	aria-label={`Profile ${colName}`}
+																	onClick={(e) => {
+																		e.stopPropagation()
+																		setProfileCol(colName)
+																	}}
+																>
+																	Σ
+																</button>
+															</div>
 															<span
 																class="col-resizer"
 																title="Drag to resize · Double-click to auto-fit"
@@ -1396,6 +1443,7 @@ export function TableView(props: {
 							rwArmed={props.rwArmed}
 							onClose={() => setInspectorRowIdx(null)}
 							onFollowFk={followFk}
+							onDuplicateRow={openDuplicateRow}
 							onDeleteRow={requestDeleteRow}
 							onNotify={(m) => props.onNotify(m)}
 						/>
@@ -1646,6 +1694,28 @@ export function TableView(props: {
 							</table>
 						</div>
 
+						<Show when={(ts().triggers?.length ?? 0) > 0}>
+							<div class="schema-card">
+								<div class="schema-card-head">
+									<span>Triggers ({ts().triggers!.length})</span>
+								</div>
+								<div style="padding:10px;display:flex;flex-direction:column;gap:10px">
+									<For each={ts().triggers ?? []}>
+										{(tr) => (
+											<div>
+												<div class="mono" style="font-weight:600;font-size:12px;margin-bottom:4px">
+													{tr.name}
+												</div>
+												<pre class="ddl-pre" style="margin:0">
+													{tr.sql}
+												</pre>
+											</div>
+										)}
+									</For>
+								</div>
+							</div>
+						</Show>
+
 						<div class="schema-card">
 							<div class="schema-card-head">
 								<span>DDL Definition</span>
@@ -1735,6 +1805,29 @@ export function TableView(props: {
 				onRequestArmRw={props.onRequestArmRw}
 				onSwitchToEdit={() => setCellViewer((cur) => (cur ? { ...cur, mode: 'edit' } : null))}
 				onNotify={props.onNotify}
+			/>
+
+			<ColumnProfileModal
+				open={Boolean(profileCol())}
+				connId={props.route.connId}
+				table={props.route.table}
+				column={profileCol()}
+				onClose={() => setProfileCol(null)}
+				onApplyFilter={(col, op, val) => {
+					updateRoute({ filters: [...props.route.filters, { column: col, op, value: val }] })
+				}}
+			/>
+
+			<ImportModal
+				open={importOpen()}
+				connId={props.route.connId}
+				tableSchema={props.tableSchema}
+				onClose={() => setImportOpen(false)}
+				onImported={(count) => {
+					setReloadTick((n) => n + 1)
+					props.onSchemaChanged()
+					props.onNotify(`Imported ${count.toLocaleString()} row(s) into ${props.route.table}`, 'ok')
+				}}
 			/>
 		</div>
 	)

@@ -2,6 +2,15 @@
 
 export type DriverKind = 'sqlite' | 'postgres'
 export type LocationKind = 'local' | 'ssh'
+export type ConnectionColor = 'blue' | 'green' | 'amber' | 'purple' | 'rose' | 'slate'
+export type DiscoverPreset = 'default' | 'ios-simulators' | 'mac-containers'
+
+export interface SshHostOption {
+	alias: string
+	hostName?: string
+	user?: string
+	port?: number
+}
 
 export interface ConnectionConfig {
 	id: string
@@ -13,6 +22,10 @@ export interface ConnectionConfig {
 	sshUser?: string
 	sshPort?: number
 	isProduction: boolean
+	alwaysReadOnly?: boolean
+	group?: string
+	tags?: string[]
+	color?: ConnectionColor
 	pinned?: boolean
 	createdAt: string
 	lastVisitedAt?: string
@@ -43,6 +56,13 @@ export interface TableSummary {
 	name: string
 	type: 'table' | 'view'
 	rowCount: number | null
+	isInternal?: boolean
+}
+
+export interface TriggerInfo {
+	name: string
+	table: string
+	sql: string
 }
 
 export interface ColumnInfo {
@@ -84,11 +104,50 @@ export interface TableSchema {
 	reverseForeignKeys: ReverseForeignKeyInfo[]
 	indexes: IndexInfo[]
 	primaryKeyColumns: string[]
+	triggers?: TriggerInfo[]
 }
 
 export interface DatabaseSchema {
 	tables: TableSummary[]
 	schemas: Record<string, TableSchema>
+	triggers?: TriggerInfo[]
+	durationMs: number
+}
+
+export interface ColumnProfile {
+	table: string
+	column: string
+	columnType: string
+	totalRows: number
+	nonNullCount: number
+	nullCount: number
+	nullPct: number
+	distinctCount: number
+	min: string | null
+	max: string | null
+	topValues: { value: string | null; count: number }[]
+	durationMs: number
+}
+
+export interface DatabaseInfo {
+	driver: DriverKind
+	version: string
+	fileSizeBytes?: number | null
+	walSizeBytes?: number | null
+	shmSizeBytes?: number | null
+	journalMode?: string
+	synchronous?: string
+	foreignKeys?: boolean
+	userVersion?: number
+	pageSize?: number
+	pageCount?: number
+	freelistCount?: number
+	encoding?: string
+	autoVacuum?: string
+	currentDatabase?: string
+	currentUser?: string
+	databaseSizeBytes?: number | null
+	readOnly?: boolean
 	durationMs: number
 }
 
@@ -201,6 +260,7 @@ export interface Console {
 export interface QueryHistoryEntry {
 	id: string
 	connectionId: string
+	connectionName?: string
 	sql: string
 	durationMs: number
 	rowCount: number

@@ -5,6 +5,8 @@ import { homedir } from 'node:os'
 import type {
 	BrowseParams,
 	BrowseResult,
+	ColumnProfile,
+	DatabaseInfo,
 	DatabaseSchema,
 	IdMatch,
 	MutateRequest,
@@ -15,9 +17,12 @@ import type {
 import {
 	browseSqliteTable,
 	countSqliteReverseFks,
+	getSqliteInfo,
 	getSqliteSchema,
 	mutateSqliteTable,
 	peekSqliteRow,
+	profileSqliteColumn,
+	runSqliteMaintenance,
 	searchSqliteId,
 } from './sqlite-ops.ts'
 import type { DbAdapter } from './types.ts'
@@ -144,6 +149,18 @@ export class LocalSqliteAdapter implements DbAdapter {
 
 	async searchId(value: string): Promise<IdMatch[]> {
 		return searchSqliteId(this.open(false), value)
+	}
+
+	async profileColumn(table: string, column: string): Promise<ColumnProfile> {
+		return profileSqliteColumn(this.open(false), table, column)
+	}
+
+	async getInfo(): Promise<DatabaseInfo> {
+		return getSqliteInfo(this.open(false), this.resolvedPath)
+	}
+
+	async runMaintenance(action: 'wal_checkpoint' | 'vacuum') {
+		return runSqliteMaintenance(this.open(true), action)
 	}
 
 	close() {

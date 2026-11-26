@@ -4,10 +4,13 @@ import { basename, dirname, resolve } from 'node:path'
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import type {
 	BrowseParams,
+	ColumnProfile,
 	ConnectionConfig,
 	ConnectionsPayload,
 	ConnectionWithStatus,
+	DatabaseInfo,
 	DiscoveredDb,
+	DiscoverPreset,
 	MutateRequest,
 	MutateResponse,
 	QueryResponse,
@@ -98,8 +101,10 @@ export class ConnectionManager {
 				this.rwStates.delete(id)
 				continue
 			}
-			// If connection was newly marked as production while RW was unlimited, lock back to RO.
-			if (updated.isProduction && !entry.config.isProduction) {
+			// If connection was newly marked as production while RW was unlimited, or locked alwaysReadOnly, lock back to RO.
+			if (updated.alwaysReadOnly) {
+				this.rwStates.delete(id)
+			} else if (updated.isProduction && !entry.config.isProduction) {
 				const st = this.rwStates.get(id)
 				if (st && st.armed && st.until === null) {
 					this.rwStates.delete(id)
@@ -246,6 +251,7 @@ export class ConnectionManager {
 	}
 
 	getRwState(conn: ConnectionConfig): { armed: boolean; until: number | null } {
+		if (conn.alwaysReadOnly) return { armed: false, until: null }
 		const st = this.rwStates.get(conn.id)
 		if (!st || !st.armed) return { armed: false, until: null }
 		if (st.until !== null && Date.now() >= st.until) {
@@ -262,6 +268,9 @@ export class ConnectionManager {
 			this.rwStates.delete(id)
 			this.notifySubscribers()
 			return { armed: false, until: null }
+		}
+		if (conn.alwaysReadOnly) {
+			throw new HttpError(403, `Connection "${conn.name}" is locked permanently Read-Only.`)
 		}
 		const until = conn.isProduction ? Date.now() + PROD_RW_TTL_MS : null
 		this.rwStates.set(id, { armed: true, until })
@@ -573,6 +582,33 @@ export class ConnectionManager {
 		return res
 	}
 
+	async profileColumn(id: string, table: string, column: string): Promise<ColumnProfile> {
+		const { adapter } = this.getAdapterById(id)
+		return adapter.profileColumn(table, column)
+	}
+
+	async getDbInfo(id: string): Promise<DatabaseInfo> {
+		const { adapter } = this.getAdapterById(id)
+		return adapter.getInfo()
+	}
+
+	async runMaintenance(
+		id: string,
+		action: 'wal_checkpoint' | 'vacuum',
+	): Promise<{ ok: true; message: string; durationMs: number }> {
+		const { conn, adapter } = this.getAdapterById(id)
+		const rw = this.getRwState(conn)
+		if (!rw.armed) {
+			throw new HttpError(403, 'Connection is in Read-Only mode. Switch to Read-Write mode to run maintenance.')
+		}
+		if (!adapter.runMaintenance) {
+			throw new HttpError(400, 'Maintenance actions are only supported for SQLite connections')
+		}
+		const res = await adapter.runMaintenance(action)
+		this.refreshProdRwTimer(conn)
+		return res
+	}
+
 	async discover(params: {
 		location: 'local' | 'ssh'
 		sshHost?: string
@@ -580,6 +616,7 @@ export class ConnectionManager {
 		sshPort?: number
 		roots?: string[]
 		maxDepth?: number
+		preset?: DiscoverPreset
 	}): Promise<DiscoveredDb[]> {
 		const existing = this.store.listConnections()
 		const isSaved = (path: string) =>
@@ -602,7 +639,7 @@ export class ConnectionManager {
 							{ op: 'discover', params: { roots: params.roots, maxDepth: params.maxDepth } },
 							30_000,
 						)
-				: discoverLocalSqliteDbs(params.roots, params.maxDepth)
+				: discoverLocalSqliteDbs(params.roots, params.maxDepth, params.preset)
 
 		return raw.map((item) => ({
 			...item,

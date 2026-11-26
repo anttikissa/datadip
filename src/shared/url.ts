@@ -24,6 +24,10 @@ export type AppRoute =
 			connId: string
 			consoleId: string | null
 	  }
+	| {
+			kind: 'er'
+			connId: string
+	  }
 
 const VALID_OPS = new Set<FilterOp>(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'isnull', 'notnull'])
 
@@ -116,12 +120,20 @@ export function parseRoute(pathname: string, search: string): AppRoute {
 		}
 	}
 
+	if (parts[2] === 'er') {
+		return {
+			kind: 'er',
+			connId,
+		}
+	}
+
 	return { kind: 'connection', connId }
 }
 
 export function formatRoute(route: AppRoute): string {
 	if (route.kind === 'home') return '/'
 	if (route.kind === 'connection') return `/c/${encodeURIComponent(route.connId)}`
+	if (route.kind === 'er') return `/c/${encodeURIComponent(route.connId)}/er`
 	if (route.kind === 'sql') {
 		const base = `/c/${encodeURIComponent(route.connId)}/sql`
 		return route.consoleId ? `${base}/${encodeURIComponent(route.consoleId)}` : base
@@ -181,4 +193,32 @@ export function maskConnectionPath(path: string): string {
 	} catch {
 		return path.replace(/(:\/\/[^:@/\s]+):[^@/\s]+@/, '$1:••••@')
 	}
+}
+
+export function slugifyConnectionName(name: string): string {
+	return name
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+}
+
+// Resolves a URL connection segment by exact ID, exact name (case-insensitive), or slugified name for teammate links.
+export function resolveConnectionRef<T extends { id: string; name: string }>(ref: string, connections: T[]): T | null {
+	if (!ref) return null
+	const byId = connections.find((c) => c.id === ref)
+	if (byId) return byId
+	const lower = ref.trim().toLowerCase()
+	const byExactName = connections.find((c) => c.name.trim().toLowerCase() === lower)
+	if (byExactName) return byExactName
+	const slug = slugifyConnectionName(ref)
+	if (!slug) return null
+	return connections.find((c) => slugifyConnectionName(c.name) === slug) ?? null
+}
+
+export function buildTeammateRouteUrl(route: AppRoute, connName: string, origin: string): string {
+	if (route.kind === 'home') return origin + '/'
+	const slug = slugifyConnectionName(connName) || route.connId
+	const nextRoute: AppRoute = { ...route, connId: slug }
+	return origin + formatRoute(nextRoute)
 }

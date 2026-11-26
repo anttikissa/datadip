@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { liveFiles } from '../src/shared/live-file.ts'
 import { tid } from '../src/shared/tid.ts'
-import type { ConnectionConfig, QueryHistoryEntry, RecentTable, Console } from '../src/shared/types.ts'
+import type { ConnectionColor, ConnectionConfig, QueryHistoryEntry, RecentTable, Console } from '../src/shared/types.ts'
+
+const VALID_COLORS = new Set<ConnectionColor>(['blue', 'green', 'amber', 'purple', 'rose', 'slate'])
 
 export interface ServerInfo {
 	pid: number
@@ -75,6 +77,10 @@ function serializeConnection(c: ConnectionConfig): Record<string, unknown> {
 		if (c.sshPort && c.sshPort !== 22) out.sshPort = c.sshPort
 	}
 	out.isProduction = c.isProduction
+	if (c.alwaysReadOnly) out.alwaysReadOnly = true
+	if (c.group?.trim()) out.group = c.group.trim()
+	if (c.tags && c.tags.length > 0) out.tags = c.tags
+	if (c.color && VALID_COLORS.has(c.color)) out.color = c.color
 	if (c.pinned) out.pinned = true
 	out.createdAt = c.createdAt
 	return out
@@ -205,6 +211,16 @@ export class DataStore {
 		if (fileVisit && (!lastVisitedAt || fileVisit > lastVisitedAt)) {
 			lastVisitedAt = fileVisit
 		}
+		const tags = Array.isArray(raw.tags)
+			? raw.tags
+					.map((t) => String(t).trim())
+					.filter(Boolean)
+					.slice(0, 12)
+			: undefined
+		const color =
+			typeof raw.color === 'string' && VALID_COLORS.has(raw.color as ConnectionColor)
+				? (raw.color as ConnectionColor)
+				: undefined
 		return {
 			id,
 			name: String(raw.name ?? 'Untitled'),
@@ -215,6 +231,10 @@ export class DataStore {
 			sshUser: raw.sshUser ? String(raw.sshUser) : undefined,
 			sshPort: typeof raw.sshPort === 'number' && Number.isFinite(raw.sshPort) ? raw.sshPort : undefined,
 			isProduction: Boolean(raw.isProduction),
+			alwaysReadOnly: Boolean(raw.alwaysReadOnly) || undefined,
+			group: raw.group ? String(raw.group).trim() || undefined : undefined,
+			tags: tags && tags.length > 0 ? tags : undefined,
+			color,
 			pinned: Boolean(raw.pinned),
 			createdAt: raw.createdAt ? String(raw.createdAt) : new Date().toISOString(),
 			lastVisitedAt,
@@ -446,7 +466,31 @@ export class DataStore {
 		return full
 	}
 
-	listQueryHistory(connectionId: string, limit = 100): QueryHistoryEntry[] {
+	listQueryHistory(
+		connectionId: string | 'all',
+		limit = 100,
+		search?: string,
+		extraConnections: ConnectionConfig[] = [],
+	): QueryHistoryEntry[] {
+		const connNames = new Map<string, string>()
+		for (const c of extraConnections) connNames.set(c.id, c.name)
+		for (const c of this.listConnections()) connNames.set(c.id, c.name)
+
+		const clauses: string[] = []
+		const bindings: (string | number)[] = []
+		if (connectionId && connectionId !== 'all') {
+			clauses.push('connection_id = ?')
+			bindings.push(connectionId)
+		}
+		const q = search?.trim()
+		if (q) {
+			clauses.push('LOWER(sql) LIKE ?')
+			bindings.push(`%${q.toLowerCase()}%`)
+		}
+		const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+		const capped = Math.max(1, Math.min(500, limit))
+		bindings.push(capped)
+
 		const rows = this.db
 			.query<
 				{
@@ -458,19 +502,20 @@ export class DataStore {
 					error: string | null
 					executed_at: string
 				},
-				[string, number]
+				(string | number)[]
 			>(
 				`SELECT id, connection_id, sql, duration_ms, row_count, error, executed_at
 				 FROM query_history
-				 WHERE connection_id = ?
+				 ${whereSql}
 				 ORDER BY executed_at DESC
 				 LIMIT ?`,
 			)
-			.all(connectionId, limit)
+			.all(...bindings)
 
 		return rows.map((r) => ({
 			id: r.id,
 			connectionId: r.connection_id,
+			connectionName: connNames.get(r.connection_id),
 			sql: r.sql,
 			durationMs: r.duration_ms,
 			rowCount: r.row_count,

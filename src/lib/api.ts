@@ -3,10 +3,13 @@ import { parse as parseAson, stringify as stringifyAson } from '../shared/ason.t
 import type {
 	BrowseParams,
 	BrowseResult,
+	ColumnProfile,
 	ConnectionConfig,
 	ConnectionsPayload,
+	DatabaseInfo,
 	DatabaseSchema,
 	DiscoveredDb,
+	DiscoverPreset,
 	IdMatch,
 	MutateRequest,
 	MutateResponse,
@@ -15,6 +18,7 @@ import type {
 	RecentTable,
 	ReverseFkCount,
 	Console,
+	SshHostOption,
 } from '../shared/types.ts'
 
 export class ApiError extends Error {
@@ -107,6 +111,20 @@ export const api = {
 		}),
 	searchId: (id: string, value: string) =>
 		request<{ matches: IdMatch[] }>('POST', `/api/connections/${encodeURIComponent(id)}/search-id`, { value }),
+	profileColumn: (id: string, table: string, column: string) =>
+		request<{ profile: ColumnProfile }>('POST', `/api/connections/${encodeURIComponent(id)}/profile`, {
+			table,
+			column,
+		}),
+	getDbInfo: (id: string) => request<{ info: DatabaseInfo }>('GET', `/api/connections/${encodeURIComponent(id)}/info`),
+	runMaintenance: (id: string, action: 'wal_checkpoint' | 'vacuum') =>
+		request<{ ok: true; message: string; durationMs: number }>(
+			'POST',
+			`/api/connections/${encodeURIComponent(id)}/maintenance`,
+			{ action },
+		),
+
+	listSshHosts: () => request<{ hosts: SshHostOption[] }>('GET', '/api/ssh/hosts'),
 
 	listConsoles: (connId: string) =>
 		request<{ consoles: Console[] }>('GET', `/api/connections/${encodeURIComponent(connId)}/consoles`),
@@ -120,11 +138,18 @@ export const api = {
 	deleteConsole: (consoleId: string) =>
 		request<{ ok: true }>('DELETE', `/api/consoles/${encodeURIComponent(consoleId)}`),
 
-	listHistory: (connId: string, limit = 100) =>
-		request<{ history: QueryHistoryEntry[] }>(
+	listHistory: (connId: string | 'all', limit = 100, q?: string) => {
+		const params = new URLSearchParams({ limit: String(limit) })
+		if (q?.trim()) params.set('q', q.trim())
+		if (connId === 'all') {
+			params.set('connectionId', 'all')
+			return request<{ history: QueryHistoryEntry[] }>('GET', `/api/history?${params.toString()}`)
+		}
+		return request<{ history: QueryHistoryEntry[] }>(
 			'GET',
-			`/api/connections/${encodeURIComponent(connId)}/history?limit=${limit}`,
-		),
+			`/api/connections/${encodeURIComponent(connId)}/history?${params.toString()}`,
+		)
+	},
 	clearHistory: (connId: string) =>
 		request<{ ok: true }>('DELETE', `/api/connections/${encodeURIComponent(connId)}/history`),
 
@@ -139,6 +164,7 @@ export const api = {
 		sshPort?: number
 		roots?: string[]
 		maxDepth?: number
+		preset?: DiscoverPreset
 	}) => request<{ databases: DiscoveredDb[] }>('POST', '/api/discover', params),
 
 	answerSshPrompt: (id: string, payload: { answer?: string; cancelled?: boolean }) =>

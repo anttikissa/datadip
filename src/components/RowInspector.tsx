@@ -20,6 +20,7 @@ export function RowInspector(props: {
 	rwArmed: boolean
 	onClose: () => void
 	onFollowFk: (targetTable: string, targetColumn: string, value: unknown) => void
+	onDuplicateRow?: (row: Record<string, unknown>) => void
 	onDeleteRow: (row: Record<string, unknown>) => void
 	onNotify: (msg: string) => void
 }) {
@@ -198,7 +199,18 @@ export function RowInspector(props: {
 								props.rwArmed && props.tableSchema.type === 'table' && props.tableSchema.primaryKeyColumns.length > 0
 							}
 						>
-							<div style="padding-top:6px">
+							<div style="padding-top:6px;display:flex;flex-direction:column;gap:8px">
+								<Show when={props.onDuplicateRow}>
+									<button
+										type="button"
+										class="btn"
+										style="width:100%;justify-content:center"
+										onClick={() => props.onDuplicateRow?.(row())}
+									>
+										<IconCopy />
+										Duplicate Row
+									</button>
+								</Show>
 								<button
 									type="button"
 									class="btn danger"

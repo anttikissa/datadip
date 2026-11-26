@@ -2,7 +2,9 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js'
 import { ConfirmDialog, type ConfirmState } from './components/ConfirmDialog.tsx'
 import { ConnectionModal } from './components/ConnectionModal.tsx'
+import { DbInfoModal } from './components/DbInfoModal.tsx'
 import { DiscoverModal } from './components/DiscoverModal.tsx'
+import { ErDiagramView } from './components/ErDiagramView.tsx'
 import { HomeView } from './components/HomeView.tsx'
 import { Omnibar } from './components/Omnibar.tsx'
 import { RecentModal } from './components/RecentModal.tsx'
@@ -42,7 +44,14 @@ import type {
 	Console,
 	SshPromptRequest,
 } from './shared/types.ts'
-import { type AppRoute, formatRoute, maskConnectionPath, parseRoute } from './shared/url.ts'
+import {
+	type AppRoute,
+	buildTeammateRouteUrl,
+	formatRoute,
+	maskConnectionPath,
+	parseRoute,
+	resolveConnectionRef,
+} from './shared/url.ts'
 
 interface TrailStep {
 	label: string
@@ -82,6 +91,8 @@ export function App() {
 	const [connModalOpen, setConnModalOpen] = createSignal(false)
 	const [editingConn, setEditingConn] = createSignal<ConnectionConfig | null>(null)
 	const [discoverOpen, setDiscoverOpen] = createSignal(false)
+	const [dbInfoOpen, setDbInfoOpen] = createSignal(false)
+	const [showInternalTables, setShowInternalTables] = createSignal(false)
 	const [omnibarOpen, setOmnibarOpen] = createSignal(false)
 	const [recentModalOpen, setRecentModalOpen] = createSignal(false)
 
@@ -89,15 +100,48 @@ export function App() {
 	const [trail, setTrail] = createSignal<TrailStep[]>([])
 	const [toasts, setToasts] = createSignal<Toast[]>([])
 
-	const activeConnId = createMemo(() => (route().kind === 'home' ? null : (route() as { connId: string }).connId))
-	const activeConn = createMemo(() => connections().find((c) => c.id === activeConnId()) ?? null)
+	const routeConnRef = createMemo(() => (route().kind === 'home' ? null : (route() as { connId: string }).connId))
+	const activeConn = createMemo(() => {
+		const ref = routeConnRef()
+		if (!ref) return null
+		return resolveConnectionRef(ref, connections())
+	})
+	const activeConnId = createMemo(() => activeConn()?.id ?? routeConnRef())
 	const isProd = createMemo(() => Boolean(activeConn()?.isProduction))
+	const isAlwaysReadOnly = createMemo(() => Boolean(activeConn()?.alwaysReadOnly))
 	const rwArmed = createMemo(() => {
 		const c = activeConn()
-		if (!c || !c.rwArmed) return false
+		if (!c || c.alwaysReadOnly || !c.rwArmed) return false
 		if (c.rwArmedUntil !== null && nowMs() >= c.rwArmedUntil) return false
 		return true
 	})
+
+	// Canonicalize teammate slug URLs (/c/my-db-name/...) to the local connection ID once connections load.
+	createEffect(
+		() => [routeConnRef(), activeConn()] as const,
+		([ref, conn]) => {
+			if (!ref || !conn || ref === conn.id) return
+			const cur = route()
+			if (cur.kind === 'home') return
+			navigate({ ...cur, connId: conn.id } as AppRoute, { replace: true })
+		},
+	)
+
+	// Target-bound production safety: auto-relock RW on a Production connection when switching to another DB or Home.
+	let prevActiveConnId: string | null = null
+	createEffect(
+		() => activeConnId(),
+		(nextId) => {
+			const prevId = prevActiveConnId
+			prevActiveConnId = nextId
+			if (prevId && prevId !== nextId) {
+				const prevConn = connections().find((c) => c.id === prevId)
+				if (prevConn?.isProduction && prevConn.rwArmed) {
+					void api.setRwMode(prevId, false).catch(() => {})
+				}
+			}
+		},
+	)
 
 	function notify(text: string, kind: 'info' | 'ok' | 'error' = 'info') {
 		const id = tid('t')
@@ -356,13 +400,18 @@ export function App() {
 			}
 		}
 
+		if (armed && conn.alwaysReadOnly) {
+			notify(`"${conn.name}" is locked permanently Read-Only`, 'error')
+			return
+		}
 		if (armed && conn.isProduction) {
 			setConfirmState({
 				title: `Enable Read-Write on PRODUCTION (${conn.name})?`,
 				message:
-					'You are about to unlock write access on a Production database. It will automatically relock to Read-Only after 10 minutes of inactivity.',
+					'You are about to unlock write access on a Production database. It auto-relocks after 10 minutes of inactivity or when switching databases.',
 				confirmLabel: 'Arm Read-Write (10 min)',
 				danger: true,
+				requireConfirmText: conn.name,
 				onConfirm: apply,
 			})
 		} else {
@@ -651,6 +700,27 @@ export function App() {
 		return q ? list.filter((t) => t.name.toLowerCase().includes(q)) : list
 	})
 
+	const primaryTables = createMemo(() => filteredTables().filter((t) => !t.isInternal))
+	const internalTables = createMemo(() => filteredTables().filter((t) => Boolean(t.isInternal)))
+	const existingGroups = createMemo(() =>
+		Array.from(
+			new Set(
+				connections()
+					.map((c) => c.group?.trim())
+					.filter((g): g is string => Boolean(g)),
+			),
+		).sort(),
+	)
+
+	async function copyTeammateLink() {
+		const conn = activeConn()
+		if (!conn) return
+		const url = buildTeammateRouteUrl(route(), conn.name, window.location.origin)
+		if (await copyToClipboard(url)) {
+			notify(`Copied teammate link (${conn.name})`, 'ok')
+		}
+	}
+
 	// Stable left-to-right console order (by createdAt ASC) so tabs never jump around on edit/save.
 	const orderedConsoles = createMemo(() =>
 		[...consoles()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
@@ -681,13 +751,16 @@ export function App() {
 				return
 			}
 			const prodPrefix = conn.isProduction ? '[PROD] ' : ''
+			const connLabel = conn.group ? `${conn.group} / ${conn.name}` : conn.name
 			if (r.kind === 'table') {
-				document.title = `${prodPrefix}${r.table} · ${conn.name} — DataDip`
+				document.title = `${prodPrefix}${r.table} · ${connLabel} — DataDip`
 			} else if (r.kind === 'sql') {
 				const consoleLabel = p2 ? `${p1 ?? 'Console'} | ${p2}` : (p1 ?? 'Console')
-				document.title = `${prodPrefix}${consoleLabel} · ${conn.name} — DataDip`
+				document.title = `${prodPrefix}${consoleLabel} · ${connLabel} — DataDip`
+			} else if (r.kind === 'er') {
+				document.title = `${prodPrefix}ER Diagram · ${connLabel} — DataDip`
 			} else {
-				document.title = `${prodPrefix}${conn.name} — DataDip`
+				document.title = `${prodPrefix}${connLabel} — DataDip`
 			}
 		},
 	)
@@ -717,6 +790,11 @@ export function App() {
 	const activeSqlRoute = createMemo(() => {
 		const r = route()
 		return r.kind === 'sql' && !schemaError() ? r : null
+	})
+
+	const activeErRoute = createMemo(() => {
+		const r = route()
+		return r.kind === 'er' && !schemaError() ? r : null
 	})
 
 	return (
@@ -785,6 +863,7 @@ export function App() {
 								{(c) => (
 									<option value={c.id} selected={c.id === activeConnId()}>
 										{c.isProduction ? '[PROD] ' : ''}
+										{c.group ? `${c.group} / ` : ''}
 										{c.name}
 									</option>
 								)}
@@ -798,6 +877,7 @@ export function App() {
 										● {c.orphaned ? '[ORPHANED] ' : ''}
 										{c.rwArmed ? '[RW] ' : ''}
 										{c.isProduction ? '[PROD] ' : ''}
+										{c.group ? `${c.group} / ` : ''}
 										{c.name}
 									</option>
 								)}
@@ -809,6 +889,7 @@ export function App() {
 									{(c) => (
 										<option value={c.id} selected={c.id === activeConnId()}>
 											{c.isProduction ? '[PROD] ' : ''}
+											{c.group ? `${c.group} / ` : ''}
 											{c.name}
 										</option>
 									)}
@@ -866,6 +947,15 @@ export function App() {
 					>
 						<IconCopy />
 					</button>
+					<button
+						type="button"
+						class="btn sm"
+						style="height:26px;padding:0 8px;font-size:11.5px"
+						title="Copy teammate-shareable link using the database name instead of your local connection ID"
+						onClick={() => void copyTeammateLink()}
+					>
+						Share
+					</button>
 				</Show>
 
 				<button
@@ -893,35 +983,48 @@ export function App() {
 					<span class="kbd">{modKeyLabel('K')}</span>
 				</button>
 
-				{/* Always-visible Read-Only / Read-Write safety toggle */}
+				{/* Always-visible Read-Only / Read-Write safety toggle (or permanent LOCKED RO badge) */}
 				<Show when={activeConn()}>
 					{(conn) => (
-						<div class={['rw-switch', { armed: rwArmed(), prod: conn().isProduction }]}>
-							<button
-								type="button"
-								class={['rw-btn', { 'ro-active': !rwArmed() }]}
-								onClick={() => {
-									if (rwArmed()) void setRw(false)
-								}}
-							>
-								<IconLock />
-								READ-ONLY
-							</button>
-							<button
-								type="button"
-								class={['rw-btn', { 'rw-active': rwArmed(), prod: conn().isProduction }]}
-								onClick={() => {
-									if (!rwArmed()) void setRw(true)
-								}}
-							>
-								<IconUnlock />
-								{rwArmed()
-									? conn().isProduction && conn().rwArmedUntil
-										? `WRITE ${formatCountdown(conn().rwArmedUntil, nowMs())}`
-										: 'READ-WRITE'
-									: 'WRITE'}
-							</button>
-						</div>
+						<Show
+							when={!conn().alwaysReadOnly}
+							fallback={
+								<span
+									class="locked-ro-pill"
+									title="This connection is locked permanently Read-Only in connection settings"
+								>
+									<IconLock />
+									LOCKED RO
+								</span>
+							}
+						>
+							<div class={['rw-switch', { armed: rwArmed(), prod: conn().isProduction }]}>
+								<button
+									type="button"
+									class={['rw-btn', { 'ro-active': !rwArmed() }]}
+									onClick={() => {
+										if (rwArmed()) void setRw(false)
+									}}
+								>
+									<IconLock />
+									READ-ONLY
+								</button>
+								<button
+									type="button"
+									class={['rw-btn', { 'rw-active': rwArmed(), prod: conn().isProduction }]}
+									onClick={() => {
+										if (!rwArmed()) void setRw(true)
+									}}
+								>
+									<IconUnlock />
+									{rwArmed()
+										? conn().isProduction && conn().rwArmedUntil
+											? `WRITE ${formatCountdown(conn().rwArmedUntil, nowMs())}`
+											: 'READ-WRITE'
+										: 'WRITE'}
+								</button>
+							</div>
+						</Show>
 					)}
 				</Show>
 
@@ -1014,6 +1117,15 @@ export function App() {
 										<Show when={schema()}>{(s) => <span>· {s().durationMs}ms</span>}</Show>
 									</div>
 								</div>
+								<button
+									type="button"
+									class="btn sm"
+									style="height:22px;padding:0 6px;font-size:11px"
+									title="Database Info, PRAGMA & WAL Inspector"
+									onClick={() => setDbInfoOpen(true)}
+								>
+									Info
+								</button>
 								<button
 									type="button"
 									class="icon-btn ghost"
@@ -1121,9 +1233,25 @@ export function App() {
 								}}
 							</For>
 
+							{/* Schema / ER Diagram quick button */}
+							<button
+								type="button"
+								class={['sidebar-item', { active: route().kind === 'er' }]}
+								onClick={() => {
+									const id = activeConnId()
+									if (id) navigate({ kind: 'er', connId: id })
+								}}
+							>
+								<IconView />
+								<span class="sidebar-item-label">ER Diagram</span>
+								<Show when={schema()}>
+									{(s) => <span class="sidebar-count">{s().tables.filter((t) => !t.isInternal).length}</span>}
+								</Show>
+							</button>
+
 							{/* Tables & Views section */}
 							<div class="sidebar-section-head">
-								<span>Tables &amp; Views ({filteredTables().length})</span>
+								<span>Tables &amp; Views ({primaryTables().length})</span>
 							</div>
 
 							<Show when={schemaLoading() && !schema()}>
@@ -1132,7 +1260,7 @@ export function App() {
 								</div>
 							</Show>
 
-							<For each={filteredTables()}>
+							<For each={primaryTables()}>
 								{(t) => {
 									const isActive = () =>
 										route().kind === 'table' && (route() as Extract<AppRoute, { kind: 'table' }>).table === t.name
@@ -1167,6 +1295,54 @@ export function App() {
 									)
 								}}
 							</For>
+
+							{/* Collapsible FTS5 / RTree internal shadow tables */}
+							<Show when={internalTables().length > 0}>
+								<button type="button" class="sidebar-section-toggle" onClick={() => setShowInternalTables((v) => !v)}>
+									<span>
+										{showInternalTables() || tableFilter().trim() ? '▾' : '▸'} Internal / FTS5 (
+										{internalTables().length})
+									</span>
+								</button>
+								<Show when={showInternalTables() || Boolean(tableFilter().trim())}>
+									<For each={internalTables()}>
+										{(t) => {
+											const isActive = () =>
+												route().kind === 'table' && (route() as Extract<AppRoute, { kind: 'table' }>).table === t.name
+											return (
+												<button
+													type="button"
+													class={['sidebar-item', { active: isActive() }]}
+													style="opacity:0.78"
+													onClick={() =>
+														navigate({
+															kind: 'table',
+															connId: activeConnId()!,
+															table: t.name,
+															tab: 'data',
+															fields: [],
+															filters: [],
+															order: [],
+															limit: 100,
+															start: null,
+															direction: 'next',
+															offset: null,
+															search: '',
+															selectedRow: null,
+														})
+													}
+												>
+													<IconTable />
+													<span class="sidebar-item-label mono">{t.name}</span>
+													<Show when={t.rowCount !== null}>
+														<span class="sidebar-count">{t.rowCount!.toLocaleString()}</span>
+													</Show>
+												</button>
+											)
+										}}
+									</For>
+								</Show>
+							</Show>
 						</div>
 					</aside>
 				</Show>
@@ -1280,6 +1456,31 @@ export function App() {
 								const id = activeConnId()
 								if (id) void loadConnectionData(id)
 							}}
+						/>
+					)}
+				</Show>
+
+				<Show when={activeErRoute()}>
+					{(r) => (
+						<ErDiagramView
+							schema={schema()}
+							onOpenTable={(table) =>
+								navigate({
+									kind: 'table',
+									connId: r().connId,
+									table,
+									tab: 'data',
+									fields: [],
+									filters: [],
+									order: [],
+									limit: 100,
+									start: null,
+									direction: 'next',
+									offset: null,
+									search: '',
+									selectedRow: null,
+								})
+							}
 						/>
 					)}
 				</Show>
@@ -1535,11 +1736,22 @@ export function App() {
 			<ConnectionModal
 				open={connModalOpen()}
 				editing={editingConn()}
+				existingGroups={existingGroups()}
 				onClose={() => setConnModalOpen(false)}
 				onSaved={async (conn) => {
 					await refreshConnections()
 					notify(`Saved ${conn.name}`, 'ok')
 				}}
+			/>
+
+			<DbInfoModal
+				open={dbInfoOpen()}
+				connId={activeConnId()}
+				connName={activeConn()?.name ?? 'Database'}
+				rwArmed={rwArmed()}
+				onClose={() => setDbInfoOpen(false)}
+				onRequestConfirm={(st) => setConfirmState(st)}
+				onNotify={notify}
 			/>
 
 			<DiscoverModal
@@ -1585,6 +1797,13 @@ export function App() {
 					const id = activeConnId()
 					if (id) void openOrCreateConsole(id, '-- New console\n')
 				}}
+				onOpenErDiagram={() => {
+					const id = activeConnId()
+					if (id) navigate({ kind: 'er', connId: id })
+				}}
+				onOpenDbInfo={() => setDbInfoOpen(true)}
+				onCopyTeammateLink={() => void copyTeammateLink()}
+				canToggleRw={!isAlwaysReadOnly()}
 				onToggleTheme={toggleTheme}
 				onToggleRw={() => void setRw(!rwArmed())}
 				onOpenDiscover={() => setDiscoverOpen(true)}

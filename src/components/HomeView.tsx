@@ -5,14 +5,24 @@ import {
 	IconAlert,
 	IconCompass,
 	IconDisk,
+	IconLock,
 	IconPlus,
 	IconSearch,
 	IconServer,
 	IconTable,
 	IconTrash,
 } from '../lib/icons.tsx'
-import type { ConnectionConfig, ConnectionWithStatus, RecentTable } from '../shared/types.ts'
+import type { ConnectionColor, ConnectionConfig, ConnectionWithStatus, RecentTable } from '../shared/types.ts'
 import { maskConnectionPath } from '../shared/url.ts'
+
+const COLOR_HEX: Record<ConnectionColor, string> = {
+	blue: '#2563eb',
+	green: '#16a34a',
+	amber: '#d97706',
+	purple: '#7c3aed',
+	rose: '#e11d48',
+	slate: '#64748b',
+}
 
 type ScopeFilter = 'all' | 'prod' | 'ssh' | 'local'
 
@@ -45,9 +55,27 @@ export function HomeView(props: {
 			return (
 				c.name.toLowerCase().includes(q) ||
 				c.path.toLowerCase().includes(q) ||
-				(c.sshHost?.toLowerCase().includes(q) ?? false)
+				(c.sshHost?.toLowerCase().includes(q) ?? false) ||
+				(c.group?.toLowerCase().includes(q) ?? false) ||
+				(c.tags?.some((t) => t.toLowerCase().includes(q)) ?? false)
 			)
 		})
+	})
+
+	const groupedConnections = createMemo(() => {
+		const list = filteredConnections()
+		const hasGroups = list.some((c) => Boolean(c.group?.trim()))
+		if (!hasGroups) return [{ group: null as string | null, items: list }]
+		const map = new Map<string, ConnectionWithStatus[]>()
+		for (const c of list) {
+			const g = c.group?.trim() || 'Ungrouped'
+			const arr = map.get(g) ?? []
+			arr.push(c)
+			map.set(g, arr)
+		}
+		return Array.from(map.entries())
+			.sort(([a], [b]) => (a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)))
+			.map(([group, items]) => ({ group, items }))
 	})
 
 	return (
@@ -146,7 +174,7 @@ export function HomeView(props: {
 						<IconSearch />
 						<input
 							class="home-search-input"
-							placeholder="Filter databases by name, host, or path…"
+							placeholder="Filter databases by name, group, tag, host, or path…"
 							value={query()}
 							onInput={(e) => setQuery(e.currentTarget.value)}
 						/>
@@ -181,133 +209,161 @@ export function HomeView(props: {
 						</div>
 					}
 				>
-					<div class="conn-grid">
-						<For each={filteredConnections()}>
-							{(conn) => (
-								<div
-									class={[
-										'conn-card',
-										{ 'is-prod': conn.isProduction, 'is-orphan': conn.orphaned, 'is-connected': conn.connected },
-									]}
-									role="button"
-									tabindex={0}
-									onClick={() => props.onOpenConnection(conn.id)}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											e.preventDefault()
-											props.onOpenConnection(conn.id)
-										}
-									}}
-								>
-									<div class="conn-card-top">
-										<span class="conn-card-name">
-											<Show when={conn.connected}>
-												<span class="status-dot" title="Active connection" />
-											</Show>
-											<span class="conn-card-name-text">{conn.name}</span>
-										</span>
-										<div class="conn-card-tags">
-											<Show when={conn.orphaned}>
-												<span class="tag orphan">ORPHANED</span>
-											</Show>
-											<Show when={conn.rwArmed}>
-												<span class="tag rw">RW</span>
-											</Show>
-											<Show when={conn.isProduction}>
-												<span class="tag prod">
-													<IconAlert />
-													PROD
-												</span>
-											</Show>
-											<Show when={conn.driver === 'postgres'}>
-												<span class="tag">PG</span>
-											</Show>
-											<span class={['tag', { ssh: conn.location === 'ssh' }]}>
-												{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
-												{conn.location === 'ssh' ? conn.sshHost : conn.driver === 'postgres' ? 'direct' : 'local'}
-											</span>
-										</div>
+					<For each={groupedConnections()}>
+						{(bucket) => (
+							<div class="workspace-group">
+								<Show when={bucket.group}>
+									<div class="workspace-group-head">
+										<span>{bucket.group}</span>
+										<span class="tag">{bucket.items.length}</span>
 									</div>
-
-									<div class="conn-card-path">{maskConnectionPath(conn.path)}</div>
-
-									<div class="conn-card-foot">
-										<span class="mono">
-											{conn.orphaned
-												? 'Removed from connections.ason (active)'
-												: conn.lastVisitedAt
-													? `${formatRelative(conn.lastVisitedAt)} · ${formatIsoShort(conn.lastVisitedAt).slice(0, 16)}Z`
-													: 'Not opened yet'}
-										</span>
-										<div class="conn-card-actions">
-											<Show
-												when={!conn.orphaned}
-												fallback={
-													<>
-														<button
-															type="button"
-															class="btn sm primary"
-															onClick={(e) => {
-																e.stopPropagation()
-																props.onRestoreConnection(conn)
-															}}
-														>
-															Re-save
-														</button>
-														<button
-															type="button"
-															class="btn sm"
-															onClick={(e) => {
-																e.stopPropagation()
-																props.onDisconnectConnection(conn)
-															}}
-														>
-															Close
-														</button>
-													</>
-												}
+								</Show>
+								<div class="conn-grid">
+									<For each={bucket.items}>
+										{(conn) => (
+											<div
+												class={[
+													'conn-card',
+													{ 'is-prod': conn.isProduction, 'is-orphan': conn.orphaned, 'is-connected': conn.connected },
+												]}
+												style={conn.color ? `border-left:3px solid ${COLOR_HEX[conn.color]}` : undefined}
+												role="button"
+												tabindex={0}
+												onClick={() => props.onOpenConnection(conn.id)}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault()
+														props.onOpenConnection(conn.id)
+													}
+												}}
 											>
-												<Show when={conn.connected}>
-													<button
-														type="button"
-														class="btn sm ghost-btn"
-														onClick={(e) => {
-															e.stopPropagation()
-															props.onDisconnectConnection(conn)
-														}}
-													>
-														Disconnect
-													</button>
+												<div class="conn-card-top">
+													<span class="conn-card-name">
+														<Show when={conn.connected}>
+															<span class="status-dot" title="Active connection" />
+														</Show>
+														<Show when={!conn.connected && conn.color}>
+															<span class="color-dot" style={`background:${COLOR_HEX[conn.color!]}`} />
+														</Show>
+														<span class="conn-card-name-text">{conn.name}</span>
+													</span>
+													<div class="conn-card-tags">
+														<Show when={conn.orphaned}>
+															<span class="tag orphan">ORPHANED</span>
+														</Show>
+														<Show when={conn.alwaysReadOnly}>
+															<span class="tag">
+																<IconLock />
+																RO
+															</span>
+														</Show>
+														<Show when={conn.rwArmed}>
+															<span class="tag rw">RW</span>
+														</Show>
+														<Show when={conn.isProduction}>
+															<span class="tag prod">
+																<IconAlert />
+																PROD
+															</span>
+														</Show>
+														<Show when={conn.driver === 'postgres'}>
+															<span class="tag">PG</span>
+														</Show>
+														<span class={['tag', { ssh: conn.location === 'ssh' }]}>
+															{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
+															{conn.location === 'ssh' ? conn.sshHost : conn.driver === 'postgres' ? 'direct' : 'local'}
+														</span>
+													</div>
+												</div>
+
+												<div class="conn-card-path">{maskConnectionPath(conn.path)}</div>
+
+												<Show when={(conn.tags?.length ?? 0) > 0}>
+													<div class="conn-custom-tags">
+														<For each={conn.tags ?? []}>{(t) => <span class="tag mono">#{t}</span>}</For>
+													</div>
 												</Show>
-												<button
-													type="button"
-													class="btn sm ghost-btn"
-													onClick={(e) => {
-														e.stopPropagation()
-														props.onEditConnection(conn)
-													}}
-												>
-													Edit
-												</button>
-												<button
-													type="button"
-													class="icon-btn ghost"
-													style="height:24px;width:24px"
-													aria-label={`Delete ${conn.name}`}
-													onClick={(e) => {
-														e.stopPropagation()
-														props.onDeleteConnection(conn)
-													}}
-												>
-													<IconTrash />
-												</button>
-											</Show>
-										</div>
-									</div>
+
+												<div class="conn-card-foot">
+													<span class="mono">
+														{conn.orphaned
+															? 'Removed from connections.ason (active)'
+															: conn.lastVisitedAt
+																? `${formatRelative(conn.lastVisitedAt)} · ${formatIsoShort(conn.lastVisitedAt).slice(0, 16)}Z`
+																: 'Not opened yet'}
+													</span>
+													<div class="conn-card-actions">
+														<Show
+															when={!conn.orphaned}
+															fallback={
+																<>
+																	<button
+																		type="button"
+																		class="btn sm primary"
+																		onClick={(e) => {
+																			e.stopPropagation()
+																			props.onRestoreConnection(conn)
+																		}}
+																	>
+																		Re-save
+																	</button>
+																	<button
+																		type="button"
+																		class="btn sm"
+																		onClick={(e) => {
+																			e.stopPropagation()
+																			props.onDisconnectConnection(conn)
+																		}}
+																	>
+																		Close
+																	</button>
+																</>
+															}
+														>
+															<Show when={conn.connected}>
+																<button
+																	type="button"
+																	class="btn sm ghost-btn"
+																	onClick={(e) => {
+																		e.stopPropagation()
+																		props.onDisconnectConnection(conn)
+																	}}
+																>
+																	Disconnect
+																</button>
+															</Show>
+															<button
+																type="button"
+																class="btn sm ghost-btn"
+																onClick={(e) => {
+																	e.stopPropagation()
+																	props.onEditConnection(conn)
+																}}
+															>
+																Edit
+															</button>
+															<button
+																type="button"
+																class="icon-btn ghost"
+																style="height:24px;width:24px"
+																aria-label={`Delete ${conn.name}`}
+																onClick={(e) => {
+																	e.stopPropagation()
+																	props.onDeleteConnection(conn)
+																}}
+															>
+																<IconTrash />
+															</button>
+														</Show>
+													</div>
+												</div>
+											</div>
+										)}
+									</For>
 								</div>
-							)}
-						</For>
-					</div>
+							</div>
+						)}
+					</For>
 				</Show>
 			</Show>
 

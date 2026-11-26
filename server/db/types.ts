@@ -2,6 +2,8 @@
 import type {
 	BrowseParams,
 	BrowseResult,
+	ColumnProfile,
+	DatabaseInfo,
 	DatabaseSchema,
 	IdMatch,
 	MutateRequest,
@@ -24,5 +26,8 @@ export interface DbAdapter {
 	peekRow(table: string, column: string, value: unknown): Promise<Record<string, unknown> | null>
 	countReverseFks(table: string, row: Record<string, unknown>): Promise<ReverseFkCount[]>
 	searchId(value: string): Promise<IdMatch[]>
+	profileColumn(table: string, column: string): Promise<ColumnProfile>
+	getInfo(): Promise<DatabaseInfo>
+	runMaintenance?(action: 'wal_checkpoint' | 'vacuum'): Promise<{ ok: true; message: string; durationMs: number }>
 	close(): void
 }

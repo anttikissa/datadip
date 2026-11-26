@@ -25,6 +25,10 @@ export function Omnibar(props: {
 	onSelectTable: (connId: string, table: string, filter?: { column: string; value: string }) => void
 	onSelectConsole: (connId: string, consoleId: string) => void
 	onNewConsole: () => void
+	onOpenErDiagram?: () => void
+	onOpenDbInfo?: () => void
+	onCopyTeammateLink?: () => void
+	canToggleRw?: boolean
 	onToggleTheme: () => void
 	onToggleRw: () => void
 	onOpenDiscover: () => void
@@ -135,12 +139,21 @@ export function Omnibar(props: {
 		// Connections
 		for (const c of props.connections) {
 			const displayPath = maskConnectionPath(c.path)
-			if (!q || c.name.toLowerCase().includes(q) || displayPath.toLowerCase().includes(q)) {
+			const matchesGroup = c.group?.toLowerCase().includes(q) ?? false
+			const matchesTag = c.tags?.some((t) => t.toLowerCase().includes(q)) ?? false
+			if (
+				!q ||
+				c.name.toLowerCase().includes(q) ||
+				displayPath.toLowerCase().includes(q) ||
+				matchesGroup ||
+				matchesTag
+			) {
+				const tagText = c.tags?.length ? ` · ${c.tags.map((t) => `#${t}`).join(' ')}` : ''
 				list.push({
 					id: `c:${c.id}`,
 					kind: c.isProduction ? 'PROD DB' : 'DB',
-					label: c.name,
-					detail: c.location === 'ssh' ? `${c.sshHost}:${displayPath}` : displayPath,
+					label: c.group ? `${c.group} / ${c.name}` : c.name,
+					detail: (c.location === 'ssh' ? `${c.sshHost}:${displayPath}` : displayPath) + tagText,
 					run: () => {
 						props.onSelectConnection(c.id)
 						props.onClose()
@@ -163,16 +176,62 @@ export function Omnibar(props: {
 								props.onClose()
 							},
 						},
-						{
-							id: 'act:toggle-rw',
-							kind: 'ACTION',
-							label: 'Toggle Read-Only / Read-Write Mode',
-							detail: 'Safety switch',
-							run: () => {
-								props.onToggleRw()
-								props.onClose()
-							},
-						},
+						...(props.onOpenErDiagram
+							? [
+									{
+										id: 'act:er',
+										kind: 'ACTION',
+										label: 'Open Schema / ER Diagram',
+										detail: 'Visual table & foreign-key graph',
+										run: () => {
+											props.onOpenErDiagram?.()
+											props.onClose()
+										},
+									},
+								]
+							: []),
+						...(props.onOpenDbInfo
+							? [
+									{
+										id: 'act:info',
+										kind: 'ACTION',
+										label: 'Database Info & PRAGMA / WAL Inspector',
+										detail: 'Version, sizes, user_version, checkpoint',
+										run: () => {
+											props.onOpenDbInfo?.()
+											props.onClose()
+										},
+									},
+								]
+							: []),
+						...(props.onCopyTeammateLink
+							? [
+									{
+										id: 'act:share-link',
+										kind: 'ACTION',
+										label: 'Copy Link for Teammate (by DB name)',
+										detail: 'Shareable slug URL',
+										run: () => {
+											props.onCopyTeammateLink?.()
+											props.onClose()
+										},
+									},
+								]
+							: []),
+						...(props.canToggleRw !== false
+							? [
+									{
+										id: 'act:toggle-rw',
+										kind: 'ACTION',
+										label: 'Toggle Read-Only / Read-Write Mode',
+										detail: 'Safety switch',
+										run: () => {
+											props.onToggleRw()
+											props.onClose()
+										},
+									},
+								]
+							: []),
 					]
 				: []),
 			{

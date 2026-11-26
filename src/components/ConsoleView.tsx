@@ -56,6 +56,8 @@ export function ConsoleView(props: {
 	const [saveState, setSaveState] = createSignal<'saved' | 'saving'>('saved')
 
 	const [showHistory, setShowHistory] = createSignal(false)
+	const [historyScope, setHistoryScope] = createSignal<'current' | 'all'>('current')
+	const [historyQuery, setHistoryQuery] = createSignal('')
 	const [showExport, setShowExport] = createSignal(false)
 	const [history, setHistory] = createSignal<QueryHistoryEntry[]>([])
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
@@ -257,9 +259,9 @@ export function ConsoleView(props: {
 		scheduleSave(title(), formatted)
 	}
 
-	async function loadHistory() {
+	async function loadHistory(scope = historyScope(), q = historyQuery()) {
 		try {
-			const res = await api.listHistory(props.connId, 100)
+			const res = await api.listHistory(scope === 'all' ? 'all' : props.connId, 150, q)
 			setHistory(res.history)
 		} catch {}
 	}
@@ -974,34 +976,75 @@ export function ConsoleView(props: {
 
 				{/* Query History Drawer */}
 				<Show when={showHistory()}>
-					<aside class="inspector" style="width:340px">
+					<aside class="inspector" style="width:360px">
 						<div class="inspector-head">
 							<span>Query History ({history().length})</span>
 							<div style="display:flex;gap:4px">
-								<button
-									type="button"
-									class="btn sm"
-									onClick={async () => {
-										await api.clearHistory(props.connId)
-										setHistory([])
-									}}
-								>
-									Clear
-								</button>
+								<Show when={historyScope() === 'current'}>
+									<button
+										type="button"
+										class="btn sm"
+										onClick={async () => {
+											await api.clearHistory(props.connId)
+											setHistory([])
+										}}
+									>
+										Clear
+									</button>
+								</Show>
 								<button class="icon-btn ghost" type="button" onClick={() => setShowHistory(false)}>
 									<IconClose />
 								</button>
 							</div>
 						</div>
+						<div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:6px">
+							<div style="display:flex;gap:6px;align-items:center">
+								<input
+									class="input mono"
+									style="height:26px;font-size:11.5px;flex:1"
+									placeholder="Search SQL history…"
+									value={historyQuery()}
+									onInput={(e) => {
+										const next = e.currentTarget.value
+										setHistoryQuery(next)
+										void loadHistory(historyScope(), next)
+									}}
+								/>
+								<div class="tab-group">
+									<button
+										type="button"
+										class={['tab-btn', { active: historyScope() === 'current' }]}
+										onClick={() => {
+											setHistoryScope('current')
+											void loadHistory('current', historyQuery())
+										}}
+									>
+										This DB
+									</button>
+									<button
+										type="button"
+										class={['tab-btn', { active: historyScope() === 'all' }]}
+										onClick={() => {
+											setHistoryScope('all')
+											void loadHistory('all', historyQuery())
+										}}
+									>
+										All DBs
+									</button>
+								</div>
+							</div>
+						</div>
 						<div class="inspector-body" style="gap:8px">
 							<Show when={history().length === 0}>
-								<div style="color:var(--ink-muted)">No executed queries yet.</div>
+								<div style="color:var(--ink-muted)">
+									{historyQuery().trim() ? 'No matching queries.' : 'No executed queries yet.'}
+								</div>
 							</Show>
 							<For each={history()}>
 								{(h) => (
 									<div style="border:1px solid var(--border-strong);border-radius:var(--radius);padding:8px;display:flex;flex-direction:column;gap:6px;background:var(--bg-subtle)">
 										<div
-											style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-muted)"
+											style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:var(--ink-muted)"
 											class="mono"
 										>
 											<span>{formatIsoShort(h.executedAt)}</span>
@@ -1009,6 +1052,11 @@ export function ConsoleView(props: {
 												{h.durationMs} ms · {h.error ? 'ERR' : `${h.rowCount} rows`}
 											</span>
 										</div>
+										<Show when={historyScope() === 'all' && h.connectionName}>
+											<div>
+												<span class="tag">{h.connectionName}</span>
+											</div>
+										</Show>
 										<pre
 											class="mono"
 											style="margin:0;font-size:11.5px;white-space:pre-wrap;max-height:90px;overflow:hidden"

@@ -2195,3 +2195,307 @@ dialog.omnibar-dialog::backdrop {
 		transition-duration: 0.01ms !important;
 	}
 }
+
+/* --- v0.2.0: Workspaces, Locked RO, Column Profile, Import, DB Info, & ER Diagram --- */
+
+.locked-ro-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 28px;
+	padding: 0 10px;
+	border-radius: var(--radius);
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-strong);
+	color: var(--ink-secondary);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.03em;
+	user-select: none;
+}
+
+.color-swatches {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 2px;
+}
+.color-swatch {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	cursor: pointer;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 13px;
+	color: var(--ink-secondary);
+}
+.color-swatch.none {
+	background: var(--bg-subtle);
+	border-color: var(--border-strong);
+}
+.color-swatch.active {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+.color-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.workspace-group {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-bottom: 18px;
+}
+.workspace-group-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--ink-secondary);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+.conn-custom-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+}
+
+.sidebar-section-toggle {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 10px 4px;
+	border: 0;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	cursor: pointer;
+	text-align: left;
+}
+.sidebar-section-toggle:hover {
+	color: var(--ink-primary);
+}
+
+.th-inner {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+}
+.th-profile-btn {
+	margin-left: auto;
+	border: 0;
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 11px;
+	font-weight: 600;
+	padding: 1px 4px;
+	border-radius: 3px;
+	cursor: pointer;
+	opacity: 0;
+	transition:
+		opacity 120ms var(--ease-out),
+		background 120ms var(--ease-out);
+}
+.data-table thead th:hover .th-profile-btn,
+.th-profile-btn:focus-visible {
+	opacity: 1;
+}
+.th-profile-btn:hover {
+	background: var(--bg-hover);
+	color: var(--accent);
+}
+
+/* Column Profile Modal */
+.profile-stats-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 8px;
+}
+.profile-stat {
+	background: var(--bg-canvas);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	padding: 8px 10px;
+}
+.profile-stat-val {
+	font-size: 15px;
+	font-weight: 600;
+	margin-top: 2px;
+	color: var(--ink-primary);
+}
+.profile-minmax {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 7px 10px;
+	background: var(--bg-canvas);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	font-size: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.profile-bars {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+.profile-bar-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 6px 10px;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+	cursor: pointer;
+	text-align: left;
+	overflow: hidden;
+}
+.profile-bar-row:hover {
+	border-color: var(--accent);
+}
+.profile-bar-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	background: var(--fk-bg);
+	pointer-events: none;
+}
+.profile-bar-label {
+	position: relative;
+	z-index: 1;
+	font-size: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.profile-bar-count {
+	position: relative;
+	z-index: 1;
+	font-size: 11px;
+	color: var(--ink-secondary);
+	flex-shrink: 0;
+}
+
+/* Import Modal */
+.import-map-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 180px;
+	overflow-y: auto;
+	padding: 8px;
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+}
+.import-map-row {
+	display: grid;
+	grid-template-columns: 1fr auto 1.3fr;
+	align-items: center;
+	gap: 8px;
+}
+
+/* Database Info Modal */
+.info-kv-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.info-kv {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 8px 10px;
+	background: var(--bg-canvas);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius);
+	font-size: 12.5px;
+}
+.info-maint-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--bg-canvas);
+}
+
+/* Interactive ER Diagram */
+.er-canvas-wrap {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--bg-canvas);
+	background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px);
+	background-size: 20px 20px;
+}
+.er-svg {
+	width: 100%;
+	height: 100%;
+	display: block;
+	cursor: grab;
+	user-select: none;
+}
+.er-svg:active {
+	cursor: grabbing;
+}
+.er-node {
+	cursor: pointer;
+}
+.er-title {
+	fill: var(--ink-primary);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-weight: 600;
+}
+.er-count {
+	fill: var(--ink-muted);
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+}
+.er-col-name {
+	fill: var(--ink-primary);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+.er-col-type {
+	fill: var(--ink-muted);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	text-transform: uppercase;
+}
+.er-legend {
+	position: absolute;
+	left: 12px;
+	bottom: 10px;
+	padding: 4px 10px;
+	border-radius: var(--radius);
+	background: var(--bg-surface);
+	border: 1px solid var(--border-subtle);
+	color: var(--ink-muted);
+	font-size: 11px;
+	pointer-events: none;
+}

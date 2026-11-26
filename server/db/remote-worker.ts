@@ -110,6 +110,22 @@ function getSchema(db) {
 	} catch {}
 	const tables = [];
 	const schemas = {};
+	const shadowTables = new Set();
+	const ftsSuf = ['_content', '_data', '_docsize', '_idx', '_config', '_segments', '_segdir', '_stat'];
+	const rtSuf = ['_node', '_rowid', '_parent'];
+	for (const m of masterRows) {
+		const ddl = m.sql || '';
+		if (/^CREATE\s+VIRTUAL\s+TABLE\b[\s\S]*?\bUSING\s+fts[345]\b/i.test(ddl)) for (const s of ftsSuf) shadowTables.add(m.name + s);
+		else if (/^CREATE\s+VIRTUAL\s+TABLE\b[\s\S]*?\bUSING\s+rtree/i.test(ddl)) for (const s of rtSuf) shadowTables.add(m.name + s);
+	}
+	const triggers = db.query("SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name COLLATE NOCASE, name COLLATE NOCASE").all()
+		.map(tr => ({ name: tr.name, table: tr.tbl_name, sql: tr.sql || '' }));
+	const triggersByTable = new Map();
+	for (const tr of triggers) {
+		const list = triggersByTable.get(tr.table) || [];
+		list.push(tr);
+		triggersByTable.set(tr.table, list);
+	}
 	for (const m of masterRows) {
 		const qName = quoteIdent(m.name);
 		const columns = db.query('PRAGMA table_info(' + qName + ')').all().map(c => ({
@@ -144,8 +160,9 @@ function getSchema(db) {
 				try { rowCount = db.query('SELECT COUNT(*) AS c FROM ' + qName).get()?.c ?? 0; } catch {}
 			}
 		}
-		tables.push({ name: m.name, type: m.type, rowCount });
-		schemas[m.name] = { name: m.name, type: m.type, ddl: m.sql || '', columns, foreignKeys, reverseForeignKeys: [], indexes, primaryKeyColumns };
+		const isInternal = shadowTables.has(m.name);
+		tables.push({ name: m.name, type: m.type, rowCount, ...(isInternal ? { isInternal: true } : {}) });
+		schemas[m.name] = { name: m.name, type: m.type, ddl: m.sql || '', columns, foreignKeys, reverseForeignKeys: [], indexes, primaryKeyColumns, triggers: triggersByTable.get(m.name) || [] };
 	}
 	for (const s of Object.values(schemas)) {
 		for (const fk of s.foreignKeys) {
@@ -154,7 +171,7 @@ function getSchema(db) {
 			}
 		}
 	}
-	return { tables, schemas, durationMs: Math.round((performance.now() - t0) * 100) / 100 };
+	return { tables, schemas, triggers, durationMs: Math.round((performance.now() - t0) * 100) / 100 };
 }
 
 function browseTable(db, params) {
@@ -409,6 +426,67 @@ function searchId(db, value) {
 	return matches;
 }
 
+function profileColumn(db, table, column) {
+	const t0 = performance.now();
+	const schema = getSchema(db);
+	const ts = schema.schemas[table];
+	if (!ts) throw new Error('Table or view not found: ' + table);
+	const col = ts.columns.find(c => c.name === column);
+	if (!col) throw new Error('Column not found: ' + table + '.' + column);
+	const qT = quoteIdent(ts.name);
+	const qC = quoteIdent(col.name);
+	const agg = db.query('SELECT COUNT(*) AS total, COUNT(' + qC + ') AS non_null, COUNT(DISTINCT ' + qC + ') AS distinct_cnt, MIN(' + qC + ') AS min_val, MAX(' + qC + ') AS max_val FROM ' + qT).get();
+	const totalRows = agg?.total || 0;
+	const nonNullCount = agg?.non_null || 0;
+	const nullCount = Math.max(0, totalRows - nonNullCount);
+	const nullPct = totalRows > 0 ? Math.round((nullCount / totalRows) * 1000) / 10 : 0;
+	const topRows = db.query('SELECT ' + qC + ' AS val, COUNT(*) AS cnt FROM ' + qT + ' GROUP BY ' + qC + ' ORDER BY cnt DESC LIMIT 10').all();
+	const fmt = (v) => { const n = normalizeCell(v); return n === null || n === undefined ? null : String(n); };
+	return {
+		table: ts.name, column: col.name, columnType: col.type, totalRows, nonNullCount, nullCount, nullPct,
+		distinctCount: agg?.distinct_cnt || 0, min: fmt(agg?.min_val), max: fmt(agg?.max_val),
+		topValues: topRows.map(r => ({ value: fmt(r.val), count: r.cnt })),
+		durationMs: Math.round((performance.now() - t0) * 100) / 100,
+	};
+}
+
+function getDbInfo(db, dbPath) {
+	const t0 = performance.now();
+	const resolved = expandPath(dbPath);
+	const ver = db.query('SELECT sqlite_version() AS v').get()?.v || '';
+	const pv = (name) => { try { const r = db.query('PRAGMA ' + name).get(); return r ? Object.values(r)[0] : undefined; } catch { return undefined; } };
+	const st = (p) => { try { return fs.statSync(p).size; } catch { return null; } };
+	const syncModes = ['OFF', 'NORMAL', 'FULL', 'EXTRA'];
+	const avModes = ['NONE', 'FULL', 'INCREMENTAL'];
+	const sNum = Number(pv('synchronous'));
+	const aNum = Number(pv('auto_vacuum'));
+	return {
+		driver: 'sqlite', version: ver,
+		fileSizeBytes: st(resolved), walSizeBytes: st(resolved + '-wal'), shmSizeBytes: st(resolved + '-shm'),
+		journalMode: String(pv('journal_mode') || '').toUpperCase() || undefined,
+		synchronous: Number.isFinite(sNum) ? (syncModes[sNum] || String(sNum)) : undefined,
+		foreignKeys: Boolean(pv('foreign_keys')),
+		userVersion: Number(pv('user_version') || 0),
+		pageSize: Number(pv('page_size') || 0),
+		pageCount: Number(pv('page_count') || 0),
+		freelistCount: Number(pv('freelist_count') || 0),
+		encoding: String(pv('encoding') || '') || undefined,
+		autoVacuum: Number.isFinite(aNum) ? (avModes[aNum] || String(aNum)) : undefined,
+		durationMs: Math.round((performance.now() - t0) * 100) / 100,
+	};
+}
+
+function runMaintenance(db, action) {
+	const t0 = performance.now();
+	if (action === 'wal_checkpoint') {
+		const row = db.query('PRAGMA wal_checkpoint(TRUNCATE)').get();
+		const msg = row ? 'WAL checkpoint complete (checkpointed ' + row.checkpointed + '/' + row.log + ' frames, busy=' + row.busy + ')' : 'WAL checkpoint complete';
+		return { ok: true, message: msg, durationMs: Math.round((performance.now() - t0) * 100) / 100 };
+	}
+	db.exec('VACUUM');
+	return { ok: true, message: 'VACUUM complete', durationMs: Math.round((performance.now() - t0) * 100) / 100 };
+}
+
 const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '.config', '.local', '.npm', '.bun', '.Trash', 'attic', 'Library', 'dist', 'build', '.venv', 'venv', '__pycache__']);
 const SQLITE_MAGIC = 'SQLite format 3\0';
 
@@ -492,6 +570,9 @@ function handle(req) {
 		case 'peek': return peekRow(db, params.table, params.column, params.value);
 		case 'reverseFks': return countReverseFks(db, params.table, params.row);
 		case 'searchId': return searchId(db, params.value);
+		case 'profileColumn': return profileColumn(db, params.table, params.column);
+		case 'info': return getDbInfo(db, dbPath);
+		case 'maintenance': return runMaintenance(db, params.action);
 		default: throw new Error('Unknown op: ' + op);
 	}
 }

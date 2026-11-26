@@ -1,12 +1,22 @@
-// Native <dialog> modal for creating or editing a saved database connection with live connection testing.
-import { createEffect, createSignal, Show } from 'solid-js'
+// Native <dialog> modal for creating or editing a saved database connection with SSH alias picker, workspace grouping, and live testing.
+import { createEffect, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
-import { IconAlert, IconClose } from '../lib/icons.tsx'
-import type { ConnectionConfig, DriverKind, LocationKind } from '../shared/types.ts'
+import { IconAlert, IconClose, IconLock } from '../lib/icons.tsx'
+import type { ConnectionColor, ConnectionConfig, DriverKind, LocationKind, SshHostOption } from '../shared/types.ts'
+
+const COLOR_OPTIONS: { value: ConnectionColor; hex: string; label: string }[] = [
+	{ value: 'blue', hex: '#2563eb', label: 'Blue' },
+	{ value: 'green', hex: '#16a34a', label: 'Green' },
+	{ value: 'amber', hex: '#d97706', label: 'Amber' },
+	{ value: 'purple', hex: '#7c3aed', label: 'Purple' },
+	{ value: 'rose', hex: '#e11d48', label: 'Rose' },
+	{ value: 'slate', hex: '#64748b', label: 'Slate' },
+]
 
 export function ConnectionModal(props: {
 	open: boolean
 	editing: ConnectionConfig | null
+	existingGroups?: string[]
 	onClose: () => void
 	onSaved: (conn: ConnectionConfig) => void
 }) {
@@ -21,6 +31,11 @@ export function ConnectionModal(props: {
 	const [sshUser, setSshUser] = createSignal('')
 	const [sshPort, setSshPort] = createSignal('22')
 	const [isProduction, setIsProduction] = createSignal(false)
+	const [alwaysReadOnly, setAlwaysReadOnly] = createSignal(false)
+	const [group, setGroup] = createSignal('')
+	const [tagsRaw, setTagsRaw] = createSignal('')
+	const [color, setColor] = createSignal<ConnectionColor | undefined>(undefined)
+	const [sshHosts, setSshHosts] = createSignal<SshHostOption[]>([])
 
 	const [error, setError] = createSignal<string | null>(null)
 	const [testMsg, setTestMsg] = createSignal<{ ok: boolean; text: string } | null>(null)
@@ -40,8 +55,16 @@ export function ConnectionModal(props: {
 				setSshUser(editing?.sshUser ?? '')
 				setSshPort(editing?.sshPort ? String(editing.sshPort) : '22')
 				setIsProduction(editing?.isProduction ?? false)
+				setAlwaysReadOnly(Boolean(editing?.alwaysReadOnly))
+				setGroup(editing?.group ?? '')
+				setTagsRaw((editing?.tags ?? []).join(', '))
+				setColor(editing?.color)
 				setError(null)
 				setTestMsg(null)
+				void api
+					.listSshHosts()
+					.then((res) => setSshHosts(res.hosts))
+					.catch(() => setSshHosts([]))
 				if (!dialogEl.open) dialogEl.showModal()
 				queueMicrotask(() => nameInput?.focus())
 			} else if (dialogEl.open) {
@@ -52,6 +75,10 @@ export function ConnectionModal(props: {
 
 	function buildDraft(): Omit<ConnectionConfig, 'id' | 'createdAt'> {
 		const portNum = Number(sshPort().trim())
+		const tags = tagsRaw()
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean)
 		return {
 			name: name().trim(),
 			driver: driver(),
@@ -61,6 +88,10 @@ export function ConnectionModal(props: {
 			sshUser: location() === 'ssh' ? sshUser().trim() || undefined : undefined,
 			sshPort: location() === 'ssh' && Number.isFinite(portNum) && portNum > 0 ? portNum : undefined,
 			isProduction: isProduction(),
+			alwaysReadOnly: alwaysReadOnly() || undefined,
+			group: group().trim() || undefined,
+			tags: tags.length > 0 ? tags : undefined,
+			color: color(),
 			pinned: props.editing?.pinned,
 		}
 	}
@@ -205,6 +236,39 @@ export function ConnectionModal(props: {
 					</div>
 
 					<Show when={location() === 'ssh'}>
+						<Show when={sshHosts().length > 0}>
+							<div class="field-group">
+								<label class="field-label" for="conn-ssh-preset">
+									Pick from ~/.ssh/config
+								</label>
+								<select
+									id="conn-ssh-preset"
+									class="select mono"
+									onChange={(e) => {
+										const alias = e.currentTarget.value
+										if (!alias) return
+										const picked = sshHosts().find((h) => h.alias === alias)
+										if (picked) {
+											setSshHost(picked.alias)
+											if (picked.user) setSshUser(picked.user)
+											if (picked.port) setSshPort(String(picked.port))
+										}
+										e.currentTarget.value = ''
+									}}
+								>
+									<option value="">Choose an SSH host alias…</option>
+									<For each={sshHosts()}>
+										{(h) => (
+											<option value={h.alias}>
+												{h.alias}
+												{h.hostName && h.hostName !== h.alias ? ` (${h.hostName})` : ''}
+												{h.user ? ` · ${h.user}` : ''}
+											</option>
+										)}
+									</For>
+								</select>
+							</div>
+						</Show>
 						<div class="field-row">
 							<div class="field-group">
 								<label class="field-label" for="conn-ssh-host">
@@ -276,6 +340,64 @@ export function ConnectionModal(props: {
 						</Show>
 					</div>
 
+					<div class="field-row">
+						<div class="field-group">
+							<label class="field-label" for="conn-group">
+								Workspace / Folder (optional)
+							</label>
+							<input
+								id="conn-group"
+								class="input"
+								list="conn-groups-list"
+								placeholder="e.g. Client A / Billing"
+								value={group()}
+								onInput={(e) => setGroup(e.currentTarget.value)}
+							/>
+							<datalist id="conn-groups-list">
+								<For each={props.existingGroups ?? []}>{(g) => <option value={g} />}</For>
+							</datalist>
+						</div>
+						<div class="field-group">
+							<label class="field-label" for="conn-tags">
+								Tags (comma-separated)
+							</label>
+							<input
+								id="conn-tags"
+								class="input mono"
+								placeholder="eu-west, replica, analytics"
+								value={tagsRaw()}
+								onInput={(e) => setTagsRaw(e.currentTarget.value)}
+							/>
+						</div>
+					</div>
+
+					<div class="field-group">
+						<span class="field-label">Color Tag (optional)</span>
+						<div class="color-swatches">
+							<button
+								type="button"
+								class={['color-swatch none', { active: !color() }]}
+								title="None"
+								aria-label="No color"
+								onClick={() => setColor(undefined)}
+							>
+								×
+							</button>
+							<For each={COLOR_OPTIONS}>
+								{(opt) => (
+									<button
+										type="button"
+										class={['color-swatch', { active: color() === opt.value }]}
+										style={`background:${opt.hex}`}
+										title={opt.label}
+										aria-label={opt.label}
+										onClick={() => setColor(opt.value)}
+									/>
+								)}
+							</For>
+						</div>
+					</div>
+
 					<label class={['checkbox-card', { prod: isProduction() }]}>
 						<input
 							type="checkbox"
@@ -288,8 +410,26 @@ export function ConnectionModal(props: {
 								This is a Production database
 							</div>
 							<div style="font-size:12px;color:var(--ink-secondary);margin-top:2px">
-								Displays a persistent crimson production banner &amp; badge and auto-relocks Read-Write mode after 10
-								minutes of inactivity.
+								Displays a persistent crimson banner, requires typing the DB name to unlock writes, and auto-relocks
+								Read-Write after 10 minutes idle or when switching DBs.
+							</div>
+						</div>
+					</label>
+
+					<label class="checkbox-card">
+						<input
+							type="checkbox"
+							checked={alwaysReadOnly()}
+							onChange={(e) => setAlwaysReadOnly(e.currentTarget.checked)}
+						/>
+						<div>
+							<div style="font-weight:600;display:flex;align-items:center;gap:6px">
+								<IconLock />
+								Lock permanently Read-Only
+							</div>
+							<div style="font-size:12px;color:var(--ink-secondary);margin-top:2px">
+								Hides Write controls completely and blocks Read-Write arming on the server (ideal for prod read
+								replicas).
 							</div>
 						</div>
 					</label>

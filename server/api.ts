@@ -1,7 +1,8 @@
 // HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, consoles, and discovery.
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
-import type { BrowseParams, ConnectionConfig, MutateRequest } from '../src/shared/types.ts'
+import type { BrowseParams, ConnectionConfig, DiscoverPreset, MutateRequest } from '../src/shared/types.ts'
 import { type ConnectionManager, HttpError } from './db/manager.ts'
+import { listSshConfigHosts } from './db/ssh-config.ts'
 import { EXPORT_MIME, type ExportFormat } from './export.ts'
 
 function asonResponse(data: unknown, status = 200): Response {
@@ -28,7 +29,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 	try {
 		// Health & meta
 		if (path === '/api/health' && method === 'GET') {
-			return asonResponse({ ok: true, version: '0.1.0', now: new Date().toISOString() })
+			return asonResponse({ ok: true, version: '0.2.0', now: new Date().toISOString() })
 		}
 
 		// Live Server-Sent Events stream for connections.ason hot-reload & orphaned state
@@ -117,6 +118,21 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			return asonResponse({ ok: true })
 		}
 
+		// SSH config host alias picker
+		if (path === '/api/ssh/hosts' && method === 'GET') {
+			return asonResponse({ hosts: listSshConfigHosts() })
+		}
+
+		// Cross-connection searchable query history
+		if (path === '/api/history' && method === 'GET') {
+			const connFilter = url.searchParams.get('connectionId') || 'all'
+			const q = url.searchParams.get('q') || undefined
+			const limit = Number(url.searchParams.get('limit')) || 100
+			return asonResponse({
+				history: manager.store.listQueryHistory(connFilter, limit, q, manager.getOrphanedConfigs()),
+			})
+		}
+
 		// Preferences
 		if (path === '/api/preferences' && method === 'GET') {
 			return asonResponse({ preferences: manager.store.getPreferences() })
@@ -147,6 +163,7 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				sshPort?: number
 				roots?: string[]
 				maxDepth?: number
+				preset?: DiscoverPreset
 			}>(req)
 			const databases = await manager.discover(body)
 			return asonResponse({ databases })
@@ -172,6 +189,10 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				sshUser: body.sshUser?.trim() || undefined,
 				sshPort: body.sshPort ? Number(body.sshPort) : undefined,
 				isProduction: Boolean(body.isProduction),
+				alwaysReadOnly: Boolean(body.alwaysReadOnly) || undefined,
+				group: body.group?.trim() || undefined,
+				tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean) : undefined,
+				color: body.color,
 				pinned: Boolean(body.pinned),
 			})
 			return asonResponse({ connection: conn }, 201)
@@ -293,6 +314,27 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ matches })
 			}
 
+			if (rest === 'profile' && method === 'POST') {
+				const body = await readBody<{ table?: string; column?: string }>(req)
+				if (!body.table || !body.column) throw new HttpError(400, 'Table and column are required')
+				const profile = await manager.profileColumn(connId, body.table, body.column)
+				return asonResponse({ profile })
+			}
+
+			if (rest === 'info' && method === 'GET') {
+				const info = await manager.getDbInfo(connId)
+				return asonResponse({ info })
+			}
+
+			if (rest === 'maintenance' && method === 'POST') {
+				const body = await readBody<{ action?: 'wal_checkpoint' | 'vacuum' }>(req)
+				if (body.action !== 'wal_checkpoint' && body.action !== 'vacuum') {
+					throw new HttpError(400, 'Invalid maintenance action')
+				}
+				const result = await manager.runMaintenance(connId, body.action)
+				return asonResponse(result)
+			}
+
 			if (rest === 'export' && method === 'POST') {
 				const body = await readBody<{
 					mode?: 'table' | 'query'
@@ -333,10 +375,11 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ console: sqlConsole }, 201)
 			}
 
-			// Query history per connection
+			// Query history per connection (with optional substring search)
 			if (rest === 'history' && method === 'GET') {
 				const limit = Number(url.searchParams.get('limit')) || 100
-				return asonResponse({ history: manager.store.listQueryHistory(connId, limit) })
+				const q = url.searchParams.get('q') || undefined
+				return asonResponse({ history: manager.store.listQueryHistory(connId, limit, q, manager.getOrphanedConfigs()) })
 			}
 			if (rest === 'history' && method === 'DELETE') {
 				manager.store.clearQueryHistory(connId)

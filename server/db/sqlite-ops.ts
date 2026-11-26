@@ -1,11 +1,14 @@
-// Core SQLite database operations (introspection, keyset browsing, query execution, mutations, FK peeks, reverse FK counts, ID search).
+// Core SQLite database operations (introspection, keyset browsing, query execution, mutations, FK peeks, reverse FK counts, ID search, profiling, PRAGMA/WAL info).
 // Designed to run identically on local bun:sqlite handles and inside the remote SSH Bun worker.
 import type { Database } from 'bun:sqlite'
+import { statSync } from 'node:fs'
 import { detectSourceTable } from '../../src/shared/sql.ts'
 import type {
 	BrowseParams,
 	BrowseResult,
 	ColumnInfo,
+	ColumnProfile,
+	DatabaseInfo,
 	DatabaseSchema,
 	FilterSpec,
 	ForeignKeyInfo,
@@ -18,6 +21,7 @@ import type {
 	ReverseFkCount,
 	TableSchema,
 	TableSummary,
+	TriggerInfo,
 } from '../../src/shared/types.ts'
 
 export function quoteIdent(name: string): string {
@@ -89,6 +93,32 @@ export function getSqliteSchema(db: Database): DatabaseSchema {
 
 	const tables: TableSummary[] = []
 	const schemas: Record<string, TableSchema> = {}
+
+	// Identify shadow tables created by FTS5/FTS4/FTS3/RTree virtual tables so UI can group them cleanly.
+	const shadowTables = new Set<string>()
+	const FTS_SUFFIXES = ['_content', '_data', '_docsize', '_idx', '_config', '_segments', '_segdir', '_stat']
+	const RTREE_SUFFIXES = ['_node', '_rowid', '_parent']
+	for (const m of masterRows) {
+		const ddl = m.sql ?? ''
+		if (/^CREATE\s+VIRTUAL\s+TABLE\b[\s\S]*?\bUSING\s+fts[345]\b/i.test(ddl)) {
+			for (const suf of FTS_SUFFIXES) shadowTables.add(`${m.name}${suf}`)
+		} else if (/^CREATE\s+VIRTUAL\s+TABLE\b[\s\S]*?\bUSING\s+rtree/i.test(ddl)) {
+			for (const suf of RTREE_SUFFIXES) shadowTables.add(`${m.name}${suf}`)
+		}
+	}
+
+	const triggers: TriggerInfo[] = db
+		.query<{ name: string; tbl_name: string; sql: string | null }, []>(
+			`SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name COLLATE NOCASE, name COLLATE NOCASE`,
+		)
+		.all()
+		.map((tr) => ({ name: tr.name, table: tr.tbl_name, sql: tr.sql ?? '' }))
+	const triggersByTable = new Map<string, TriggerInfo[]>()
+	for (const tr of triggers) {
+		const list = triggersByTable.get(tr.table) ?? []
+		list.push(tr)
+		triggersByTable.set(tr.table, list)
+	}
 
 	for (const m of masterRows) {
 		const qName = quoteIdent(m.name)
@@ -163,7 +193,8 @@ export function getSqliteSchema(db: Database): DatabaseSchema {
 			}
 		}
 
-		tables.push({ name: m.name, type: m.type, rowCount })
+		const isInternal = shadowTables.has(m.name)
+		tables.push({ name: m.name, type: m.type, rowCount, ...(isInternal ? { isInternal: true } : {}) })
 		schemas[m.name] = {
 			name: m.name,
 			type: m.type,
@@ -173,6 +204,7 @@ export function getSqliteSchema(db: Database): DatabaseSchema {
 			reverseForeignKeys: [],
 			indexes,
 			primaryKeyColumns: pkCols,
+			triggers: triggersByTable.get(m.name) ?? [],
 		}
 	}
 
@@ -193,6 +225,7 @@ export function getSqliteSchema(db: Database): DatabaseSchema {
 	return {
 		tables,
 		schemas,
+		triggers,
 		durationMs: Math.round((performance.now() - t0) * 100) / 100,
 	}
 }
@@ -693,4 +726,138 @@ export function searchSqliteId(db: Database, value: string): IdMatch[] {
 	}
 
 	return matches
+}
+
+export function profileSqliteColumn(db: Database, table: string, column: string): ColumnProfile {
+	const t0 = performance.now()
+	const schema = getSqliteSchema(db)
+	const tableSchema = schema.schemas[table]
+	if (!tableSchema) throw new Error(`Table or view not found: ${table}`)
+	const col = tableSchema.columns.find((c) => c.name === column)
+	if (!col) throw new Error(`Column not found: ${table}.${column}`)
+
+	const qTable = quoteIdent(tableSchema.name)
+	const qCol = quoteIdent(col.name)
+
+	const agg = db
+		.query<
+			{
+				total: number
+				non_null: number
+				distinct_cnt: number
+				min_val: unknown
+				max_val: unknown
+			},
+			[]
+		>(
+			`SELECT
+				COUNT(*) AS total,
+				COUNT(${qCol}) AS non_null,
+				COUNT(DISTINCT ${qCol}) AS distinct_cnt,
+				MIN(${qCol}) AS min_val,
+				MAX(${qCol}) AS max_val
+			 FROM ${qTable}`,
+		)
+		.get()
+
+	const totalRows = agg?.total ?? 0
+	const nonNullCount = agg?.non_null ?? 0
+	const nullCount = Math.max(0, totalRows - nonNullCount)
+	const nullPct = totalRows > 0 ? Math.round((nullCount / totalRows) * 1000) / 10 : 0
+	const distinctCount = agg?.distinct_cnt ?? 0
+
+	const topRows = db
+		.query<{ val: unknown; cnt: number }, []>(
+			`SELECT ${qCol} AS val, COUNT(*) AS cnt
+			 FROM ${qTable}
+			 GROUP BY ${qCol}
+			 ORDER BY cnt DESC
+			 LIMIT 10`,
+		)
+		.all()
+
+	const fmtVal = (v: unknown): string | null => {
+		const norm = normalizeCellValue(v)
+		return norm === null || norm === undefined ? null : String(norm)
+	}
+
+	return {
+		table: tableSchema.name,
+		column: col.name,
+		columnType: col.type,
+		totalRows,
+		nonNullCount,
+		nullCount,
+		nullPct,
+		distinctCount,
+		min: fmtVal(agg?.min_val),
+		max: fmtVal(agg?.max_val),
+		topValues: topRows.map((r) => ({ value: fmtVal(r.val), count: r.cnt })),
+		durationMs: Math.round((performance.now() - t0) * 100) / 100,
+	}
+}
+
+const SYNC_MODES = ['OFF', 'NORMAL', 'FULL', 'EXTRA']
+const AUTO_VACUUM_MODES = ['NONE', 'FULL', 'INCREMENTAL']
+
+export function getSqliteInfo(db: Database, filePath?: string): DatabaseInfo {
+	const t0 = performance.now()
+	const ver = db.query<{ v: string }, []>('SELECT sqlite_version() AS v').get()?.v ?? ''
+	const pragmaVal = (name: string): unknown => {
+		try {
+			const row = db.query<Record<string, unknown>, []>(`PRAGMA ${name}`).get()
+			if (!row) return undefined
+			return Object.values(row)[0]
+		} catch {
+			return undefined
+		}
+	}
+	const statSize = (p: string): number | null => {
+		try {
+			return statSync(p).size
+		} catch {
+			return null
+		}
+	}
+
+	const syncNum = Number(pragmaVal('synchronous'))
+	const avNum = Number(pragmaVal('auto_vacuum'))
+
+	return {
+		driver: 'sqlite',
+		version: ver,
+		fileSizeBytes: filePath ? statSize(filePath) : null,
+		walSizeBytes: filePath ? statSize(`${filePath}-wal`) : null,
+		shmSizeBytes: filePath ? statSize(`${filePath}-shm`) : null,
+		journalMode: String(pragmaVal('journal_mode') ?? '').toUpperCase() || undefined,
+		synchronous: Number.isFinite(syncNum) ? (SYNC_MODES[syncNum] ?? String(syncNum)) : undefined,
+		foreignKeys: Boolean(pragmaVal('foreign_keys')),
+		userVersion: Number(pragmaVal('user_version') ?? 0),
+		pageSize: Number(pragmaVal('page_size') ?? 0),
+		pageCount: Number(pragmaVal('page_count') ?? 0),
+		freelistCount: Number(pragmaVal('freelist_count') ?? 0),
+		encoding: String(pragmaVal('encoding') ?? '') || undefined,
+		autoVacuum: Number.isFinite(avNum) ? (AUTO_VACUUM_MODES[avNum] ?? String(avNum)) : undefined,
+		durationMs: Math.round((performance.now() - t0) * 100) / 100,
+	}
+}
+
+export function runSqliteMaintenance(
+	db: Database,
+	action: 'wal_checkpoint' | 'vacuum',
+): { ok: true; message: string; durationMs: number } {
+	const t0 = performance.now()
+	if (action === 'wal_checkpoint') {
+		const row = db
+			.query<{ busy: number; log: number; checkpointed: number }, []>('PRAGMA wal_checkpoint(TRUNCATE)')
+			.get()
+		const durationMs = Math.round((performance.now() - t0) * 100) / 100
+		const msg = row
+			? `WAL checkpoint complete (checkpointed ${row.checkpointed}/${row.log} frames, busy=${row.busy})`
+			: 'WAL checkpoint complete'
+		return { ok: true, message: msg, durationMs }
+	}
+	db.exec('VACUUM')
+	const durationMs = Math.round((performance.now() - t0) * 100) / 100
+	return { ok: true, message: 'VACUUM complete', durationMs }
 }

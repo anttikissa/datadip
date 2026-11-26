@@ -509,4 +509,150 @@ describe('DataDip server API & safety boundaries', () => {
 		expect(normalizePgCell({ a: 1 })).toBe('{"a":1}')
 		expect(normalizePgCell(42n)).toBe('42')
 	})
+
+	test('enforces alwaysReadOnly, persists workspace metadata, and supports cross-DB searchable history', async () => {
+		const created = await apiCall('POST', '/api/connections', {
+			name: 'Replica RO',
+			driver: 'sqlite',
+			location: 'local',
+			path: sampleDbPath,
+			isProduction: true,
+			alwaysReadOnly: true,
+			group: 'Acme Corp',
+			tags: ['replica', 'eu-west'],
+			color: 'blue',
+		})
+		expect(created.status).toBe(201)
+		const roConn = created.data.connection as {
+			id: string
+			alwaysReadOnly?: boolean
+			group?: string
+			tags?: string[]
+			color?: string
+		}
+		expect(roConn.alwaysReadOnly).toBe(true)
+		expect(roConn.group).toBe('Acme Corp')
+		expect(roConn.tags).toEqual(['replica', 'eu-west'])
+		expect(roConn.color).toBe('blue')
+
+		// Arming RW on an alwaysReadOnly connection must be rejected with 403
+		const armRes = await apiCall('POST', `/api/connections/${roConn.id}/rw`, { armed: true })
+		expect(armRes.status).toBe(403)
+
+		// Run a query on the RO connection and search across all connections
+		const qRes = await apiCall('POST', `/api/connections/${roConn.id}/query`, {
+			sql: "SELECT email FROM users WHERE id = 'u1'",
+		})
+		expect(qRes.status).toBe(200)
+
+		const crossHist = await apiCall('GET', '/api/history?connectionId=all&q=email')
+		expect(crossHist.status).toBe(200)
+		const entries = crossHist.data.history as { connectionId: string; connectionName?: string; sql: string }[]
+		expect(entries.some((e) => e.connectionId === roConn.id && e.connectionName === 'Replica RO')).toBe(true)
+
+		await apiCall('DELETE', `/api/connections/${roConn.id}`)
+	})
+
+	test('profiles columns, detects triggers & FTS5 shadow tables, inspects PRAGMA/WAL info, and gates maintenance', async () => {
+		// Create a dedicated SQLite DB with a trigger and an FTS5 virtual table
+		const internalsPath = join(workDir, 'internals.sqlite')
+		const idb = new Database(internalsPath)
+		idb.exec(`
+			PRAGMA journal_mode = WAL;
+			PRAGMA user_version = 7;
+			CREATE TABLE notes (id INTEGER PRIMARY KEY, category TEXT, body TEXT);
+			CREATE VIRTUAL TABLE notes_fts USING fts5(body);
+			CREATE TRIGGER trg_notes_ai AFTER INSERT ON notes BEGIN
+				INSERT INTO notes_fts(body) VALUES (new.body);
+			END;
+			INSERT INTO notes (category, body) VALUES ('ops', 'hello'), ('ops', 'world'), (NULL, 'orphan');
+		`)
+		idb.close()
+
+		const created = await apiCall('POST', '/api/connections', {
+			name: 'Internals Test',
+			driver: 'sqlite',
+			location: 'local',
+			path: internalsPath,
+			isProduction: false,
+		})
+		const id = (created.data.connection as { id: string }).id
+
+		// Schema should expose triggers and flag FTS5 shadow tables as isInternal
+		const schemaRes = await apiCall('GET', `/api/connections/${id}/schema`)
+		expect(schemaRes.status).toBe(200)
+		const tables = schemaRes.data.tables as { name: string; isInternal?: boolean }[]
+		expect(tables.find((t) => t.name === 'notes')?.isInternal).toBeUndefined()
+		expect(tables.find((t) => t.name === 'notes_fts_data')?.isInternal).toBe(true)
+		const triggers = schemaRes.data.triggers as { name: string; table: string }[]
+		expect(triggers.some((tr) => tr.name === 'trg_notes_ai' && tr.table === 'notes')).toBe(true)
+
+		// Column profile
+		const profRes = await apiCall('POST', `/api/connections/${id}/profile`, { table: 'notes', column: 'category' })
+		expect(profRes.status).toBe(200)
+		const profile = profRes.data.profile as {
+			totalRows: number
+			nullCount: number
+			distinctCount: number
+			topValues: { value: string | null; count: number }[]
+		}
+		expect(profile.totalRows).toBe(3)
+		expect(profile.nullCount).toBe(1)
+		expect(profile.distinctCount).toBe(1)
+		expect(profile.topValues[0]).toEqual({ value: 'ops', count: 2 })
+
+		// Database PRAGMA/WAL info
+		const infoRes = await apiCall('GET', `/api/connections/${id}/info`)
+		expect(infoRes.status).toBe(200)
+		const info = infoRes.data.info as {
+			driver: string
+			userVersion: number
+			journalMode: string
+			fileSizeBytes: number
+		}
+		expect(info.driver).toBe('sqlite')
+		expect(info.userVersion).toBe(7)
+		expect(info.journalMode).toBe('WAL')
+		expect(info.fileSizeBytes).toBeGreaterThan(0)
+
+		// Maintenance blocked in Read-Only mode, allowed when RW armed
+		const blockedMaint = await apiCall('POST', `/api/connections/${id}/maintenance`, { action: 'wal_checkpoint' })
+		expect(blockedMaint.status).toBe(403)
+		await apiCall('POST', `/api/connections/${id}/rw`, { armed: true })
+		const okMaint = await apiCall('POST', `/api/connections/${id}/maintenance`, { action: 'wal_checkpoint' })
+		expect(okMaint.status).toBe(200)
+		expect(okMaint.data.ok).toBe(true)
+
+		await apiCall('DELETE', `/api/connections/${id}`)
+	})
+
+	test('parses ~/.ssh/config aliases and RFC 4180 CSV / JSON imports', async () => {
+		const { parseSshConfigText } = await import('./db/ssh-config.ts')
+		const { parseImportText } = await import('../src/lib/import-parse.ts')
+
+		const hosts = parseSshConfigText(`
+			Host *
+			  ServerAliveInterval 60
+			Host prod-db staging-db
+			  HostName 10.0.1.25
+			  User deploy
+			  Port 2222
+		`)
+		expect(hosts).toEqual([
+			{ alias: 'prod-db', hostName: '10.0.1.25', user: 'deploy', port: 2222 },
+			{ alias: 'staging-db', hostName: '10.0.1.25', user: 'deploy', port: 2222 },
+		])
+
+		const csv = parseImportText('name,note\n"Ada, L.","Line ""1"""\nGrace,\n')
+		expect(csv.format).toBe('csv')
+		expect(csv.columns).toEqual(['name', 'note'])
+		expect(csv.rows).toEqual([
+			{ name: 'Ada, L.', note: 'Line "1"' },
+			{ name: 'Grace', note: null },
+		])
+
+		const js = parseImportText('[{"id":1,"meta":{"a":true}}]')
+		expect(js.format).toBe('json')
+		expect(js.rows).toEqual([{ id: 1, meta: '{"a":true}' }])
+	})
 })

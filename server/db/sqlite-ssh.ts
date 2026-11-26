@@ -2,6 +2,8 @@
 import type {
 	BrowseParams,
 	BrowseResult,
+	ColumnProfile,
+	DatabaseInfo,
 	DatabaseSchema,
 	IdMatch,
 	MutateRequest,
@@ -77,6 +79,18 @@ export class SshSqliteAdapter implements DbAdapter {
 
 	searchId(value: string): Promise<IdMatch[]> {
 		return this.rpc<IdMatch[]>('searchId', { value })
+	}
+
+	profileColumn(table: string, column: string): Promise<ColumnProfile> {
+		return this.rpc<ColumnProfile>('profileColumn', { table, column })
+	}
+
+	getInfo(): Promise<DatabaseInfo> {
+		return this.rpc<DatabaseInfo>('info')
+	}
+
+	runMaintenance(action: 'wal_checkpoint' | 'vacuum') {
+		return this.rpc<{ ok: true; message: string; durationMs: number }>('maintenance', { action }, true)
 	}
 
 	close() {

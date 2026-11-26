@@ -1,5 +1,5 @@
-// Native <dialog> confirmation modal for destructive SQL, row deletes, and SQL commit previews.
-import { createEffect, For, Show } from 'solid-js'
+// Native <dialog> confirmation modal for destructive SQL, target-bound production write approval, row deletes, and SQL commit previews.
+import { createEffect, createSignal, For, Show } from 'solid-js'
 import { IconAlert, IconClose } from '../lib/icons.tsx'
 
 export interface ConfirmState {
@@ -9,26 +9,46 @@ export interface ConfirmState {
 	sqlPreview?: string[]
 	confirmLabel: string
 	danger?: boolean
+	requireConfirmText?: string
 	onConfirm: () => void | Promise<void>
 }
 
 export function ConfirmDialog(props: { state: ConfirmState | null; onClose: () => void }) {
 	let dialogEl: HTMLDialogElement | undefined
 	let cancelBtn: HTMLButtonElement | undefined
+	let confirmInput: HTMLInputElement | undefined
+	const [typed, setTyped] = createSignal('')
 
 	createEffect(
 		() => props.state,
 		(st) => {
 			if (!dialogEl) return
+			setTyped('')
 			if (st) {
 				if (!dialogEl.open) dialogEl.showModal()
-				// Focus the least destructive button per DECISIONS.md
-				queueMicrotask(() => cancelBtn?.focus())
+				queueMicrotask(() => {
+					if (st.requireConfirmText) confirmInput?.focus()
+					else cancelBtn?.focus()
+				})
 			} else if (dialogEl.open) {
 				dialogEl.close()
 			}
 		},
 	)
+
+	const canConfirm = () => {
+		const req = props.state?.requireConfirmText
+		if (!req) return true
+		return typed().trim() === req.trim()
+	}
+
+	async function runConfirm() {
+		const st = props.state
+		if (!st || !canConfirm()) return
+		const fn = st.onConfirm
+		props.onClose()
+		await fn()
+	}
 
 	return (
 		<dialog
@@ -67,6 +87,34 @@ export function ConfirmDialog(props: { state: ConfirmState | null; onClose: () =
 									{(st().sqlPreview ?? []).join('\n')}
 								</pre>
 							</Show>
+							<Show when={st().requireConfirmText}>
+								{(req) => (
+									<div class="field-group" style="margin-top:4px">
+										<label class="field-label" for="confirm-target-input">
+											Type{' '}
+											<code class="mono" style="color:var(--prod)">
+												{req()}
+											</code>{' '}
+											to confirm
+										</label>
+										<input
+											id="confirm-target-input"
+											ref={(el) => (confirmInput = el)}
+											class="input mono"
+											placeholder={req()}
+											autocomplete="off"
+											value={typed()}
+											onInput={(e) => setTyped(e.currentTarget.value)}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter' && canConfirm()) {
+													e.preventDefault()
+													void runConfirm()
+												}
+											}}
+										/>
+									</div>
+								)}
+							</Show>
 						</div>
 						<div class="modal-foot">
 							<button ref={(el) => (cancelBtn = el)} class="btn" type="button" onClick={() => props.onClose()}>
@@ -75,11 +123,8 @@ export function ConfirmDialog(props: { state: ConfirmState | null; onClose: () =
 							<button
 								class={['btn', st().danger ? 'danger' : 'primary']}
 								type="button"
-								onClick={async () => {
-									const fn = st().onConfirm
-									props.onClose()
-									await fn()
-								}}
+								disabled={!canConfirm()}
+								onClick={() => void runConfirm()}
 							>
 								{st().confirmLabel}
 							</button>

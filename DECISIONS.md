@@ -66,8 +66,14 @@ obvious.
   statements before execution.
 - Connections marked `isProduction: true` display a persistent crimson
   top edge and `PROD` alert badge. Arming Read-Write on a production
-  connection automatically relocks to Read-Only after 10 minutes of
-  inactivity.
+  connection requires target-bound confirmation (typing the exact
+  connection name), automatically relocks to Read-Only after 10 minutes
+  of inactivity, and automatically relocks when switching away to
+  another connection or Home.
+- Connections marked `alwaysReadOnly: true` are enforced permanently
+  Read-Only at the server layer (`setRwMode` returns `403`, `getRwState`
+  always returns unarmed) and hide all Write arming / edit controls in
+  the UI (`LOCKED RO` badge).
 - Destructive SQL (`DROP`, `TRUNCATE`, `ALTER`, or `DELETE`/`UPDATE`
   without a `WHERE` clause) requires explicit confirmation via an in-app
   `<dialog>` on every database, not only production.
@@ -81,6 +87,45 @@ obvious.
   trackpad swipes, and `Cmd+[` / `Cmd+]` work naturally.
 - Table URLs encode connection, table, selected fields, filters, sort
   order, limit, and keyset cursor (`start=...`) or offset.
+- Teammate-shareable links (`Share` button & Omnibar) encode the
+  slugified connection name (`/c/<slug>/...`) instead of per-machine
+  random IDs; `resolveConnectionRef` resolves ID, exact name, or slug
+  on load and canonicalizes to the local connection ID.
+- Interactive Schema / ER Diagram (`/c/:id/er`, `ErDiagramView.tsx`)
+  renders tables, PK/FK columns, and Bezier FK edges in pure SVG with
+  pan, zoom, draggable cards, neighborhood highlighting, and
+  click-to-browse with zero external graph dependencies.
+
+## Inspection, Profiling, Workspaces & Internals (v0.2.0)
+
+- One-keystroke column profiling (`p` or column header `Σ`,
+  `POST /api/connections/:id/profile`) computes total/non-null/null %,
+  distinct count, min/max, and top 10 values with click-to-filter across
+  local SQLite, SSH SQLite, and PostgreSQL (`BEGIN READ ONLY` with 10s
+  `statement_timeout`).
+- Query history supports cross-connection search (`GET /api/history?connectionId=all&q=...`)
+  with a `This DB` / `All DBs` toggle and live SQL substring filtering in
+  the Console History drawer.
+- Connection workspaces support optional `group`, `tags`, and `color`
+  fields in `connections.ason`, grouping cards on HomeView and indexing
+  groups/tags in Home filter and Omnibar search.
+- `~/.ssh/config` alias discovery (`GET /api/ssh/hosts`,
+  `server/db/ssh-config.ts`) parses concrete `Host` entries (following
+  `Include` directives and skipping wildcards) to populate pickers in
+  ConnectionModal and DiscoverModal.
+- Dev data tools in Read-Write mode include one-click Row Duplication
+  (pre-filling Insert Row while clearing single integer PKs) and
+  transactional CSV/JSON import (`src/lib/import-parse.ts`,
+  `ImportModal.tsx`, capped at 5,000 rows per batch).
+- Local macOS Auto-Discover (`server/db/discover.ts`) adds presets for
+  iOS Simulators (`~/Library/Developer/CoreSimulator/Devices`, naming
+  from `device.plist`) and macOS App Containers (`~/Library/Containers`).
+- SQLite & Postgres schemas expose triggers (`sqlite_master` /
+  `pg_trigger`); SQLite FTS5/FTS4/RTree shadow tables are flagged
+  `isInternal: true` and grouped under a collapsible sidebar section;
+  `GET /api/connections/:id/info` + `POST /api/connections/:id/maintenance`
+  provide a PRAGMA/WAL inspector with RW-gated `wal_checkpoint(TRUNCATE)`
+  and `VACUUM`.
 
 ## UI & Defaults
 
