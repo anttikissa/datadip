@@ -6,7 +6,7 @@ import { copyToClipboard, exportRowsCsv, exportRowsJson, formatCellText, formatI
 import { IconAlert, IconArrowRight, IconClose, IconCopy, IconPlay, IconTable, IconTrash } from '../lib/icons.tsx'
 import { formatSql, statementAtCursor } from '../shared/sql.ts'
 import { tid } from '../shared/tid.ts'
-import type { DatabaseSchema, ForeignKeyInfo, QueryHistoryEntry, Scratchpad } from '../shared/types.ts'
+import type { DatabaseSchema, ForeignKeyInfo, QueryHistoryEntry, Console } from '../shared/types.ts'
 import type { ConfirmState } from './ConfirmDialog.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor.tsx'
@@ -17,23 +17,23 @@ function formatElapsed(startedAt: number | null, nowMs: number): string {
 	return sec < 60 ? `${sec.toFixed(1)}s` : `${Math.floor(sec / 60)}m ${Math.floor(sec % 60)}s`
 }
 
-export function ScratchpadView(props: {
+export function ConsoleView(props: {
 	connId: string
 	connName?: string
 	isProduction?: boolean
-	scratchpad: Scratchpad | null
+	console: Console | null
 	schema: DatabaseSchema | null
 	dark: boolean
 	nowMs?: number
 	focusTick?: number
 	splitOpen?: boolean
 	isSplitPane?: boolean
-	allConsoles?: Scratchpad[]
+	allConsoles?: Console[]
 	onToggleSplit?: () => void
 	onCloseSplit?: () => void
-	onSelectPad?: (padId: string) => void
-	onScratchpadUpdated: (pad: Scratchpad) => void
-	onScratchpadDeleted: (padId: string) => void
+	onSelectConsole?: (consoleId: string) => void
+	onConsoleUpdated: (sqlConsole: Console) => void
+	onConsoleDeleted: (consoleId: string) => void
 	onFollowFk: (targetTable: string, targetColumn: string, value: unknown) => void
 	onOpenTable: (table: string) => void
 	onRequestConfirm: (state: ConfirmState) => void
@@ -50,13 +50,13 @@ export function ScratchpadView(props: {
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
 
 	let editorHandle: SqlEditorHandle | undefined
-	let padSelectEl: HTMLSelectElement | undefined
+	let consoleSelectEl: HTMLSelectElement | undefined
 	let saveTimer: ReturnType<typeof setTimeout> | null = null
 	let peekTimer: ReturnType<typeof setTimeout> | null = null
 	const peekCache = new Map<string, Record<string, unknown> | null>()
 
-	const padId = () => props.scratchpad?.id
-	const runState = createMemo(() => getConsoleRun(padId()))
+	const consoleId = () => props.console?.id
+	const runState = createMemo(() => getConsoleRun(consoleId()))
 	const running = () => runState().running
 	const results = () => runState().results
 	const activeTab = () => runState().activeTab
@@ -64,21 +64,21 @@ export function ScratchpadView(props: {
 	const runError = () => runState().runError
 
 	createEffect(
-		() => props.scratchpad?.id,
+		() => props.console?.id,
 		() => {
-			const pad = props.scratchpad
+			const sqlConsole = props.console
 			if (saveTimer) clearTimeout(saveTimer)
-			setTitle(pad?.title ?? 'Untitled console')
-			setSql(pad?.sql ?? '')
+			setTitle(sqlConsole?.title ?? 'Untitled console')
+			setSql(sqlConsole?.sql ?? '')
 			setSaveState('saved')
 		},
 	)
 
-	// Keep dynamic split-pane console selector synced with props.scratchpad?.id after options update.
+	// Keep dynamic split-pane console selector synced with props.console?.id after options update.
 	createEffect(
-		() => [props.scratchpad?.id, props.allConsoles] as const,
+		() => [props.console?.id, props.allConsoles] as const,
 		([id]) => {
-			if (padSelectEl && id) padSelectEl.value = id
+			if (consoleSelectEl && id) consoleSelectEl.value = id
 		},
 	)
 
@@ -90,14 +90,14 @@ export function ScratchpadView(props: {
 	)
 
 	function scheduleSave(nextTitle: string, nextSql: string) {
-		const pad = props.scratchpad
-		if (!pad) return
+		const sqlConsole = props.console
+		if (!sqlConsole) return
 		setSaveState('saving')
 		if (saveTimer) clearTimeout(saveTimer)
 		saveTimer = setTimeout(async () => {
 			try {
-				const res = await api.updateScratchpad(pad.id, { title: nextTitle, sql: nextSql })
-				props.onScratchpadUpdated(res.scratchpad)
+				const res = await api.updateConsole(sqlConsole.id, { title: nextTitle, sql: nextSql })
+				props.onConsoleUpdated(res.console)
 				setSaveState('saved')
 			} catch {
 				setSaveState('saved')
@@ -111,9 +111,9 @@ export function ScratchpadView(props: {
 			props.onNotify('Nothing to run', 'info')
 			return
 		}
-		const targetPadId = padId() ?? `ephemeral:${props.connId}`
+		const targetConsoleId = consoleId() ?? `ephemeral:${props.connId}`
 		const queryId = tid('q')
-		updateConsoleRun(targetPadId, {
+		updateConsoleRun(targetConsoleId, {
 			running: true,
 			startedAt: Date.now(),
 			queryId,
@@ -122,7 +122,7 @@ export function ScratchpadView(props: {
 		try {
 			const res = await api.runQuery(props.connId, trimmed, confirmedDestructive, queryId)
 			if (res.needsConfirmation) {
-				updateConsoleRun(targetPadId, { running: false, startedAt: null, queryId: null })
+				updateConsoleRun(targetConsoleId, { running: false, startedAt: null, queryId: null })
 				props.onRequestConfirm({
 					title: 'Confirm Destructive SQL',
 					message: 'This query modifies schema or affects rows without a WHERE clause. Proceed?',
@@ -134,7 +134,7 @@ export function ScratchpadView(props: {
 				})
 				return
 			}
-			updateConsoleRun(targetPadId, {
+			updateConsoleRun(targetConsoleId, {
 				running: false,
 				startedAt: null,
 				queryId: null,
@@ -149,7 +149,7 @@ export function ScratchpadView(props: {
 			}
 			if (showHistory()) void loadHistory()
 		} catch (err) {
-			updateConsoleRun(targetPadId, {
+			updateConsoleRun(targetConsoleId, {
 				running: false,
 				startedAt: null,
 				queryId: null,
@@ -258,11 +258,11 @@ export function ScratchpadView(props: {
 	const elapsedText = () => formatElapsed(runState().startedAt, props.nowMs ?? Date.now())
 
 	return (
-		<div class="scratchpad-wrap">
+		<div class="console-wrap">
 			{/* Console toolbar */}
 			<div class="view-toolbar">
 				<Show
-					when={props.isSplitPane && props.allConsoles && props.onSelectPad}
+					when={props.isSplitPane && props.allConsoles && props.onSelectConsole}
 					fallback={
 						<input
 							class="input"
@@ -278,16 +278,16 @@ export function ScratchpadView(props: {
 					}
 				>
 					<select
-						ref={padSelectEl}
+						ref={consoleSelectEl}
 						class="select"
 						style="height:26px;max-width:170px;font-weight:600"
-						value={props.scratchpad?.id ?? ''}
-						onChange={(e) => props.onSelectPad?.(e.currentTarget.value)}
+						value={props.console?.id ?? ''}
+						onChange={(e) => props.onSelectConsole?.(e.currentTarget.value)}
 						aria-label="Split console selector"
 					>
 						<For each={props.allConsoles}>
 							{(p) => (
-								<option value={p.id} selected={p.id === props.scratchpad?.id}>
+								<option value={p.id} selected={p.id === props.console?.id}>
 									{p.title}
 								</option>
 							)}
@@ -384,8 +384,8 @@ export function ScratchpadView(props: {
 					</button>
 				</Show>
 
-				<Show when={!props.isSplitPane && props.scratchpad}>
-					{(pad) => (
+				<Show when={!props.isSplitPane && props.console}>
+					{(sqlConsole) => (
 						<button
 							type="button"
 							class="icon-btn ghost"
@@ -393,14 +393,14 @@ export function ScratchpadView(props: {
 							aria-label="Delete console"
 							onClick={() =>
 								props.onRequestConfirm({
-									title: `Delete "${pad().title}"?`,
+									title: `Delete "${sqlConsole().title}"?`,
 									message: 'This permanently deletes this saved console.',
 									confirmLabel: 'Delete Console',
 									danger: true,
 									onConfirm: async () => {
-										await api.deleteScratchpad(pad().id)
-										clearConsoleRun(pad().id)
-										props.onScratchpadDeleted(pad().id)
+										await api.deleteConsole(sqlConsole().id)
+										clearConsoleRun(sqlConsole().id)
+										props.onConsoleDeleted(sqlConsole().id)
 									},
 								})
 							}
@@ -413,7 +413,7 @@ export function ScratchpadView(props: {
 
 			{/* Editor + Results (+ optional History drawer) */}
 			<div style="flex:1;min-height:0;display:flex;overflow:hidden">
-				<div class="scratchpad-split">
+				<div class="console-split">
 					<div class="editor-pane">
 						<SqlEditor
 							value={sql()}
@@ -457,7 +457,7 @@ export function ScratchpadView(props: {
 											type="button"
 											class={['btn sm', { primary: activeTab() === idx() }]}
 											onClick={() => {
-												const id = padId()
+												const id = consoleId()
 												if (id) updateConsoleRun(id, { activeTab: idx() })
 											}}
 										>

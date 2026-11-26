@@ -1,4 +1,4 @@
-// Local persistence for DataDip: liveFile-backed connections.ason, server.ason, and state.db (scratchpads, history, recents, prefs).
+// Local persistence for DataDip: liveFile-backed connections.ason, server.ason, and state.db (consoles, history, recents, prefs).
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { liveFiles } from '../src/shared/live-file.ts'
 import { tid } from '../src/shared/tid.ts'
-import type { ConnectionConfig, QueryHistoryEntry, RecentTable, Scratchpad } from '../src/shared/types.ts'
+import type { ConnectionConfig, QueryHistoryEntry, RecentTable, Console } from '../src/shared/types.ts'
 
 export interface ServerInfo {
 	pid: number
@@ -112,8 +112,12 @@ export class DataStore {
 	}
 
 	private migrate() {
+		// The table was named scratchpads before the concept became Console; keep existing consoles.
+		if (this.db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scratchpads'").get()) {
+			this.db.exec('ALTER TABLE scratchpads RENAME TO consoles; DROP INDEX idx_scratchpads_conn;')
+		}
 		this.db.exec(`
-			CREATE TABLE IF NOT EXISTS scratchpads (
+			CREATE TABLE IF NOT EXISTS consoles (
 				id TEXT PRIMARY KEY,
 				connection_id TEXT NOT NULL,
 				title TEXT NOT NULL,
@@ -122,7 +126,7 @@ export class DataStore {
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL
 			);
-			CREATE INDEX IF NOT EXISTS idx_scratchpads_conn ON scratchpads(connection_id, updated_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_consoles_conn ON consoles(connection_id, updated_at DESC);
 
 			CREATE TABLE IF NOT EXISTS query_history (
 				id TEXT PRIMARY KEY,
@@ -302,9 +306,9 @@ export class DataStore {
 		return true
 	}
 
-	// --- Scratchpads ---
+	// --- Consoles ---
 
-	listScratchpads(connectionId: string): Scratchpad[] {
+	listConsoles(connectionId: string): Console[] {
 		const rows = this.db
 			.query<
 				{
@@ -319,7 +323,7 @@ export class DataStore {
 				[string]
 			>(
 				`SELECT id, connection_id, title, sql, pinned, created_at, updated_at
-				 FROM scratchpads
+				 FROM consoles
 				 WHERE connection_id = ?
 				 ORDER BY pinned DESC, updated_at DESC`,
 			)
@@ -336,7 +340,7 @@ export class DataStore {
 		}))
 	}
 
-	getScratchpad(id: string): Scratchpad | null {
+	getConsole(id: string): Console | null {
 		const r = this.db
 			.query<
 				{
@@ -351,7 +355,7 @@ export class DataStore {
 				[string]
 			>(
 				`SELECT id, connection_id, title, sql, pinned, created_at, updated_at
-				 FROM scratchpads WHERE id = ?`,
+				 FROM consoles WHERE id = ?`,
 			)
 			.get(id)
 		if (!r) return null
@@ -366,9 +370,9 @@ export class DataStore {
 		}
 	}
 
-	createScratchpad(connectionId: string, title = 'Untitled console', sql = ''): Scratchpad {
+	createConsole(connectionId: string, title = 'Untitled console', sql = ''): Console {
 		const now = new Date().toISOString()
-		const pad: Scratchpad = {
+		const sqlConsole: Console = {
 			id: tid('s'),
 			connectionId,
 			title,
@@ -378,24 +382,31 @@ export class DataStore {
 			updatedAt: now,
 		}
 		this.db.run(
-			`INSERT INTO scratchpads (id, connection_id, title, sql, pinned, created_at, updated_at)
+			`INSERT INTO consoles (id, connection_id, title, sql, pinned, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, 0, ?, ?)`,
-			[pad.id, pad.connectionId, pad.title, pad.sql, pad.createdAt, pad.updatedAt],
+			[
+				sqlConsole.id,
+				sqlConsole.connectionId,
+				sqlConsole.title,
+				sqlConsole.sql,
+				sqlConsole.createdAt,
+				sqlConsole.updatedAt,
+			],
 		)
-		return pad
+		return sqlConsole
 	}
 
-	updateScratchpad(id: string, patch: { title?: string; sql?: string; pinned?: boolean }): Scratchpad | null {
-		const existing = this.getScratchpad(id)
+	updateConsole(id: string, patch: { title?: string; sql?: string; pinned?: boolean }): Console | null {
+		const existing = this.getConsole(id)
 		if (!existing) return null
-		const next: Scratchpad = {
+		const next: Console = {
 			...existing,
 			title: patch.title !== undefined ? patch.title : existing.title,
 			sql: patch.sql !== undefined ? patch.sql : existing.sql,
 			pinned: patch.pinned !== undefined ? patch.pinned : existing.pinned,
 			updatedAt: new Date().toISOString(),
 		}
-		this.db.run(`UPDATE scratchpads SET title = ?, sql = ?, pinned = ?, updated_at = ? WHERE id = ?`, [
+		this.db.run(`UPDATE consoles SET title = ?, sql = ?, pinned = ?, updated_at = ? WHERE id = ?`, [
 			next.title,
 			next.sql,
 			next.pinned ? 1 : 0,
@@ -405,8 +416,8 @@ export class DataStore {
 		return next
 	}
 
-	deleteScratchpad(id: string): boolean {
-		const res = this.db.run('DELETE FROM scratchpads WHERE id = ?', [id])
+	deleteConsole(id: string): boolean {
+		const res = this.db.run('DELETE FROM consoles WHERE id = ?', [id])
 		return res.changes > 0
 	}
 

@@ -188,7 +188,7 @@ export interface IdMatch {
 	row: Record<string, unknown>
 }
 
-export interface Scratchpad {
+export interface Console {
 	id: string
 	connectionId: string
 	title: string

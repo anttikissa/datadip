@@ -1,4 +1,4 @@
-// Unit tests for URL route parsing and formatting (fields, filters, multi-sort, keyset cursor, schema, scratchpad).
+// Unit tests for URL route parsing and formatting (fields, filters, multi-sort, keyset cursor, schema, console).
 import { describe, expect, test } from 'bun:test'
 import { formatRoute, parseRoute } from './url.ts'
 
@@ -43,7 +43,7 @@ describe('URL state codec', () => {
 		}
 	})
 
-	test('parses schema and scratchpad routes', () => {
+	test('parses schema and console routes', () => {
 		expect(parseRoute('/c/c1/t/users/schema', '')).toMatchObject({
 			kind: 'table',
 			connId: 'c1',
@@ -53,7 +53,7 @@ describe('URL state codec', () => {
 		expect(parseRoute('/c/c1/sql/s999', '')).toEqual({
 			kind: 'sql',
 			connId: 'c1',
-			padId: 's999',
+			consoleId: 's999',
 		})
 	})
 })

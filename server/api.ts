@@ -1,4 +1,4 @@
-// HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, scratchpads, and discovery.
+// HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, consoles, and discovery.
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import type { BrowseParams, ConnectionConfig, MutateRequest } from '../src/shared/types.ts'
 import { type ConnectionManager, HttpError } from './db/manager.ts'
@@ -284,14 +284,14 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ matches })
 			}
 
-			// Scratchpads per connection
-			if (rest === 'scratchpads' && method === 'GET') {
-				return asonResponse({ scratchpads: manager.store.listScratchpads(connId) })
+			// Consoles per connection
+			if (rest === 'consoles' && method === 'GET') {
+				return asonResponse({ consoles: manager.store.listConsoles(connId) })
 			}
-			if (rest === 'scratchpads' && method === 'POST') {
+			if (rest === 'consoles' && method === 'POST') {
 				const body = await readBody<{ title?: string; sql?: string }>(req)
-				const pad = manager.store.createScratchpad(connId, body.title || 'Untitled console', body.sql ?? '')
-				return asonResponse({ scratchpad: pad }, 201)
+				const sqlConsole = manager.store.createConsole(connId, body.title || 'Untitled console', body.sql ?? '')
+				return asonResponse({ console: sqlConsole }, 201)
 			}
 
 			// Query history per connection
@@ -305,18 +305,18 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			}
 		}
 
-		// Scratchpad update/delete by id
-		const padMatch = /^\/api\/scratchpads\/([^/]+)$/.exec(path)
-		if (padMatch) {
-			const padId = decodeURIComponent(padMatch[1]!)
+		// Console update/delete by id
+		const consoleMatch = /^\/api\/consoles\/([^/]+)$/.exec(path)
+		if (consoleMatch) {
+			const consoleId = decodeURIComponent(consoleMatch[1]!)
 			if (method === 'PUT') {
 				const body = await readBody<{ title?: string; sql?: string; pinned?: boolean }>(req)
-				const updated = manager.store.updateScratchpad(padId, body)
+				const updated = manager.store.updateConsole(consoleId, body)
 				if (!updated) throw new HttpError(404, 'Console not found')
-				return asonResponse({ scratchpad: updated })
+				return asonResponse({ console: updated })
 			}
 			if (method === 'DELETE') {
-				const ok = manager.store.deleteScratchpad(padId)
+				const ok = manager.store.deleteConsole(consoleId)
 				if (!ok) throw new HttpError(404, 'Console not found')
 				return asonResponse({ ok: true })
 			}

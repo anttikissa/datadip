@@ -1837,7 +1837,7 @@ textarea {
 	background: #ffffff;
 }
 
-.scratchpad-wrap {
+.console-wrap {
 	flex: 1;
 	min-height: 0;
 	display: flex;
@@ -1845,7 +1845,7 @@ textarea {
 	overflow: hidden;
 }
 
-.scratchpad-split {
+.console-split {
 	flex: 1;
 	min-height: 0;
 	display: flex;

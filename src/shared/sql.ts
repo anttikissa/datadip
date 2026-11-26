@@ -515,7 +515,7 @@ export function analyzeSqlDanger(sql: string): DangerAnalysis {
 	return { isWrite, isDestructive, warnings }
 }
 
-/** Detects the primary table in a simple SELECT query so FK columns become clickable in scratchpad results. */
+/** Detects the primary table in a simple SELECT query so FK columns become clickable in console results. */
 export function detectSourceTable(sql: string): string | null {
 	const toks = significantTokens(sql)
 	if (toks.length < 3) return null

@@ -6,7 +6,7 @@ import { DiscoverModal } from './components/DiscoverModal.tsx'
 import { HomeView } from './components/HomeView.tsx'
 import { Omnibar } from './components/Omnibar.tsx'
 import { RecentModal } from './components/RecentModal.tsx'
-import { ScratchpadView } from './components/ScratchpadView.tsx'
+import { ConsoleView } from './components/ConsoleView.tsx'
 import { SshPromptModal } from './components/SshPromptModal.tsx'
 import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
@@ -38,7 +38,7 @@ import type {
 	ConnectionWithStatus,
 	DatabaseSchema,
 	RecentTable,
-	Scratchpad,
+	Console,
 	SshPromptRequest,
 } from './shared/types.ts'
 import { type AppRoute, formatRoute, parseRoute } from './shared/url.ts'
@@ -64,9 +64,9 @@ export function App() {
 	const [schema, setSchema] = createSignal<DatabaseSchema | null>(null)
 	const [schemaLoading, setSchemaLoading] = createSignal(false)
 	const [schemaError, setSchemaError] = createSignal<string | null>(null)
-	const [scratchpads, setScratchpads] = createSignal<Scratchpad[]>([])
+	const [consoles, setConsoles] = createSignal<Console[]>([])
 	const [consoleFocusTick, setConsoleFocusTick] = createSignal(0)
-	const [splitPadId, setSplitPadId] = createSignal<string | null>(null)
+	const [splitConsoleId, setSplitConsoleId] = createSignal<string | null>(null)
 	let connSelectEl: HTMLSelectElement | undefined
 
 	const [sidebarOpen, setSidebarOpen] = createSignal(true)
@@ -158,11 +158,11 @@ export function App() {
 		setSchemaLoading(true)
 		setSchemaError(null)
 		try {
-			const [sRes, pRes] = await Promise.all([api.getSchema(connId), api.listScratchpads(connId)])
+			const [sRes, pRes] = await Promise.all([api.getSchema(connId), api.listConsoles(connId)])
 			if (activeConnId() !== connId) return
 			setSchema(sRes)
-			setScratchpads(pRes.scratchpads)
-			// If on /c/:id with no table/sql chosen, jump to first table or scratchpad
+			setConsoles(pRes.consoles)
+			// If on /c/:id with no table/sql chosen, jump to first table or console
 			const cur = route()
 			if (cur.kind === 'connection' && cur.connId === connId) {
 				if (sRes.tables.length > 0) {
@@ -185,19 +185,19 @@ export function App() {
 						{ replace: true },
 					)
 				} else {
-					await openOrCreateScratchpad(connId)
+					await openOrCreateConsole(connId)
 				}
 			} else if (cur.kind === 'sql' && cur.connId === connId) {
-				if (pRes.scratchpads.length === 0) {
-					const created = await api.createScratchpad(
+				if (pRes.consoles.length === 0) {
+					const created = await api.createConsole(
 						connId,
 						'Console 1',
 						'-- Press Cmd+Enter to run the highlighted statement\n',
 					)
-					setScratchpads([created.scratchpad])
-					navigate({ kind: 'sql', connId, padId: created.scratchpad.id }, { replace: true })
-				} else if (!cur.padId || !pRes.scratchpads.some((p) => p.id === cur.padId)) {
-					navigate({ kind: 'sql', connId, padId: pRes.scratchpads[0]!.id }, { replace: true })
+					setConsoles([created.console])
+					navigate({ kind: 'sql', connId, consoleId: created.console.id }, { replace: true })
+				} else if (!cur.consoleId || !pRes.consoles.some((p) => p.id === cur.consoleId)) {
+					navigate({ kind: 'sql', connId, consoleId: pRes.consoles[0]!.id }, { replace: true })
 				}
 			}
 		} catch (err) {
@@ -209,112 +209,112 @@ export function App() {
 		}
 	}
 
-	function nextConsoleTitle(pads: Scratchpad[]): string {
-		const used = new Set(pads.map((p) => p.title.trim().toLowerCase()))
+	function nextConsoleTitle(consoleList: Console[]): string {
+		const used = new Set(consoleList.map((p) => p.title.trim().toLowerCase()))
 		let n = 1
 		while (used.has(`console ${n}`)) n++
 		return `Console ${n}`
 	}
 
-	function isConsoleTrivial(pad: Scratchpad): boolean {
-		const nonCommentLines = pad.sql
+	function isConsoleTrivial(sqlConsole: Console): boolean {
+		const nonCommentLines = sqlConsole.sql
 			.split('\n')
 			.map((l) => l.trim())
 			.filter((l) => l.length > 0 && !l.startsWith('--'))
 		return nonCommentLines.length === 0
 	}
 
-	async function deleteConsoleImmediate(pad: Scratchpad) {
-		const run = getConsoleRun(pad.id)
+	async function deleteConsoleImmediate(sqlConsole: Console) {
+		const run = getConsoleRun(sqlConsole.id)
 		if (run.running && run.queryId) {
-			void api.cancelQuery(pad.connectionId, run.queryId).catch(() => {})
+			void api.cancelQuery(sqlConsole.connectionId, run.queryId).catch(() => {})
 		}
 		try {
-			await api.deleteScratchpad(pad.id)
+			await api.deleteConsole(sqlConsole.id)
 		} catch (err) {
 			notify(err instanceof Error ? err.message : String(err), 'error')
 			return
 		}
-		clearConsoleRun(pad.id)
-		const rest = scratchpads().filter((p) => p.id !== pad.id)
-		setScratchpads(rest)
-		if (splitPadId() === pad.id) {
-			setSplitPadId(null)
+		clearConsoleRun(sqlConsole.id)
+		const rest = consoles().filter((p) => p.id !== sqlConsole.id)
+		setConsoles(rest)
+		if (splitConsoleId() === sqlConsole.id) {
+			setSplitConsoleId(null)
 		}
 		const cur = route()
-		if (cur.kind === 'sql' && cur.padId === pad.id) {
-			const nextPad = rest.find((p) => p.id !== splitPadId()) ?? rest[0]
-			if (nextPad) {
-				if (splitPadId() === nextPad.id) setSplitPadId(null)
-				navigate({ kind: 'sql', connId: cur.connId, padId: nextPad.id }, { replace: true })
+		if (cur.kind === 'sql' && cur.consoleId === sqlConsole.id) {
+			const nextConsole = rest.find((p) => p.id !== splitConsoleId()) ?? rest[0]
+			if (nextConsole) {
+				if (splitConsoleId() === nextConsole.id) setSplitConsoleId(null)
+				navigate({ kind: 'sql', connId: cur.connId, consoleId: nextConsole.id }, { replace: true })
 			} else {
 				navigate({ kind: 'connection', connId: cur.connId }, { replace: true })
 			}
 		}
 	}
 
-	function requestCloseConsole(pad: Scratchpad) {
-		const run = getConsoleRun(pad.id)
-		if (isConsoleTrivial(pad) && !run.running) {
-			void deleteConsoleImmediate(pad)
+	function requestCloseConsole(sqlConsole: Console) {
+		const run = getConsoleRun(sqlConsole.id)
+		if (isConsoleTrivial(sqlConsole) && !run.running) {
+			void deleteConsoleImmediate(sqlConsole)
 			return
 		}
 		setConfirmState({
-			title: `Close "${pad.title}"?`,
+			title: `Close "${sqlConsole.title}"?`,
 			message: run.running
 				? 'This console has a running query. Closing will cancel the query and delete this console.'
 				: 'Closing deletes this console and its SQL text.',
 			confirmLabel: 'Close Console',
 			danger: true,
-			onConfirm: () => deleteConsoleImmediate(pad),
+			onConfirm: () => deleteConsoleImmediate(sqlConsole),
 		})
 	}
 
 	async function createNewConsole(
 		connId: string,
 		initialSql = '-- Press Cmd+Enter to run the highlighted statement\n',
-	): Promise<Scratchpad | null> {
+	): Promise<Console | null> {
 		try {
-			const title = nextConsoleTitle(scratchpads())
-			const res = await api.createScratchpad(connId, title, initialSql)
-			setScratchpads((prev) => [...prev, res.scratchpad])
-			return res.scratchpad
+			const title = nextConsoleTitle(consoles())
+			const res = await api.createConsole(connId, title, initialSql)
+			setConsoles((prev) => [...prev, res.console])
+			return res.console
 		} catch (err) {
 			notify(err instanceof Error ? err.message : String(err), 'error')
 			return null
 		}
 	}
 
-	async function openOrCreateScratchpad(connId: string, initialSql?: string) {
+	async function openOrCreateConsole(connId: string, initialSql?: string) {
 		if (initialSql !== undefined) {
-			const pad = await createNewConsole(connId, initialSql)
-			if (pad) navigate({ kind: 'sql', connId, padId: pad.id })
+			const sqlConsole = await createNewConsole(connId, initialSql)
+			if (sqlConsole) navigate({ kind: 'sql', connId, consoleId: sqlConsole.id })
 			return
 		}
 		const existing = orderedConsoles()
 		if (existing.length > 0) {
-			navigate({ kind: 'sql', connId, padId: existing[0]!.id })
+			navigate({ kind: 'sql', connId, consoleId: existing[0]!.id })
 			return
 		}
-		const pad = await createNewConsole(connId)
-		if (pad) navigate({ kind: 'sql', connId, padId: pad.id })
+		const sqlConsole = await createNewConsole(connId)
+		if (sqlConsole) navigate({ kind: 'sql', connId, consoleId: sqlConsole.id })
 	}
 
 	async function toggleSplitConsole() {
 		const id = activeConnId()
 		if (!id) return
-		if (splitPadId()) {
-			setSplitPadId(null)
+		if (splitConsoleId()) {
+			setSplitConsoleId(null)
 			return
 		}
-		const primary = activePad()
+		const primary = activeConsole()
 		const existingOther = orderedConsoles().find((p) => p.id !== primary?.id)
 		if (existingOther) {
-			setSplitPadId(existingOther.id)
+			setSplitConsoleId(existingOther.id)
 			return
 		}
 		const created = await createNewConsole(id)
-		if (created) setSplitPadId(created.id)
+		if (created) setSplitConsoleId(created.id)
 	}
 
 	async function setRw(armed: boolean) {
@@ -409,7 +409,7 @@ export function App() {
 				if (route().kind === 'sql') {
 					setConsoleFocusTick((n) => n + 1)
 				} else {
-					void openOrCreateScratchpad(id).then(() => setConsoleFocusTick((n) => n + 1))
+					void openOrCreateConsole(id).then(() => setConsoleFocusTick((n) => n + 1))
 				}
 			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'l') {
 				e.preventDefault()
@@ -535,15 +535,15 @@ export function App() {
 		}
 	})
 
-	// Reload schema & scratchpads when active connection changes
+	// Reload schema & consoles when active connection changes
 	createEffect(
 		() => activeConnId(),
 		(connId) => {
 			setTableFilter('')
-			setSplitPadId(null)
+			setSplitConsoleId(null)
 			if (!connId) {
 				setSchema(null)
-				setScratchpads([])
+				setConsoles([])
 				setSchemaError(null)
 				return
 			}
@@ -567,28 +567,28 @@ export function App() {
 
 	// Stable left-to-right console order (by createdAt ASC) so tabs never jump around on edit/save.
 	const orderedConsoles = createMemo(() =>
-		[...scratchpads()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
+		[...consoles()].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
 	)
 
-	const activePad = createMemo(() => {
+	const activeConsole = createMemo(() => {
 		const r = route()
 		if (r.kind !== 'sql') return null
 		const list = orderedConsoles()
-		if (r.padId) return list.find((p) => p.id === r.padId) ?? list[0] ?? null
+		if (r.consoleId) return list.find((p) => p.id === r.consoleId) ?? list[0] ?? null
 		return list[0] ?? null
 	})
 
-	const splitPad = createMemo(() => {
-		const sid = splitPadId()
+	const splitConsole = createMemo(() => {
+		const sid = splitConsoleId()
 		if (!sid || route().kind !== 'sql') return null
-		const pad = orderedConsoles().find((p) => p.id === sid)
-		if (!pad || pad.id === activePad()?.id) return null
-		return pad
+		const sqlConsole = orderedConsoles().find((p) => p.id === sid)
+		if (!sqlConsole || sqlConsole.id === activeConsole()?.id) return null
+		return sqlConsole
 	})
 
 	// Keep browser & DataDip.app window title prominently showing the active DB and view.
 	createEffect(
-		() => [activeConn(), route(), activePad()?.title, splitPad()?.title] as const,
+		() => [activeConn(), route(), activeConsole()?.title, splitConsole()?.title] as const,
 		([conn, r, p1, p2]) => {
 			if (r.kind === 'home' || !conn) {
 				document.title = 'DataDip'
@@ -944,7 +944,7 @@ export function App() {
 										title="New Console"
 										onClick={() => {
 											const id = activeConnId()
-											if (id) void openOrCreateScratchpad(id, '-- Write SQL and press Cmd+Enter\n')
+											if (id) void openOrCreateConsole(id, '-- Write SQL and press Cmd+Enter\n')
 										}}
 									>
 										<IconPlus />
@@ -959,7 +959,7 @@ export function App() {
 									style="color:var(--ink-muted)"
 									onClick={() => {
 										const id = activeConnId()
-										if (id) void openOrCreateScratchpad(id)
+										if (id) void openOrCreateConsole(id)
 									}}
 								>
 									<IconSql />
@@ -968,22 +968,22 @@ export function App() {
 							</Show>
 
 							<For each={orderedConsoles()}>
-								{(pad) => {
-									const run = () => getConsoleRun(pad.id)
-									const isPrimary = () => route().kind === 'sql' && activePad()?.id === pad.id
-									const isSecondary = () => route().kind === 'sql' && splitPad()?.id === pad.id
+								{(sqlConsole) => {
+									const run = () => getConsoleRun(sqlConsole.id)
+									const isPrimary = () => route().kind === 'sql' && activeConsole()?.id === sqlConsole.id
+									const isSecondary = () => route().kind === 'sql' && splitConsole()?.id === sqlConsole.id
 									return (
 										<div class={['sidebar-console-row', { active: isPrimary(), secondary: isSecondary() }]}>
 											<button
 												type="button"
 												class={['sidebar-item', { active: isPrimary() || isSecondary() }]}
 												onClick={() => {
-													if (splitPadId() === pad.id) setSplitPadId(activePad()?.id ?? null)
-													navigate({ kind: 'sql', connId: pad.connectionId, padId: pad.id })
+													if (splitConsoleId() === sqlConsole.id) setSplitConsoleId(activeConsole()?.id ?? null)
+													navigate({ kind: 'sql', connId: sqlConsole.connectionId, consoleId: sqlConsole.id })
 												}}
 											>
 												<IconSql />
-												<span class="sidebar-item-label">{pad.title}</span>
+												<span class="sidebar-item-label">{sqlConsole.title}</span>
 												<Show when={run().running}>
 													<span class="sidebar-run-badge mono">
 														<span class="status-pulse accent" />
@@ -994,11 +994,11 @@ export function App() {
 											<button
 												type="button"
 												class="sidebar-close-btn"
-												aria-label={`Close ${pad.title}`}
-												title={`Close ${pad.title}`}
+												aria-label={`Close ${sqlConsole.title}`}
+												title={`Close ${sqlConsole.title}`}
 												onClick={(e) => {
 													e.stopPropagation()
-													requestCloseConsole(pad)
+													requestCloseConsole(sqlConsole)
 												}}
 											>
 												<IconClose />
@@ -1156,7 +1156,7 @@ export function App() {
 							reconnectTick={reconnectTick()}
 							onNavigate={(next, opts) => navigate(next, opts)}
 							onOpenInSql={(sqlText) => {
-								void openOrCreateScratchpad(r().connId, sqlText)
+								void openOrCreateConsole(r().connId, sqlText)
 							}}
 							onRequestConfirm={(st) => setConfirmState(st)}
 							onRequestArmRw={() => void setRw(true)}
@@ -1176,17 +1176,17 @@ export function App() {
 							<div class="console-tabs-bar" role="tablist" aria-label="SQL Consoles">
 								<div class="console-tabs-scroll">
 									<For each={orderedConsoles()}>
-										{(pad) => {
-											const run = () => getConsoleRun(pad.id)
-											const isActive = () => activePad()?.id === pad.id
-											const isSplit = () => splitPad()?.id === pad.id
+										{(sqlConsole) => {
+											const run = () => getConsoleRun(sqlConsole.id)
+											const isActive = () => activeConsole()?.id === sqlConsole.id
+											const isSplit = () => splitConsole()?.id === sqlConsole.id
 											return (
 												<div
 													class={['console-tab', { active: isActive(), split: isSplit() }]}
 													onAuxClick={(e) => {
 														if (e.button === 1) {
 															e.preventDefault()
-															requestCloseConsole(pad)
+															requestCloseConsole(sqlConsole)
 														}
 													}}
 												>
@@ -1196,12 +1196,12 @@ export function App() {
 														aria-selected={isActive() ? 'true' : 'false'}
 														class="console-tab-btn"
 														onClick={() => {
-															if (splitPadId() === pad.id) setSplitPadId(activePad()?.id ?? null)
-															navigate({ kind: 'sql', connId: r().connId, padId: pad.id })
+															if (splitConsoleId() === sqlConsole.id) setSplitConsoleId(activeConsole()?.id ?? null)
+															navigate({ kind: 'sql', connId: r().connId, consoleId: sqlConsole.id })
 														}}
 													>
 														<IconSql />
-														<span>{pad.title}</span>
+														<span>{sqlConsole.title}</span>
 														<Show when={run().running}>
 															<span class="sidebar-run-badge mono">
 																<span class="status-pulse accent" />
@@ -1212,11 +1212,11 @@ export function App() {
 													<button
 														type="button"
 														class="console-tab-close"
-														aria-label={`Close ${pad.title}`}
-														title={`Close ${pad.title}`}
+														aria-label={`Close ${sqlConsole.title}`}
+														title={`Close ${sqlConsole.title}`}
 														onClick={(e) => {
 															e.stopPropagation()
-															requestCloseConsole(pad)
+															requestCloseConsole(sqlConsole)
 														}}
 													>
 														<IconClose />
@@ -1230,7 +1230,7 @@ export function App() {
 										class="console-tab-add"
 										aria-label="New console"
 										title="New Console"
-										onClick={() => void openOrCreateScratchpad(r().connId, '-- Write SQL and press Cmd+Enter\n')}
+										onClick={() => void openOrCreateConsole(r().connId, '-- Write SQL and press Cmd+Enter\n')}
 									>
 										<IconPlus />
 									</button>
@@ -1239,26 +1239,26 @@ export function App() {
 
 							<div class="consoles-split-grid">
 								<div class="console-pane">
-									<ScratchpadView
+									<ConsoleView
 										connId={r().connId}
 										connName={activeConn()?.name}
 										isProduction={activeConn()?.isProduction}
-										scratchpad={activePad()}
+										console={activeConsole()}
 										schema={schema()}
 										dark={dark()}
 										nowMs={nowMs()}
 										focusTick={consoleFocusTick()}
-										splitOpen={Boolean(splitPad())}
+										splitOpen={Boolean(splitConsole())}
 										onToggleSplit={() => void toggleSplitConsole()}
-										onScratchpadUpdated={(pad) =>
-											setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))
+										onConsoleUpdated={(sqlConsole) =>
+											setConsoles((prev) => prev.map((p) => (p.id === sqlConsole.id ? sqlConsole : p)))
 										}
-										onScratchpadDeleted={(padId) => {
-											const rest = scratchpads().filter((p) => p.id !== padId)
-											setScratchpads(rest)
-											if (splitPadId() === padId) setSplitPadId(null)
+										onConsoleDeleted={(consoleId) => {
+											const rest = consoles().filter((p) => p.id !== consoleId)
+											setConsoles(rest)
+											if (splitConsoleId() === consoleId) setSplitConsoleId(null)
 											if (rest.length > 0)
-												navigate({ kind: 'sql', connId: r().connId, padId: rest[0]!.id }, { replace: true })
+												navigate({ kind: 'sql', connId: r().connId, consoleId: rest[0]!.id }, { replace: true })
 											else navigate({ kind: 'connection', connId: r().connId }, { replace: true })
 										}}
 										onFollowFk={(targetTable, targetColumn, value) =>
@@ -1312,27 +1312,27 @@ export function App() {
 									/>
 								</div>
 
-								<Show when={splitPad()}>
+								<Show when={splitConsole()}>
 									{(sp) => (
 										<div class="console-pane split-secondary">
-											<ScratchpadView
+											<ConsoleView
 												connId={r().connId}
 												connName={activeConn()?.name}
 												isProduction={activeConn()?.isProduction}
-												scratchpad={sp()}
+												console={sp()}
 												schema={schema()}
 												dark={dark()}
 												nowMs={nowMs()}
 												isSplitPane
-												allConsoles={orderedConsoles().filter((p) => p.id !== activePad()?.id)}
-												onSelectPad={(pid) => setSplitPadId(pid)}
-												onCloseSplit={() => setSplitPadId(null)}
-												onScratchpadUpdated={(pad) =>
-													setScratchpads((prev) => prev.map((p) => (p.id === pad.id ? pad : p)))
+												allConsoles={orderedConsoles().filter((p) => p.id !== activeConsole()?.id)}
+												onSelectConsole={(pid) => setSplitConsoleId(pid)}
+												onCloseSplit={() => setSplitConsoleId(null)}
+												onConsoleUpdated={(sqlConsole) =>
+													setConsoles((prev) => prev.map((p) => (p.id === sqlConsole.id ? sqlConsole : p)))
 												}
-												onScratchpadDeleted={(padId) => {
-													setScratchpads((prev) => prev.filter((p) => p.id !== padId))
-													if (splitPadId() === padId) setSplitPadId(null)
+												onConsoleDeleted={(consoleId) => {
+													setConsoles((prev) => prev.filter((p) => p.id !== consoleId))
+													if (splitConsoleId() === consoleId) setSplitConsoleId(null)
 												}}
 												onFollowFk={(targetTable, targetColumn, value) =>
 													navigate(
@@ -1436,7 +1436,7 @@ export function App() {
 				activeConnId={activeConnId()}
 				connections={connections()}
 				schema={schema()}
-				scratchpads={scratchpads()}
+				consoles={consoles()}
 				onClose={() => setOmnibarOpen(false)}
 				onSelectConnection={(id) => navigate({ kind: 'connection', connId: id })}
 				onSelectTable={(connId, table, filter) =>
@@ -1459,10 +1459,10 @@ export function App() {
 						filter ? { trailLabel: `${table}.${filter.column}=${filter.value}` } : undefined,
 					)
 				}
-				onSelectScratchpad={(connId, padId) => navigate({ kind: 'sql', connId, padId })}
-				onNewScratchpad={() => {
+				onSelectConsole={(connId, consoleId) => navigate({ kind: 'sql', connId, consoleId })}
+				onNewConsole={() => {
 					const id = activeConnId()
-					if (id) void openOrCreateScratchpad(id, '-- New console\n')
+					if (id) void openOrCreateConsole(id, '-- New console\n')
 				}}
 				onToggleTheme={toggleTheme}
 				onToggleRw={() => void setRw(!rwArmed())}

@@ -1,4 +1,4 @@
-// Browser URL codec mapping DataDip navigation state (connection, table, fields, filters, sort, cursor, scratchpad) to/from URLs.
+// Browser URL codec mapping DataDip navigation state (connection, table, fields, filters, sort, cursor, console) to/from URLs.
 import type { FilterOp, FilterSpec, OrderSpec } from './types.ts'
 
 export type AppRoute =
@@ -22,7 +22,7 @@ export type AppRoute =
 	| {
 			kind: 'sql'
 			connId: string
-			padId: string | null
+			consoleId: string | null
 	  }
 
 const VALID_OPS = new Set<FilterOp>(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'isnull', 'notnull'])
@@ -112,7 +112,7 @@ export function parseRoute(pathname: string, search: string): AppRoute {
 		return {
 			kind: 'sql',
 			connId,
-			padId: parts[3] ?? null,
+			consoleId: parts[3] ?? null,
 		}
 	}
 
@@ -124,7 +124,7 @@ export function formatRoute(route: AppRoute): string {
 	if (route.kind === 'connection') return `/c/${encodeURIComponent(route.connId)}`
 	if (route.kind === 'sql') {
 		const base = `/c/${encodeURIComponent(route.connId)}/sql`
-		return route.padId ? `${base}/${encodeURIComponent(route.padId)}` : base
+		return route.consoleId ? `${base}/${encodeURIComponent(route.consoleId)}` : base
 	}
 
 	const base =

@@ -14,7 +14,7 @@ import type {
 	QueryResponse,
 	RecentTable,
 	ReverseFkCount,
-	Scratchpad,
+	Console,
 } from '../shared/types.ts'
 
 export class ApiError extends Error {
@@ -108,16 +108,17 @@ export const api = {
 	searchId: (id: string, value: string) =>
 		request<{ matches: IdMatch[] }>('POST', `/api/connections/${encodeURIComponent(id)}/search-id`, { value }),
 
-	listScratchpads: (connId: string) =>
-		request<{ scratchpads: Scratchpad[] }>('GET', `/api/connections/${encodeURIComponent(connId)}/scratchpads`),
-	createScratchpad: (connId: string, title?: string, sql?: string) =>
-		request<{ scratchpad: Scratchpad }>('POST', `/api/connections/${encodeURIComponent(connId)}/scratchpads`, {
+	listConsoles: (connId: string) =>
+		request<{ consoles: Console[] }>('GET', `/api/connections/${encodeURIComponent(connId)}/consoles`),
+	createConsole: (connId: string, title?: string, sql?: string) =>
+		request<{ console: Console }>('POST', `/api/connections/${encodeURIComponent(connId)}/consoles`, {
 			title,
 			sql,
 		}),
-	updateScratchpad: (padId: string, patch: { title?: string; sql?: string; pinned?: boolean }) =>
-		request<{ scratchpad: Scratchpad }>('PUT', `/api/scratchpads/${encodeURIComponent(padId)}`, patch),
-	deleteScratchpad: (padId: string) => request<{ ok: true }>('DELETE', `/api/scratchpads/${encodeURIComponent(padId)}`),
+	updateConsole: (consoleId: string, patch: { title?: string; sql?: string; pinned?: boolean }) =>
+		request<{ console: Console }>('PUT', `/api/consoles/${encodeURIComponent(consoleId)}`, patch),
+	deleteConsole: (consoleId: string) =>
+		request<{ ok: true }>('DELETE', `/api/consoles/${encodeURIComponent(consoleId)}`),
 
 	listHistory: (connId: string, limit = 100) =>
 		request<{ history: QueryHistoryEntry[] }>(

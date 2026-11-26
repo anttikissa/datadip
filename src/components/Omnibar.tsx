@@ -1,9 +1,9 @@
-// Cmd+K Omnibar for jumping to tables, columns, scratchpads, connections, actions, or searching an ID across tables.
+// Cmd+K Omnibar for jumping to tables, columns, consoles, connections, actions, or searching an ID across tables.
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { formatCellText } from '../lib/format.ts'
 import { IconSearch } from '../lib/icons.tsx'
-import type { ConnectionWithStatus, DatabaseSchema, IdMatch, Scratchpad } from '../shared/types.ts'
+import type { ConnectionWithStatus, DatabaseSchema, IdMatch, Console } from '../shared/types.ts'
 
 interface OmniItem {
 	id: string
@@ -18,12 +18,12 @@ export function Omnibar(props: {
 	activeConnId: string | null
 	connections: ConnectionWithStatus[]
 	schema: DatabaseSchema | null
-	scratchpads: Scratchpad[]
+	consoles: Console[]
 	onClose: () => void
 	onSelectConnection: (connId: string) => void
 	onSelectTable: (connId: string, table: string, filter?: { column: string; value: string }) => void
-	onSelectScratchpad: (connId: string, padId: string) => void
-	onNewScratchpad: () => void
+	onSelectConsole: (connId: string, consoleId: string) => void
+	onNewConsole: () => void
 	onToggleTheme: () => void
 	onToggleRw: () => void
 	onOpenDiscover: () => void
@@ -115,15 +115,15 @@ export function Omnibar(props: {
 			}
 
 			// Consoles
-			for (const pad of props.scratchpads) {
-				if (!q || pad.title.toLowerCase().includes(q) || pad.sql.toLowerCase().includes(q)) {
+			for (const sqlConsole of props.consoles) {
+				if (!q || sqlConsole.title.toLowerCase().includes(q) || sqlConsole.sql.toLowerCase().includes(q)) {
 					list.push({
-						id: `pad:${pad.id}`,
+						id: `sqlConsole:${sqlConsole.id}`,
 						kind: 'CONSOLE',
-						label: pad.title,
-						detail: pad.sql.trim().slice(0, 50),
+						label: sqlConsole.title,
+						detail: sqlConsole.sql.trim().slice(0, 50),
 						run: () => {
-							props.onSelectScratchpad(connId, pad.id)
+							props.onSelectConsole(connId, sqlConsole.id)
 							props.onClose()
 						},
 					})
@@ -157,7 +157,7 @@ export function Omnibar(props: {
 							label: 'New SQL Console',
 							detail: 'Open fresh query console',
 							run: () => {
-								props.onNewScratchpad()
+								props.onNewConsole()
 								props.onClose()
 							},
 						},

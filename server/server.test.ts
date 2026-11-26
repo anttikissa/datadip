@@ -172,19 +172,19 @@ describe('DataDip server API & safety boundaries', () => {
 		await apiCall('POST', `/api/connections/${connId}/rw`, { armed: false })
 	})
 
-	test('saves and updates scratchpads and records query history', async () => {
-		const created = await apiCall('POST', `/api/connections/${connId}/scratchpads`, {
+	test('saves and updates consoles and records query history', async () => {
+		const created = await apiCall('POST', `/api/connections/${connId}/consoles`, {
 			title: 'Prod Checks',
 			sql: 'SELECT * FROM users;',
 		})
 		expect(created.status).toBe(201)
-		const padId = (created.data.scratchpad as { id: string }).id
+		const consoleId = (created.data.console as { id: string }).id
 
-		const updated = await apiCall('PUT', `/api/scratchpads/${padId}`, {
+		const updated = await apiCall('PUT', `/api/consoles/${consoleId}`, {
 			sql: 'SELECT COUNT(*) AS n FROM orders;',
 		})
 		expect(updated.status).toBe(200)
-		expect((updated.data.scratchpad as { sql: string }).sql).toContain('COUNT(*)')
+		expect((updated.data.console as { sql: string }).sql).toContain('COUNT(*)')
 
 		const hist = await apiCall('GET', `/api/connections/${connId}/history`)
 		expect(hist.status).toBe(200)

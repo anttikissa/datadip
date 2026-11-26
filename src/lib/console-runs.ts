@@ -24,23 +24,23 @@ const EMPTY_RUN: ConsoleRunState = {
 
 const [runsMap, setRunsMap] = createSignal<Record<string, ConsoleRunState>>({})
 
-export function getConsoleRun(padId: string | undefined): ConsoleRunState {
-	if (!padId) return EMPTY_RUN
-	return runsMap()[padId] ?? EMPTY_RUN
+export function getConsoleRun(consoleId: string | undefined): ConsoleRunState {
+	if (!consoleId) return EMPTY_RUN
+	return runsMap()[consoleId] ?? EMPTY_RUN
 }
 
-export function updateConsoleRun(padId: string, patch: Partial<ConsoleRunState>): void {
+export function updateConsoleRun(consoleId: string, patch: Partial<ConsoleRunState>): void {
 	setRunsMap((prev) => ({
 		...prev,
-		[padId]: { ...(prev[padId] ?? EMPTY_RUN), ...patch },
+		[consoleId]: { ...(prev[consoleId] ?? EMPTY_RUN), ...patch },
 	}))
 }
 
-export function clearConsoleRun(padId: string): void {
+export function clearConsoleRun(consoleId: string): void {
 	setRunsMap((prev) => {
-		if (!(padId in prev)) return prev
+		if (!(consoleId in prev)) return prev
 		const next = { ...prev }
-		delete next[padId]
+		delete next[consoleId]
 		return next
 	})
 }

@@ -1,6 +1,6 @@
 # DataDip
 
-A utilitarian database browser, foreign-key navigator, and SQL scratchpad
+A utilitarian database browser, foreign-key navigator, and SQL console
 IDE for local and SSH-remote databases (SQLite first, adapter-ready for
 Postgres). Runs as a localhost web server and native macOS WKWebView app
 (`DataDip.app`). Read DECISIONS.md before changing behavior. Record each
