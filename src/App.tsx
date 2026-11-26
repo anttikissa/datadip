@@ -1,5 +1,6 @@
 // Root DataDip application: URL history router, Production chrome, Read-Only/Read-Write switch, sidebar, FK trail, and modals.
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js'
+import { ChangelogModal } from './components/ChangelogModal.tsx'
 import { ConfirmDialog, type ConfirmState } from './components/ConfirmDialog.tsx'
 import { ConnectionModal } from './components/ConnectionModal.tsx'
 import { DbInfoModal } from './components/DbInfoModal.tsx'
@@ -34,6 +35,7 @@ import {
 	IconView,
 } from './lib/icons.tsx'
 import { parse as parseAson } from './shared/ason.ts'
+import { APP_VERSION } from './shared/changelog.ts'
 import { tid } from './shared/tid.ts'
 import type {
 	ConnectionConfig,
@@ -92,6 +94,8 @@ export function App() {
 	const [editingConn, setEditingConn] = createSignal<ConnectionConfig | null>(null)
 	const [discoverOpen, setDiscoverOpen] = createSignal(false)
 	const [dbInfoOpen, setDbInfoOpen] = createSignal(false)
+	const [changelogOpen, setChangelogOpen] = createSignal(false)
+	const [hasUnseenChangelog, setHasUnseenChangelog] = createSignal(false)
 	const [showInternalTables, setShowInternalTables] = createSignal(false)
 	const [omnibarOpen, setOmnibarOpen] = createSignal(false)
 	const [recentModalOpen, setRecentModalOpen] = createSignal(false)
@@ -426,6 +430,14 @@ export function App() {
 		void api.setPreference('theme', next ? 'dark' : 'light')
 	}
 
+	function openChangelog() {
+		setChangelogOpen(true)
+		if (hasUnseenChangelog()) {
+			setHasUnseenChangelog(false)
+			void api.setPreference('lastSeenVersion', APP_VERSION)
+		}
+	}
+
 	// Boot: load connections, prefs, popstate listener, clock tick, global hotkeys
 	onSettled(() => {
 		void refreshConnections()
@@ -435,6 +447,9 @@ export function App() {
 				pref === 'dark' || (pref !== 'light' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
 			setDark(isDark)
 			document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+			if (res.preferences.lastSeenVersion !== APP_VERSION) {
+				setHasUnseenChangelog(true)
+			}
 		})
 
 		const onPop = () => {
@@ -539,9 +554,11 @@ export function App() {
 			e.preventDefault()
 			if (!confirmState()) requestCloseConsole(cur)
 		}
+		const onChangelog = () => openChangelog()
 		window.addEventListener('datadip:refresh', onRefresh)
 		window.addEventListener('datadip:new-tab', onNewTab)
 		window.addEventListener('datadip:close-tab', onCloseTab)
+		window.addEventListener('datadip:changelog', onChangelog)
 
 		const DIALOG_FOCUSABLE =
 			'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -664,6 +681,7 @@ export function App() {
 			window.removeEventListener('datadip:refresh', onRefresh)
 			window.removeEventListener('datadip:new-tab', onNewTab)
 			window.removeEventListener('datadip:close-tab', onCloseTab)
+			window.removeEventListener('datadip:changelog', onChangelog)
 			if (reconnectTimer) clearTimeout(reconnectTimer)
 			es?.close()
 			clearInterval(timer)
@@ -809,6 +827,19 @@ export function App() {
 				<button type="button" class="brand-btn" onClick={() => navigate({ kind: 'home' })} aria-label="DataDip Home">
 					<IconBrand />
 					<span>DataDip</span>
+				</button>
+
+				<button
+					type="button"
+					class={['version-badge-btn mono', { unseen: hasUnseenChangelog() }]}
+					title={`What's New in DataDip v${APP_VERSION}`}
+					aria-label={`What's New in DataDip v${APP_VERSION}`}
+					onClick={openChangelog}
+				>
+					<Show when={hasUnseenChangelog()}>
+						<span class="unseen-dot" aria-hidden="true" />
+					</Show>
+					v{APP_VERSION}
 				</button>
 
 				<Show when={activeConnId()}>
@@ -1804,10 +1835,13 @@ export function App() {
 				onOpenDbInfo={() => setDbInfoOpen(true)}
 				onCopyTeammateLink={() => void copyTeammateLink()}
 				canToggleRw={!isAlwaysReadOnly()}
+				onOpenChangelog={openChangelog}
 				onToggleTheme={toggleTheme}
 				onToggleRw={() => void setRw(!rwArmed())}
 				onOpenDiscover={() => setDiscoverOpen(true)}
 			/>
+
+			<ChangelogModal open={changelogOpen()} onClose={() => setChangelogOpen(false)} />
 
 			<RecentModal
 				open={recentModalOpen()}

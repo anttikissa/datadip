@@ -28,6 +28,7 @@ export function Omnibar(props: {
 	onOpenErDiagram?: () => void
 	onOpenDbInfo?: () => void
 	onCopyTeammateLink?: () => void
+	onOpenChangelog?: () => void
 	canToggleRw?: boolean
 	onToggleTheme: () => void
 	onToggleRw: () => void
@@ -238,12 +239,26 @@ export function Omnibar(props: {
 				id: 'act:discover',
 				kind: 'ACTION',
 				label: 'Auto-Discover SQLite Databases',
-				detail: 'Scan local or SSH host',
+				detail: 'Scan local, iOS Simulators, or SSH host',
 				run: () => {
 					props.onOpenDiscover()
 					props.onClose()
 				},
 			},
+			...(props.onOpenChangelog
+				? [
+						{
+							id: 'act:changelog',
+							kind: 'ACTION',
+							label: "What's New / Changelog",
+							detail: 'View release notes & new features',
+							run: () => {
+								props.onOpenChangelog?.()
+								props.onClose()
+							},
+						},
+					]
+				: []),
 			{
 				id: 'act:theme',
 				kind: 'ACTION',

@@ -7,7 +7,15 @@ Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[
 ![DataDip walkthrough: foreign-key navigation, Row Inspector, Cmd+K ID search, SQL Console, and Production Safety](site/assets/datadip-demo.gif)
 
 <details>
-<summary>More screenshots (Row Inspector, SQL Console, Production Safety, Omnibar ID Search)</summary>
+<summary>More screenshots (ER Diagram, Column Profiling, Workspaces, Row Inspector, SQL Console, Production Safety, Omnibar)</summary>
+
+| Interactive Schema / ER Diagram | One-Keystroke Column Profiling (`p`) |
+|---|---|
+| ![Interactive pure-SVG Schema and ER Diagram](site/assets/shot-er-diagram-dark.png) | ![Column Profile showing null %, distinct, min/max, and clickable top values](site/assets/shot-profile-dark.png) |
+
+| Client Workspaces, Tags & Locked RO | SQLite PRAGMA / WAL Inspector |
+|---|---|
+| ![Home screen with color-coded workspaces, tags, and RO locks](site/assets/shot-workspaces-dark.png) | ![Database Info modal with WAL size, user_version, and maintenance controls](site/assets/shot-db-info-light.png) |
 
 | Row Inspector & Reverse FKs | SQL Console with Clickable FKs |
 |---|---|
@@ -48,7 +56,7 @@ Download the signed and Apple-notarized **`DataDip-0.2.0-arm64.dmg`** from [GitH
 
 ```text
 SHA-256 (DataDip-0.2.0-arm64.dmg):
-beb129a695bd6846e8283e5457deb8bcc29b90f70f6626ee2ae99af6337c7c35
+4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64
 ```
 
 ## Install & Run (from source)
@@ -83,6 +91,7 @@ bun run dev           # Vite HMR client on :4748
 ./mac/build-dmg       # build self-contained signed macOS .app & .dmg (--notarize <profile> to notarize)
 ```
 
-## License
+## Changelog & License
 
-[MIT](LICENSE)
+- Release history: [CHANGELOG.md](CHANGELOG.md) (also available in-app via the top-bar version pill or `Cmd+K` -> *What's New*)
+- License: [MIT](LICENSE)

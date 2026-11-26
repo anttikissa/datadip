@@ -479,6 +479,10 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		NSPasteboard.general.clearContents()
 		NSPasteboard.general.setString(u.absoluteString, forType: .string)
 	}
+	@objc func showChangelog(_ sender: Any?) {
+		guard let u = web.url, u.scheme == "http" || u.scheme == "https" else { return }
+		web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('datadip:changelog'))", completionHandler: nil)
+	}
 	@objc func showAbout(_ sender: Any?) {
 		var options: [NSApplication.AboutPanelOptionKey: Any] = [:]
 		if let u = web.url, u.scheme == "http" || u.scheme == "https", let host = u.host, let port = u.port {
@@ -536,6 +540,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 		}
 		var appItems: [(String, Selector?, String)] = [
 			("About DataDip", #selector(showAbout(_:)), ""),
+			("What's New (Changelog)…", #selector(showChangelog(_:)), ""),
 		]
 		if bundledServer != nil {
 			appItems.append(("Install 'datadip' CLI…", #selector(installCli(_:)), ""))

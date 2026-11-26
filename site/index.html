@@ -3,18 +3,18 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>DataDip — Browse SQLite &amp; PostgreSQL like the web</title>
+		<title>DataDip v0.2.0 — Browse SQLite &amp; PostgreSQL like the web</title>
 		<meta
 			name="description"
-			content="A fast, keyboard-first SQLite and PostgreSQL browser, foreign-key navigator, and SQL console for local files and SSH servers. Read-only by default. Native macOS app, no Electron, MIT open source."
+			content="DataDip v0.2.0: fast, keyboard-first SQLite and PostgreSQL browser, foreign-key navigator, interactive ER diagram, 1-key column profiler, and SQL console. Read-only by default. Native macOS app, no Electron, MIT open source."
 		/>
-		<meta property="og:title" content="DataDip — Browse SQLite &amp; PostgreSQL like the web" />
+		<meta property="og:title" content="DataDip v0.2.0 — Browse SQLite &amp; PostgreSQL like the web" />
 		<meta
 			property="og:description"
-			content="Click foreign keys to jump across tables, use Back/Forward without losing filters, and paste any ID into Cmd+K to find it everywhere. Read-only by default. No Electron."
+			content="New in v0.2.0: Interactive ER Diagram, 1-Key Column Profiling, Client Workspaces, Locked Read-Only Replicas, CSV/JSON Import, and SQLite PRAGMA/WAL Inspector. Signed macOS app, MIT open source."
 		/>
 		<meta property="og:type" content="website" />
-		<meta property="og:image" content="./assets/shot-browser-dark.png" />
+		<meta property="og:image" content="./assets/shot-er-diagram-dark.png" />
 		<link rel="icon" type="image/png" sizes="32x32" href="./assets/icon-32.png" />
 		<link rel="apple-touch-icon" href="./assets/icon-192.png" />
 		<link rel="stylesheet" href="./styles.css" />
@@ -36,17 +36,19 @@
 	<body>
 		<header class="nav">
 			<div class="container nav-inner">
-				<a class="brand" href="#top" aria-label="DataDip home">
-					<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
-					<span class="brand-name">DataDip</span>
-					<span class="version-pill">v0.2.0</span>
-				</a>
+				<div class="brand-wrap">
+					<a class="brand" href="#top" aria-label="DataDip home">
+						<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
+						<span class="brand-name">DataDip</span>
+					</a>
+					<a class="version-pill" href="#changelog" title="View v0.2.0 changelog">v0.2.0</a>
+				</div>
 
 				<nav class="nav-links" aria-label="Primary">
+					<a href="#whats-new">What&apos;s New</a>
 					<a href="#features">Features</a>
 					<a href="#compare">Compare</a>
-					<a href="#safety">Safety</a>
-					<a href="#shortcuts">Shortcuts</a>
+					<a href="#changelog">Changelog</a>
 					<a href="#install">Install</a>
 					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
 				</nav>
@@ -72,21 +74,26 @@
 			<section class="hero">
 				<div class="container">
 					<div class="hero-copy">
-						<div class="eyebrow">
-							<span class="dot"></span>
-							SQLite &amp; PostgreSQL &middot; Native macOS (No Electron) &middot; MIT Open Source
-						</div>
+						<a class="release-banner" href="#whats-new">
+							<span class="release-pill mono">v0.2.0</span>
+							<span class="release-text">
+								Grand Release: Interactive ER Diagram, 1-Key Column Profiling, Workspaces, &amp; Locked Prod Replicas
+							</span>
+							<span class="release-arrow" aria-hidden="true">&rarr;</span>
+						</a>
+
 						<h1>Browse your database<br />like the web.</h1>
 						<p class="lead">
-							A fast, keyboard-first database browser, foreign-key navigator, and SQL console for local files and
-							remote SSH servers. Click foreign keys to jump across tables, hit Back without losing filters, and
-							paste any ID into <kbd>&#8984;K</kbd> to find matching rows everywhere.
+							A fast, keyboard-first <strong>SQLite &amp; PostgreSQL</strong> browser, foreign-key navigator, visual ER
+							diagram, and parallel SQL console for local files and SSH servers. Click foreign keys to jump across
+							tables, hit Back without losing filters, and paste any ID into <kbd>&#8984;K</kbd> to find matching rows
+							everywhere.
 						</p>
 
 						<div class="hero-ctas">
 							<a class="btn primary lg" href="./downloads/DataDip-0.2.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download for macOS (Apple Silicon)
+								Download v0.2.0 for macOS (Apple Silicon)
 							</a>
 							<a class="btn secondary lg" href="#install">Build from Source / Linux</a>
 						</div>
@@ -94,11 +101,13 @@
 						<div class="trust-row">
 							<span>Apple Signed &amp; Notarized DMG (46 MB)</span>
 							<span class="sep">&middot;</span>
+							<span>Native WKWebView (No Electron)</span>
+							<span class="sep">&middot;</span>
 							<span>Read-only by default</span>
 							<span class="sep">&middot;</span>
-							<span>Zero telemetry</span>
+							<span>MIT Open Source</span>
 							<span class="sep">&middot;</span>
-							<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">Source on GitHub</a>
+							<a href="#changelog">What&apos;s New in v0.2.0</a>
 						</div>
 					</div>
 
@@ -111,7 +120,9 @@
 									<span class="tl yellow"></span>
 									<span class="tl green"></span>
 								</div>
-								<div class="mac-title mono" id="stage-title">DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)</div>
+								<div class="mac-title mono" id="stage-title">
+									DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)
+								</div>
 								<div class="mac-chrome-actions">
 									<button type="button" class="chip-btn" id="video-toggle" aria-label="Pause demo video">Pause</button>
 									<button type="button" class="chip-btn" id="zoom-btn" hidden>Zoom</button>
@@ -157,6 +168,50 @@
 								role="tab"
 								aria-selected="false"
 								data-kind="image"
+								data-src="./assets/shot-er-diagram-dark.png"
+								data-title="NEW v0.2.0 · Interactive Schema / ER Diagram — Pure SVG, pan/zoom, draggable cards, click to browse"
+							>
+								<span class="new-dot"></span> ER Diagram
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-profile-dark.png"
+								data-title="NEW v0.2.0 · One-Key Column Profiling (p) — Null %, distinct, min/max, clickable top-value filters"
+							>
+								<span class="new-dot"></span> Column Profile
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-workspaces-dark.png"
+								data-title="NEW v0.2.0 · Client Workspaces — Grouped folders, color accents, #tags, and Locked RO badges"
+							>
+								<span class="new-dot"></span> Workspaces
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-db-info-light.png"
+								data-title="NEW v0.2.0 · Database Info &amp; PRAGMA/WAL Inspector — File/WAL sizes, user_version, Checkpoint &amp; VACUUM"
+							>
+								<span class="new-dot"></span> PRAGMA / WAL
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
 								data-src="./assets/shot-browser-dark.png"
 								data-title="Table Browser — Clickable foreign keys, keyset paging, live .db auto-refresh"
 							>
@@ -180,7 +235,7 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-console-dark.png"
-								data-title="SQL Console — Parallel worker execution, clickable FK pills, instant exports"
+								data-title="SQL Console — Parallel worker execution, clickable FK pills, cross-DB searchable history"
 							>
 								SQL Console
 							</button>
@@ -191,7 +246,7 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-prod-safety.png"
-								data-title="Production Safety — Crimson top bar, 10-min RW timer, staged SQL preview"
+								data-title="Production Safety — Crimson top bar, target-bound DB-name confirm, staged SQL preview"
 							>
 								Prod Safety
 							</button>
@@ -219,28 +274,176 @@
 							<span class="badge ok">Ready</span>
 							<strong>SQLite (Local)</strong>
 						</div>
-						<p>Native <code>bun:sqlite</code>, read-only handles by default, live <code>.db</code>/<code>-wal</code> auto-refresh, Finder double-click &amp; <code>datadip ./app.db</code>.</p>
+						<p>
+							Native <code>bun:sqlite</code>, read-only handles by default, live <code>.db</code>/<code>-wal</code>
+							auto-refresh, Finder double-click &amp; <code>datadip ./app.db</code>.
+						</p>
 					</div>
 					<div class="engine-item">
 						<div class="engine-head">
 							<span class="badge ok">Ready</span>
 							<strong>PostgreSQL (Direct TLS)</strong>
 						</div>
-						<p>Built-in <code>Bun.SQL</code>, paste any <code>DATABASE_URL</code> (Supabase, Neon, RDS), enforces <code>BEGIN READ ONLY</code>, real <code>CancelRequest</code>.</p>
+						<p>
+							Built-in <code>Bun.SQL</code>, paste any <code>DATABASE_URL</code> (Supabase, Neon, RDS), enforces
+							<code>BEGIN READ ONLY</code>, real <code>CancelRequest</code>.
+						</p>
 					</div>
 					<div class="engine-item">
 						<div class="engine-head">
 							<span class="badge ok">Ready</span>
 							<strong>PostgreSQL over SSH</strong>
 						</div>
-						<p>Local OpenSSH port forwarding (<code>ssh -N -L</code>) honoring <code>~/.ssh/config</code> &amp; <code>ProxyJump</code>. Zero software needed on remote host.</p>
+						<p>
+							Local OpenSSH port forwarding (<code>ssh -N -L</code>) with a built-in <code>~/.ssh/config</code> alias
+							picker &amp; <code>ProxyJump</code>. Zero remote software needed.
+						</p>
 					</div>
 					<div class="engine-item">
 						<div class="engine-head">
 							<span class="badge ok">Ready</span>
 							<strong>SQLite over SSH</strong>
 						</div>
-						<p>One persistent multiplexed SSH session per host with parallel query workers and in-app <code>SSH_ASKPASS</code> prompts for keys &amp; 2FA.</p>
+						<p>
+							One persistent multiplexed SSH session per host with parallel query workers and in-app
+							<code>SSH_ASKPASS</code> prompts for keys &amp; 2FA.
+						</p>
+					</div>
+				</div>
+			</section>
+
+			<!-- GRAND RELEASE SHOWCASE: What's New in v0.2.0 -->
+			<section id="whats-new" class="section alt-bg">
+				<div class="container">
+					<div class="section-head">
+						<span class="badge accent" style="margin-bottom:10px">GRAND RELEASE &middot; v0.2.0</span>
+						<h2>Ten big upgrades, zero extra bloat</h2>
+						<p>
+							Visual schema exploration, one-keystroke column statistics, multi-client workspaces, permanently locked
+							read-only replicas, transactional CSV/JSON import, and deep SQLite internals — still 46 MB, still zero
+							Electron.
+						</p>
+					</div>
+
+					<div class="release-grid">
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-er-diagram-dark.png"
+									alt="DataDip v0.2.0 interactive pure-SVG Schema and ER Diagram with foreign-key curves"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge accent">NEW</span>
+									<h3>Interactive Schema / ER Diagram</h3>
+								</div>
+								<p>
+									See your entire relational graph in pure SVG (<code>/c/:id/er</code>). Drag table cards to arrange,
+									pan and zoom smoothly, hover any table to illuminate its foreign-key neighborhood, and click any card
+									to jump straight into its rows.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-profile-dark.png"
+									alt="DataDip v0.2.0 Column Profile showing row count, distinct count, null percentage, min/max, and top value bars"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge accent">NEW</span>
+									<h3>One-Key Column Profiling (<kbd>p</kbd>)</h3>
+								</div>
+								<p>
+									Press <kbd>p</kbd> on any focused cell (or click <code>&#931;</code> in a column header) for instant
+									total rows, distinct count, null %, min/max, and top-10 proportional bars. Click any bar to filter the
+									table immediately. Works across SQLite and PostgreSQL.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-workspaces-dark.png"
+									alt="DataDip v0.2.0 Home screen with color-coded client workspaces, tags, and Locked RO badges"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge prod">SAFETY + ORG</span>
+									<h3>Workspaces &amp; Locked Read-Only Replicas</h3>
+								</div>
+								<p>
+									Group databases by client or environment with color accents and <code>#tags</code> indexed in
+									<kbd>&#8984;K</kbd>. Flag replicas <strong>Lock permanently Read-Only</strong> to hide Write buttons
+									and enforce HTTP 403 on the server; production DBs now require typing the exact DB name to arm writes.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-db-info-light.png"
+									alt="DataDip v0.2.0 Database Info modal displaying SQLite PRAGMA values, WAL size, user_version, and maintenance buttons"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge ok">SQLITE + MACOS</span>
+									<h3>PRAGMA/WAL Inspector, Triggers, &amp; Simulators</h3>
+								</div>
+								<p>
+									Inspect SQLite version, file/WAL/SHM sizes, <code>user_version</code>, and freelist pages, or run
+									RW-gated <strong>WAL Checkpoint</strong> and <strong>VACUUM</strong>. View table Triggers, collapse
+									FTS5 shadow tables automatically, and discover iOS Simulator &amp; macOS App Container DBs in one
+									click.
+								</p>
+							</div>
+						</article>
+					</div>
+
+					<div class="more-v02">
+						<div class="more-v02-title mono">ALSO SHIPPED IN v0.2.0</div>
+						<div class="more-v02-grid">
+							<div class="mini-feat">
+								<strong>Teammate Slug Links</strong>
+								<span>Hit <strong>Share</strong> to copy <code>/c/billing-prod/t/invoices?...</code> resolved by DB name instead of local IDs.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>Cross-DB History Search</strong>
+								<span>Filter executed SQL live across <strong>This DB</strong> or <strong>All DBs</strong> right inside the Console History drawer.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>Duplicate Row &amp; CSV/JSON Import</strong>
+								<span>Duplicate rows from Row Inspector or import CSV/JSON files with column mapping in a single transaction.</span>
+							</div>
+							<div class="mini-feat">
+								<strong><code>~/.ssh/config</code> Alias Picker</strong>
+								<span>Autofill SSH host, user, and port from your SSH config (including <code>Include</code> files) in one click.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>Target-Bound Prod Unlock</strong>
+								<span>Typing the exact production DB name unlocks writes and auto-relocks the moment you switch DBs.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>In-App What&apos;s New Modal</strong>
+								<span>Click the <code>v0.2.0</code> pill in the top bar or press <kbd>&#8984;K</kbd> &rarr; <em>Changelog</em> anytime.</span>
+							</div>
+						</div>
 					</div>
 				</div>
 			</section>
@@ -250,7 +453,10 @@
 				<div class="container">
 					<div class="section-head">
 						<h2>Built for debugging real production data</h2>
-						<p>No bloated wizard dialogs, no JVM warm-up, no Electron RAM tax. Just the tools you actually reach for during an incident or schema deep dive.</p>
+						<p>
+							No bloated wizard dialogs, no JVM warm-up, no Electron RAM tax. Just the tools you actually reach for
+							during an incident or schema deep dive.
+						</p>
 					</div>
 
 					<div class="bento-grid">
@@ -260,8 +466,8 @@
 							<p>
 								Every foreign key is a real link. Hover to peek, click to jump, press <kbd>Space</kbd> for incoming
 								<strong>Referenced by</strong> counts, or open the pan/zoom <strong>ER Diagram</strong>. Share filtered
-								views with teammates by database name (<kbd>Share</kbd>) and use <kbd>&#8984;[</kbd> / <kbd>&#8984;]</kbd>
-								for instant history.
+								views with teammates by database name (<strong>Share</strong>) and use <kbd>&#8984;[</kbd> /
+								<kbd>&#8984;]</kbd> for instant history.
 							</p>
 						</article>
 
@@ -354,12 +560,12 @@
 							<p>
 								DataDip detects the source table of your query and turns foreign-key columns in the result grid into
 								clickable links. Run multiple queries concurrently without blocking table browsing, split two consoles
-								side by side, and download full results in one click.
+								side by side, and search query history across every database.
 							</p>
 							<ul class="check-list">
 								<li>Active-statement highlight + run single (<kbd>&#8984;&#8629;</kbd>) or run all (<kbd>&#8984;&#8679;&#8629;</kbd>)</li>
 								<li>Real server-side cancellation (<kbd>&#8984;.</kbd>) on SQLite workers and PostgreSQL</li>
-								<li>Persistent query history (<kbd>&#8984;&#8679;H</kbd>) and saved consoles stored locally</li>
+								<li>Cross-connection searchable query history (<kbd>&#8984;&#8679;H</kbd>) and saved consoles</li>
 							</ul>
 						</div>
 						<figure class="spotlight-media">
@@ -378,12 +584,11 @@
 							<h3>You should never wonder if you are in prod</h3>
 							<p>
 								Flag a connection as Production and DataDip paints a crimson top edge and <code>PRODUCTION</code> badge
-								across every screen. Arming Read-Write shows a live 10-minute auto-relock countdown, and inline grid
-								changes always preview the exact parameterized <code>UPDATE</code> SQL before committing in a single
-								transaction.
+								across every screen. Unlocking writes requires typing the exact database name, shows a live 10-minute
+								countdown, auto-relocks when switching databases, and previews exact parameterized SQL before commit.
 							</p>
 							<ul class="check-list">
-								<li>Driver-level Read-Only handles (<code>{ readonly: true }</code> / <code>BEGIN READ ONLY</code>)</li>
+								<li>Driver-level Read-Only handles + permanent <code>alwaysReadOnly</code> lock for replicas</li>
 								<li>Staged inline edits highlighted in amber with SQL preview &amp; one-click Discard</li>
 								<li>Destructive SQL confirmation dialog on every database, not only prod</li>
 							</ul>
@@ -408,7 +613,7 @@
 								directly to every matching primary or foreign key row.
 							</p>
 							<ul class="check-list">
-								<li>Fuzzy-search tables, columns, saved consoles, and connections</li>
+								<li>Fuzzy-search tables, columns, workspaces, tags, consoles, and connections</li>
 								<li>Recent Databases &amp; Tables switcher on <kbd>&#8963;R</kbd></li>
 								<li>Live connection config in hand-editable <code>~/.datadip/data/connections.ason</code></li>
 							</ul>
@@ -441,7 +646,7 @@
 									<th class="col-datadip">
 										<span class="th-brand">
 											<img src="./assets/icon-32.png" alt="" width="16" height="16" />
-											DataDip
+											DataDip v0.2
 										</span>
 									</th>
 									<th>TablePlus</th>
@@ -468,16 +673,16 @@
 									<td>Electron (Chromium)</td>
 								</tr>
 								<tr>
-									<th>Read-Only by Default</th>
-									<td class="col-datadip"><span class="cmp yes">Yes</span> Driver + SQL gate</td>
+									<th>Read-Only Default &amp; Permanent RO Lock</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Default RO + <code>LOCKED RO</code></td>
 									<td>Opt-in per connection</td>
 									<td>Opt-in per connection</td>
 									<td>Opt-in per connection</td>
 									<td>Opt-in per connection</td>
 								</tr>
 								<tr>
-									<th>Prod Auto-Relock &amp; Staged SQL Preview</th>
-									<td class="col-datadip"><span class="cmp yes">Yes</span> Crimson bar + 10m timer</td>
+									<th>Target-Bound Prod Unlock &amp; Auto-Relock</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Type DB name + 10m / switch relock</td>
 									<td>Color tag + Safe Mode</td>
 									<td>Color tag</td>
 									<td>Color tag</td>
@@ -492,6 +697,22 @@
 									<td>Basic FK jump</td>
 								</tr>
 								<tr>
+									<th>Interactive Schema / ER Diagram</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Instant pure-SVG graph</td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp yes">Yes</span> Built-in</td>
+									<td><span class="cmp yes">Yes</span> Built-in</td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
+									<th>1-Key Column Profiling (<kbd>p</kbd>)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Null %, distinct, clickable top 10</td>
+									<td><span class="cmp no">No</span></td>
+									<td>Value editor / stats</td>
+									<td>Basic column stats</td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
 									<th>Paste Any ID &rarr; Search All Tables</th>
 									<td class="col-datadip"><span class="cmp yes">Yes</span> Built-in (<code>&#8984;K</code>)</td>
 									<td><span class="cmp no">No</span></td>
@@ -500,24 +721,24 @@
 									<td><span class="cmp no">No</span></td>
 								</tr>
 								<tr>
-									<th>Local SQLite Live <code>.db</code> Auto-Refresh</th>
-									<td class="col-datadip"><span class="cmp yes">Yes</span> <code>fs.watch</code> + SSE</td>
+									<th>Teammate Slug URLs (by DB name)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> 1-click <strong>Share</strong> link</td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
+									<th>Local SQLite Live <code>.db</code> Refresh &amp; Simulators</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> <code>fs.watch</code> + iOS Sim discovery</td>
 									<td>Manual refresh</td>
 									<td>Manual refresh</td>
 									<td>Manual refresh</td>
 									<td>Manual refresh</td>
 								</tr>
 								<tr>
-									<th>Instant CLI Open (<code>datadip ./app.db</code>)</th>
-									<td class="col-datadip"><span class="cmp yes">Yes</span> CLI + Finder + <code>&#8984;O</code></td>
-									<td>Finder / URL scheme</td>
-									<td>CLI launcher</td>
-									<td>CLI flags</td>
-									<td>Finder open</td>
-								</tr>
-								<tr>
-									<th>SSH Tunnels &amp; Interactive Auth</th>
-									<td class="col-datadip"><span class="cmp yes">Yes</span> <code>~/.ssh/config</code> + <code>SSH_ASKPASS</code></td>
+									<th>SSH Tunnels &amp; <code>~/.ssh/config</code> Picker</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Alias picker + <code>SSH_ASKPASS</code></td>
 									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
 									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
 									<td><span class="cmp yes">Yes</span> Built-in SSH</td>
@@ -548,30 +769,242 @@
 				<div class="container">
 					<div class="section-head">
 						<h2>Keyboard-first without fighting macOS</h2>
-						<p>Familiar TablePlus &amp; DataGrip bindings while keeping native macOS Emacs keys (<code>Ctrl+A/E/K</code>) and CodeMirror indent/dedent intact.</p>
+						<p>
+							Familiar TablePlus &amp; DataGrip bindings while keeping native macOS Emacs keys
+							(<code>Ctrl+A/E/K</code>) and CodeMirror indent/dedent intact.
+						</p>
 					</div>
 
 					<div class="kbd-grid">
-						<div class="kbd-item"><kbd>&#8984;K</kbd><span>Omnibar: jump to table, console, or Find ID across DB</span></div>
+						<div class="kbd-item"><kbd>&#8984;K</kbd><span>Omnibar: jump to table, console, workspace, or Find ID across DB</span></div>
 						<div class="kbd-item"><kbd>&#8963;R</kbd><span>Recent databases &amp; tables switcher</span></div>
 						<div class="kbd-item"><kbd>&#8984;E</kbd><span>Open or focus active SQL Console</span></div>
 						<div class="kbd-item"><kbd>&#8984;&#8629;</kbd><span>Run active SQL statement (or follow focused FK cell)</span></div>
 						<div class="kbd-item"><kbd>&#8984;.</kbd><span>Cancel running query immediately</span></div>
 						<div class="kbd-item"><kbd>Space</kbd><span>Toggle Row Inspector with incoming FK counts</span></div>
-						<div class="kbd-item"><kbd>p</kbd><span>Profile focused column (null %, distinct, top values)</span></div>
+						<div class="kbd-item"><kbd>p</kbd><span>Profile focused column (null %, distinct, clickable top 10)</span></div>
 						<div class="kbd-item"><kbd>&#8984;[</kbd> <kbd>&#8984;]</kbd><span>Navigate Back / Forward across FK jumps</span></div>
 						<div class="kbd-item"><kbd>&#8984;&#8679;C</kbd><span>Copy focused row with column headers as TSV</span></div>
 						<div class="kbd-item"><kbd>&#8984;S</kbd><span>Commit staged inline edits (with SQL preview)</span></div>
 						<div class="kbd-item"><kbd>&#8984;O</kbd><span>Open a local SQLite file directly in DataDip.app</span></div>
+						<div class="kbd-item"><kbd>&#8984;&#8679;H</kbd><span>Toggle cross-DB searchable Query History in Console</span></div>
+					</div>
+				</div>
+			</section>
+
+			<!-- Changelog Section -->
+			<section id="changelog" class="section">
+				<div class="container">
+					<div class="section-head">
+						<h2>Changelog</h2>
+						<p>
+							Every release is also browsable right inside DataDip via the <code>v0.2.0</code> pill in the top bar or
+							<kbd>&#8984;K</kbd> &rarr; <em>Changelog</em>.
+						</p>
+					</div>
+
+					<div class="cl-toolbar">
+						<div class="cl-filters" role="group" aria-label="Filter changelog by category">
+							<button type="button" class="cl-filter active" data-filter="all" aria-pressed="true">All</button>
+							<button type="button" class="cl-filter" data-filter="new" aria-pressed="false">New</button>
+							<button type="button" class="cl-filter" data-filter="safety" aria-pressed="false">Safety</button>
+							<button type="button" class="cl-filter" data-filter="sql" aria-pressed="false">SQL</button>
+							<button type="button" class="cl-filter" data-filter="sqlite" aria-pressed="false">SQLite</button>
+							<button type="button" class="cl-filter" data-filter="macos" aria-pressed="false">macOS</button>
+						</div>
+						<a
+							class="cl-raw-link mono"
+							href="https://github.com/anttikissa/datadip/blob/main/CHANGELOG.md"
+							target="_blank"
+							rel="noreferrer"
+						>
+							CHANGELOG.md &nearr;
+						</a>
+					</div>
+
+					<div class="cl-timeline">
+						<!-- v0.2.0 -->
+						<article class="cl-release latest">
+							<div class="cl-release-head">
+								<div class="cl-ver-group">
+									<span class="cl-ver mono">v0.2.0</span>
+									<span class="badge ok">LATEST</span>
+									<span class="cl-date mono">2026-11-26</span>
+								</div>
+								<div class="cl-links">
+									<a href="./downloads/DataDip-0.2.0-arm64.dmg" download>Download DMG</a>
+									<span class="sep">&middot;</span>
+									<a href="https://github.com/anttikissa/datadip/releases/tag/v0.2.0" target="_blank" rel="noreferrer">
+										GitHub Release &nearr;
+									</a>
+								</div>
+							</div>
+							<h3 class="cl-headline">ER Diagram, 1-Key Column Profiling, Workspaces, &amp; Locked Production Guardrails</h3>
+							<p class="cl-summary">
+								Ten major upgrades for investigating schemas visually, organizing multi-client databases, locking down
+								production replicas, and inspecting SQLite internals.
+							</p>
+							<ul class="cl-list">
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Interactive Schema / ER Diagram</strong> — Pure-SVG pan/zoom table graph
+										(<code>/c/:id/er</code>) with draggable cards, PK/FK dots, Bezier FK curves, hover neighborhood
+										highlighting, search, and click-to-browse.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>One-keystroke column profiling (<kbd>p</kbd>)</strong> — Press <kbd>p</kbd> or click
+										<code>&#931;</code> in any column header for null %, distinct count, min/max, and top-10 proportional
+										bars that filter the table on click (SQLite &amp; PostgreSQL).
+									</div>
+								</li>
+								<li class="cl-item" data-tag="sql">
+									<span class="cl-tag tag-sql mono">SQL</span>
+									<div>
+										<strong>Cross-connection searchable query history</strong> — Search executed SQL live across
+										<strong>This DB</strong> or <strong>All DBs</strong> in the Console History drawer with source DB
+										badges.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="safety">
+									<span class="cl-tag tag-safety mono">SAFETY</span>
+									<div>
+										<strong>Enforceable <code>alwaysReadOnly</code> lock</strong> — Lock production read replicas
+										permanently Read-Only: hides Write controls (<code>LOCKED RO</code> pill) and blocks RW arming on the
+										server (HTTP 403).
+									</div>
+								</li>
+								<li class="cl-item" data-tag="safety">
+									<span class="cl-tag tag-safety mono">SAFETY</span>
+									<div>
+										<strong>Target-bound production write approval</strong> — Arming Read-Write on Production requires
+										typing the exact database name and automatically re-locks when switching databases or after 10 min
+										idle.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Client workspaces — folders, tags, &amp; color-coding</strong> — Organize connections into
+										named groups with <code>#tags</code> and color accents across Home, connection switcher, window title,
+										and <kbd>&#8984;K</kbd> Omnibar.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong><code>~/.ssh/config</code> host alias picker</strong> — Parses concrete <code>Host</code>
+										entries (including <code>Include</code> globs, skipping wildcards) to autofill host, user, and port in
+										Connection and Auto-Discover modals.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Teammate-shareable slug links</strong> — Click <strong>Share</strong> to copy
+										<code>/c/&lt;db-slug&gt;/...</code> URLs resolved by connection name instead of per-machine IDs.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Duplicate Row &amp; transactional CSV/JSON Import</strong> — Duplicate any row in Read-Write
+										mode or import CSV/JSON files/paste with column mapping and 5-row preview in a single transaction.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="sqlite">
+									<span class="cl-tag tag-sqlite mono">SQLITE</span>
+									<div>
+										<strong>SQLite internals, Triggers, FTS5 grouping, &amp; Apple discovery</strong> — Triggers in Schema
+										view, collapsible <strong>Internal / FTS5</strong> shadow tables, Database Info &amp; PRAGMA/WAL
+										Inspector with RW-gated Checkpoint &amp; <code>VACUUM</code>, plus one-click <strong>iOS
+										Simulators</strong> &amp; <strong>macOS App Containers</strong> discovery.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>In-app What&apos;s New &amp; Changelog modal</strong> — Unseen-release indicator on the top-bar
+										version pill, <kbd>&#8984;K</kbd> command, and <em>DataDip &rarr; What&apos;s New (Changelog)&hellip;</em>
+										in <code>DataDip.app</code>.
+									</div>
+								</li>
+							</ul>
+						</article>
+
+						<!-- v0.1.0 -->
+						<article class="cl-release">
+							<div class="cl-release-head">
+								<div class="cl-ver-group">
+									<span class="cl-ver mono">v0.1.0</span>
+									<span class="cl-date mono">2026-11-26</span>
+								</div>
+								<div class="cl-links">
+									<a href="https://github.com/anttikissa/datadip/releases/tag/v0.1.0" target="_blank" rel="noreferrer">
+										GitHub Release &nearr;
+									</a>
+								</div>
+							</div>
+							<h3 class="cl-headline">Initial Signed &amp; Apple-Notarized Release for SQLite &amp; PostgreSQL</h3>
+							<p class="cl-summary">
+								Fast, keyboard-first database browser, foreign-key navigator, and parallel SQL console packaged as a
+								self-contained macOS WKWebView app with zero Electron.
+							</p>
+							<ul class="cl-list">
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>SQLite &amp; PostgreSQL engines</strong> — Local SQLite (<code>bun:sqlite</code>), multiplexed
+										SSH SQLite, native PostgreSQL via <code>Bun.SQL</code> (one-paste <code>DATABASE_URL</code>), and
+										OpenSSH TCP port forwarding with in-app <code>SSH_ASKPASS</code> prompts.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Web-native FK navigation &amp; Omnibar ID search</strong> — Hover FK peeks, click-to-jump
+										links, <kbd>Space</kbd> Row Inspector with reverse-FK counts, Back/Forward history, and
+										<kbd>&#8984;K</kbd> cross-table ID search.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="sql">
+									<span class="cl-tag tag-sql mono">SQL</span>
+									<div>
+										<strong>Parallel cancellable SQL Consoles &amp; full exports</strong> — CodeMirror 6 tabbed/split
+										consoles, autocomplete, <code>EXPLAIN</code>, clickable FK results, real query cancellation
+										(<kbd>&#8984;.</kbd>), column resize/freeze, and 100k-row CSV/TSV/JSON/Markdown/SQL exports.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="safety">
+									<span class="cl-tag tag-safety mono">SAFETY</span>
+									<div>
+										<strong>Read-Only defaults &amp; Production guardrails</strong> — Driver-level Read-Only enforcement,
+										crimson Production bar with 10-minute auto-relock, staged inline edits with SQL preview, and
+										destructive SQL confirmation.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="macos">
+									<span class="cl-tag tag-macos mono">MACOS</span>
+									<div>
+										<strong>Self-contained signed &amp; notarized <code>DataDip.app</code></strong> — Zero external
+										dependencies, Finder double-click, Dock drop, <kbd>&#8984;O</kbd>, <code>datadip ./app.db</code> CLI,
+										and live <code>.db</code>/<code>-wal</code> auto-refresh.
+									</div>
+								</li>
+							</ul>
+						</article>
 					</div>
 				</div>
 			</section>
 
 			<!-- Download & Install -->
-			<section id="install" class="section">
+			<section id="install" class="section alt-bg">
 				<div class="container">
 					<div class="section-head">
-						<h2>Get DataDip</h2>
+						<h2>Get DataDip v0.2.0</h2>
 						<p>Self-contained macOS app with zero dependencies, or run from source on macOS and Linux.</p>
 					</div>
 
@@ -598,12 +1031,13 @@
 									<button
 										type="button"
 										class="copy-btn"
-										data-copy="beb129a695bd6846e8283e5457deb8bcc29b90f70f6626ee2ae99af6337c7c35"
+										id="dmg-sha-btn"
+										data-copy="4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64"
 									>
 										Copy
 									</button>
 								</div>
-								<code class="mono checksum-val">beb129a695bd6846e8283e5457deb8bcc29b90f70f6626ee2ae99af6337c7c35</code>
+								<code class="mono checksum-val" id="dmg-sha-val">4cb674a0cded81d8ac0a46a2f73cd9b6447496f7f202faffc49d28399520ba64</code>
 							</div>
 
 							<p class="install-foot">
@@ -667,12 +1101,16 @@ datadip stop         # stop background server</code></pre>
 					<img src="./assets/icon-32.png" alt="" width="18" height="18" />
 					<strong>DataDip</strong>
 					<span class="sep">&middot;</span>
+					<span>v0.2.0</span>
+					<span class="sep">&middot;</span>
 					<span>MIT License</span>
 					<span class="sep">&middot;</span>
 					<span>Zero cookies, zero analytics</span>
 				</div>
 				<div class="footer-right">
+					<a href="#changelog">Changelog</a>
 					<a href="https://github.com/anttikissa/datadip" target="_blank" rel="noreferrer">GitHub</a>
+					<a href="https://github.com/anttikissa/datadip/releases" target="_blank" rel="noreferrer">Releases</a>
 					<a href="https://github.com/anttikissa/datadip/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
 					<a href="https://github.com/anttikissa/datadip/blob/main/DECISIONS.md" target="_blank" rel="noreferrer">Architecture</a>
 				</div>

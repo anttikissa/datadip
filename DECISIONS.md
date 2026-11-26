@@ -126,6 +126,11 @@ obvious.
   `GET /api/connections/:id/info` + `POST /api/connections/:id/maintenance`
   provide a PRAGMA/WAL inspector with RW-gated `wal_checkpoint(TRUNCATE)`
   and `VACUUM`.
+- Structured release notes live in `src/shared/changelog.ts` (mirrored in
+  `CHANGELOG.md` and `site/index.html`) powering the in-app
+  `ChangelogModal` (`v<version>` pill with unseen-release dot persisted
+  via `preferences.lastSeenVersion`, `Omnibar`, and `DataDip -> What's
+  New (Changelog)…` in `DataDip.app`).
 
 ## UI & Defaults
 

@@ -1,4 +1,4 @@
-// Client interactions for DataDip marketing site: theme toggle, hero demo switcher, copy buttons, and screenshot lightbox.
+// Client interactions for DataDip marketing site: theme toggle, hero demo switcher, changelog filter, copy buttons, and screenshot lightbox.
 
 const themeBtn = document.getElementById('theme-toggle')
 if (themeBtn) {
@@ -70,6 +70,23 @@ if (videoToggle && heroVideo) {
 			heroVideo.pause()
 			videoToggle.textContent = 'Play'
 			videoToggle.setAttribute('aria-label', 'Play demo video')
+		}
+	})
+}
+
+// Changelog category filter
+const clFilters = document.querySelectorAll('.cl-filter')
+const clItems = document.querySelectorAll('.cl-item')
+for (const btn of clFilters) {
+	btn.addEventListener('click', () => {
+		const cat = btn.getAttribute('data-filter') || 'all'
+		for (const b of clFilters) {
+			b.classList.toggle('active', b === btn)
+			b.setAttribute('aria-pressed', b === btn ? 'true' : 'false')
+		}
+		for (const item of clItems) {
+			const tag = item.getAttribute('data-tag') || ''
+			item.hidden = cat !== 'all' && tag !== cat
 		}
 	})
 }
