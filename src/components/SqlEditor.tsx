@@ -1,5 +1,11 @@
 // CodeMirror 6 SQL editor with SQLite dialect, live schema autocomplete, SQL linter, active-statement highlight, and shortcuts.
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
+import {
+	acceptCompletion,
+	autocompletion,
+	closeBrackets,
+	closeBracketsKeymap,
+	completionKeymap,
+} from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { sql as sqlLang, SQLite } from '@codemirror/lang-sql'
 import {
@@ -212,6 +218,7 @@ export function SqlEditor(props: {
 					...searchKeymap,
 					...historyKeymap,
 					...completionKeymap,
+					{ key: 'Tab', run: acceptCompletion },
 					indentWithTab,
 				]),
 				themeComp.of(
