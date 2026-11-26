@@ -3,15 +3,15 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>DataDip v0.3.0 — Browse SQLite &amp; PostgreSQL like the web</title>
+		<title>DataDip v0.4.0 — Browse &amp; edit SQLite &amp; PostgreSQL like the web</title>
 		<meta
 			name="description"
-			content="DataDip v0.3.0: fast, keyboard-first SQLite and PostgreSQL browser, automatic &amp; virtual foreign-key navigator, interactive ER diagram, 1-key column profiler, and SQL console. Read-only by default. Self-updating native macOS app, no Electron, MIT open source."
+			content="DataDip v0.4.0: fast, keyboard-first SQLite (local, SSH Bun/Python/sqlite3, Turso, Cloudflare D1) and PostgreSQL browser, staged inline editor, passive FK learner, ER diagram, and SQL console. Read-only by default. Self-updating native macOS app, no Electron, MIT open source."
 		/>
-		<meta property="og:title" content="DataDip v0.3.0 — Browse SQLite &amp; PostgreSQL like the web" />
+		<meta property="og:title" content="DataDip v0.4.0 — Browse &amp; edit SQLite &amp; PostgreSQL like the web" />
 		<meta
 			property="og:description"
-			content="New in v0.3.0: Signed macOS Self-Updater, Automatic &amp; Virtual Foreign Keys, Accurate Postgres Row Counts, Interactive ER Diagram, and 1-Key Column Profiling. Signed macOS app, MIT open source."
+			content="New in v0.4.0: Multi-Runtime SSH SQLite (Bun / Python 3 / sqlite3 CLI), Serverless SQLite (Turso / libSQL &amp; Cloudflare D1), and Passive ID-Signature FK Learning. Signed macOS app, MIT open source."
 		/>
 		<meta property="og:type" content="website" />
 		<meta property="og:image" content="./assets/shot-er-diagram-dark.png" />
@@ -41,7 +41,7 @@
 						<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
 						<span class="brand-name">DataDip</span>
 					</a>
-					<a class="version-pill" href="#changelog" title="View v0.3.0 changelog">v0.3.0</a>
+					<a class="version-pill" href="#changelog" title="View v0.4.0 changelog">v0.4.0</a>
 				</div>
 
 				<nav class="nav-links" aria-label="Primary">
@@ -65,7 +65,7 @@
 						<span class="theme-icon-sun" aria-hidden="true">&#9788;</span>
 						<span class="theme-icon-moon" aria-hidden="true">&#9790;</span>
 					</button>
-					<a class="btn primary sm" href="./downloads/DataDip-0.3.0-arm64.dmg" download>Download DMG</a>
+					<a class="btn primary sm" href="./downloads/DataDip-0.4.0-arm64.dmg" download>Download DMG</a>
 				</div>
 			</div>
 		</header>
@@ -76,9 +76,9 @@
 				<div class="container">
 					<div class="hero-copy">
 						<a class="release-banner" href="#changelog">
-							<span class="release-pill mono">v0.3.0</span>
+							<span class="release-pill mono">v0.4.0</span>
 							<span class="release-text">
-								Signed macOS Self-Updater, Automatic &amp; Virtual Foreign Keys, &amp; Accurate Postgres Counts
+								Multi-Runtime SSH SQLite (Bun / Python / sqlite3), Turso &amp; Cloudflare D1, &amp; Passive FK Learning
 							</span>
 							<span class="release-arrow" aria-hidden="true">&rarr;</span>
 						</a>
@@ -91,9 +91,9 @@
 						</p>
 
 						<div class="hero-ctas">
-							<a class="btn primary lg" href="./downloads/DataDip-0.3.0-arm64.dmg" download>
+							<a class="btn primary lg" href="./downloads/DataDip-0.4.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download v0.3.0 for macOS (Apple Silicon)
+								Download v0.4.0 for macOS (Apple Silicon)
 							</a>
 							<a class="btn secondary lg" href="#install">Build from Source / Linux</a>
 						</div>
@@ -824,7 +824,7 @@
 					<div class="section-head">
 						<h2>Changelog</h2>
 						<p>
-							Every release is also browsable right inside DataDip via the <code>v0.3.0</code> pill in the top bar or
+							Every release is also browsable right inside DataDip via the <code>v0.4.0</code> pill in the top bar or
 							<kbd>&#8984;K</kbd> &rarr; <em>Changelog</em>.
 						</p>
 					</div>
@@ -850,12 +850,72 @@
 					</div>
 
 					<div class="cl-timeline">
-						<!-- v0.3.0 -->
+						<!-- v0.4.0 -->
 						<article class="cl-release latest">
 							<div class="cl-release-head">
 								<div class="cl-ver-group">
-									<span class="cl-ver mono">v0.3.0</span>
+									<span class="cl-ver mono">v0.4.0</span>
 									<span class="badge ok">LATEST</span>
+									<span class="cl-date mono">2026-11-27</span>
+								</div>
+								<div class="cl-links">
+									<a href="./downloads/DataDip-0.4.0-arm64.dmg" download>Download DMG</a>
+									<span class="sep">&middot;</span>
+									<a href="https://github.com/anttikissa/datadip/releases/tag/v0.4.0" target="_blank" rel="noreferrer">
+										GitHub Release &nearr;
+									</a>
+								</div>
+							</div>
+							<h3 class="cl-headline">Multi-Runtime SSH SQLite, Serverless SQLite (Turso &amp; D1), &amp; Passive FK Learning</h3>
+							<p class="cl-summary">
+								Connect to remote SQLite over SSH without installing Bun (auto-detecting <code>bun</code>,
+								<code>python3</code>, or <code>sqlite3</code> CLI), query Turso/libSQL and Cloudflare D1 natively, and
+								watch DataDip learn undeclared foreign keys automatically as you browse.
+							</p>
+							<ul class="cl-list">
+								<li class="cl-item" data-tag="sqlite">
+									<span class="cl-tag tag-sqlite mono">SQLITE</span>
+									<div>
+										<strong>Multi-runtime SSH SQLite (<code>auto</code> / <code>bun</code> / <code>python3</code> / <code>sqlite3</code>)</strong>
+										— Runs over one persistent SSH pipe without writing files remotely, auto-detecting
+										<code>bun</code> &rarr; <code>python3</code> (stdlib <code>sqlite3</code> with parallel queries &amp;
+										<code>conn.interrupt()</code> cancel) &rarr; <code>sqlite3</code> CLI (<code>&gt;= 3.33</code>), with
+										an explicit user-confirmed <strong>Install Bun</strong> fallback when missing.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="sqlite">
+									<span class="cl-tag tag-sqlite mono">SQLITE</span>
+									<div>
+										<strong>Serverless SQLite: Turso / libSQL &amp; Cloudflare D1</strong> — Zero-dependency native
+										<code>fetch()</code> adapters: Turso speaks Hrana v2 (<code>/v2/pipeline</code>, Bearer auth,
+										<code>PRAGMA query_only</code> in RO mode, atomic conditional <code>batch</code> transactions), and
+										Cloudflare D1 speaks the D1 REST API.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Passive ID-signature &amp; PK-verified FK learning</strong> — Fingerprints UUID, ULID,
+										delimited (<code>usr_...</code>), delimiterless (<code>u...</code>), and opaque IDs from already-loaded
+										browse/query rows (zero upfront scans), verifies candidates via batched PK-index lookups, and lights up
+										<code>LEARNED</code> foreign keys live via SSE with provenance tooltips and Save/Dismiss.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Upgraded schema FK inference</strong> — Handles irregular plurals and unique single-PK
+										column-name matches (<code>course_id &rarr; courses.course_id</code>) with SQL type-family checks.
+									</div>
+								</li>
+							</ul>
+						</article>
+
+						<!-- v0.3.0 -->
+						<article class="cl-release">
+							<div class="cl-release-head">
+								<div class="cl-ver-group">
+									<span class="cl-ver mono">v0.3.0</span>
 									<span class="cl-date mono">2026-11-26</span>
 								</div>
 								<div class="cl-links">
@@ -1199,7 +1259,7 @@
 			<section id="install" class="section">
 				<div class="container">
 					<div class="section-head">
-						<h2>Get DataDip v0.3.0</h2>
+						<h2>Get DataDip v0.4.0</h2>
 						<p>Self-contained macOS app with zero dependencies, or run from source on macOS and Linux.</p>
 					</div>
 
@@ -1215,9 +1275,9 @@
 								with Developer ID and notarized by Apple.
 							</p>
 
-							<a class="btn primary lg full" href="./downloads/DataDip-0.3.0-arm64.dmg" download>
+							<a class="btn primary lg full" href="./downloads/DataDip-0.4.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download DataDip-0.3.0-arm64.dmg (42 MB)
+								Download DataDip-0.4.0-arm64.dmg (42 MB)
 							</a>
 
 							<div class="checksum-box">
@@ -1227,12 +1287,12 @@
 										type="button"
 										class="copy-btn"
 										id="dmg-sha-btn"
-										data-copy="1b3f565f2156db757a1addf6e21891dd7cb6b03617d2d37b78adf24853fcdc39"
+										data-copy="7c14e703b5d3ce6bc0ede4d2aeea22791ed6ba82e0e4411defd03aad815da8b1"
 									>
 										Copy
 									</button>
 								</div>
-								<code class="mono checksum-val" id="dmg-sha-val">1b3f565f2156db757a1addf6e21891dd7cb6b03617d2d37b78adf24853fcdc39</code>
+								<code class="mono checksum-val" id="dmg-sha-val">7c14e703b5d3ce6bc0ede4d2aeea22791ed6ba82e0e4411defd03aad815da8b1</code>
 							</div>
 
 							<p class="install-foot">
@@ -1296,7 +1356,7 @@ datadip stop         # stop background server</code></pre>
 					<img src="./assets/icon-32.png" alt="" width="18" height="18" />
 					<strong>DataDip</strong>
 					<span class="sep">&middot;</span>
-					<span>v0.3.0</span>
+					<span>v0.4.0</span>
 					<span class="sep">&middot;</span>
 					<span>MIT License</span>
 					<span class="sep">&middot;</span>

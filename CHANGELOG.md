@@ -2,6 +2,16 @@
 
 All notable changes to DataDip are documented here.
 
+## [0.4.0] - 2026-11-27
+
+**Multi-Runtime SSH SQLite, Serverless SQLite (Turso & D1), & Passive FK Learning**
+
+### Added
+- **Multi-runtime SSH SQLite (`auto` / `bun` / `python3` / `sqlite3` CLI)**: one persistent `ssh -T` pipe auto-detects `bun` -> `python3` (stdlib `sqlite3` with `ThreadPoolExecutor` concurrency and `conn.interrupt()` cancellation) -> `sqlite3` CLI (`>= 3.33` via base64-framed POSIX `sh` loop) without installing files on the remote server. Selectable per connection in the Connection modal, with an explicit user-confirmed **Install Bun** button (`POST /api/ssh/install-bun`) if no runtime is installed.
+- **Serverless SQLite -- Turso / libSQL & Cloudflare D1**: zero-dependency native `fetch()` adapters sharing `AsyncSqliteAdapter`. Turso speaks Hrana v2 (`/v2/pipeline`) with Bearer auth, `PRAGMA query_only = ON` in Read-Only mode, atomic conditional `batch` transactions with auto-`ROLLBACK`, `AbortController` cancel, and token masking; Cloudflare D1 speaks the D1 REST API (`d1://<accountId>/<databaseId>`).
+- **Passive ID-signature & PK-verified foreign-key learning**: fingerprints UUID, ULID, delimited typed (`usr_...`), delimiterless typed (`u...`), and opaque IDs from already-loaded browse/query rows with zero upfront scans on connect, verifies candidates via batched PK-index lookups (`checkKeysExist`), supports retroactive discovery and polymorphic drift demotion, and pushes live `schema-changed` SSE updates with `LEARNED` badges, provenance tooltips, and one-click Save/Dismiss.
+- **Upgraded Tier 1 schema FK inference**: adds irregular plurals and unique single-PK column-name matching (`course_id -> courses.course_id`) with SQL type-family checks.
+
 ## [0.3.0] - 2026-11-26
 
 **Signed macOS Self-Updater, Virtual & Inferred Foreign Keys, & Accurate Postgres Counts**

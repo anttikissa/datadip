@@ -1,6 +1,6 @@
 // Structured release changelog shared by the in-app What's New modal and version badge.
 
-export const APP_VERSION = '0.3.0'
+export const APP_VERSION = '0.4.0'
 
 export type ChangelogTag = 'new' | 'fix' | 'safety' | 'sql' | 'sqlite' | 'macos'
 
@@ -20,6 +20,39 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+	{
+		version: '0.4.0',
+		date: '2026-11-27',
+		headline: 'Multi-Runtime SSH SQLite, Serverless SQLite (Turso & D1), & Passive FK Learning',
+		summary:
+			'Connect to remote SQLite over SSH without installing Bun (auto-detecting bun, python3, or sqlite3 CLI), query Turso/libSQL and Cloudflare D1 natively, and watch DataDip learn undeclared foreign keys automatically as you browse.',
+		items: [
+			{
+				tag: 'sqlite',
+				title: 'Multi-runtime SSH SQLite (auto / bun / python3 / sqlite3 CLI) + opt-in Bun install',
+				detail:
+					'Runs over one persistent SSH pipe without writing files to the remote host, auto-detecting bun -> python3 (stdlib sqlite3 with concurrent queries and conn.interrupt() cancellation) -> sqlite3 CLI (>= 3.33). Includes a per-connection runtime selector and an explicit user-confirmed "Install Bun" fallback when no runtime is present.',
+			},
+			{
+				tag: 'sqlite',
+				title: 'Serverless SQLite: Turso / libSQL & Cloudflare D1',
+				detail:
+					'Zero-dependency native HTTP adapters for Turso / libSQL (Hrana v2 /v2/pipeline with Bearer auth, PRAGMA query_only in Read-Only mode, atomic conditional batch transactions, and token masking) and Cloudflare D1 REST API.',
+			},
+			{
+				tag: 'new',
+				title: 'Passive ID-signature & PK-verified foreign-key learning',
+				detail:
+					'Fingerprints string/UUID/ULID/typed IDs from already-loaded browse and SELECT rows (zero upfront scans on connect), verifies candidate links via O(k log N) batched PK-index lookups, handles retroactive discovery and polymorphic drift, and lights up learned FKs live via SSE with provenance tooltips and Save/Dismiss actions.',
+			},
+			{
+				tag: 'new',
+				title: 'Upgraded schema FK inference (irregular plurals & unique PK names)',
+				detail:
+					'Tier 1 schema-only inference now handles irregular plurals and unique single-PK column name matches (e.g. course_id -> courses.course_id) with SQL type-family checks.',
+			},
+		],
+	},
 	{
 		version: '0.3.0',
 		date: '2026-11-26',
