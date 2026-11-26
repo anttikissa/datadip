@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6f7f9"/>
+      <stop offset="100%" stop-color="#e3e7ee"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d8dde6"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8b95a5"/>
+      <stop offset="22%" stop-color="#d5dce6"/>
+      <stop offset="50%" stop-color="#eef2f7"/>
+      <stop offset="78%" stop-color="#b4bfce"/>
+      <stop offset="100%" stop-color="#768091"/>
+    </linearGradient>
+    <linearGradient id="steelDark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#556070"/>
+      <stop offset="50%" stop-color="#6e7a8c"/>
+      <stop offset="100%" stop-color="#485160"/>
+    </linearGradient>
+    <linearGradient id="honey" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#f6b93b"/>
+      <stop offset="45%" stop-color="#d98a12"/>
+      <stop offset="100%" stop-color="#b06106"/>
+    </linearGradient>
+    <linearGradient id="honeyShine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe599" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#f5a623" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="butter" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff8bf"/>
+      <stop offset="60%" stop-color="#ffe878"/>
+      <stop offset="100%" stop-color="#f2c43d"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#161d29" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded macOS icon squircle canvas -->
+  <rect x="40" y="40" width="944" height="944" rx="210" fill="url(#bg)" stroke="#c7cfdb" stroke-width="8"/>
+
+  <!-- Porcelain plate -->
+  <g filter="url(#shadow)">
+    <ellipse cx="512" cy="706" rx="392" ry="176" fill="url(#plate)" stroke="#aeb7c4" stroke-width="8"/>
+    <ellipse cx="512" cy="698" rx="338" ry="144" fill="none" stroke="#9aa4b3" stroke-width="5"/>
+  </g>
+
+  <!-- Bottom honey pools on plate -->
+  <path d="M210 734 C172 752, 190 806, 266 806 C332 806, 360 778, 336 742 Z" fill="url(#honey)" opacity="0.95"/>
+  <path d="M684 742 C666 782, 708 810, 774 804 C842 798, 850 744, 804 728 Z" fill="url(#honey)" opacity="0.95"/>
+
+  <!-- Disk Platter 3 (bottom) -->
+  <path d="M208 584 L208 666 A304 128 0 0 0 816 666 L816 584 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="584" rx="304" ry="128" fill="url(#steelDark)" stroke="#687385" stroke-width="6"/>
+
+  <!-- Disk Platter 2 (middle) -->
+  <path d="M208 456 L208 544 A304 128 0 0 0 816 544 L816 456 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="456" rx="304" ry="128" fill="url(#steelDark)" stroke="#687385" stroke-width="6"/>
+
+  <!-- Disk Platter 1 (top) -->
+  <path d="M208 326 L208 416 A304 128 0 0 0 816 416 L816 326 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="326" rx="304" ry="128" fill="#dfe5ee" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="326" rx="276" ry="110" fill="#c7d0dd" stroke="#8f9bae" stroke-width="4"/>
+
+  <!-- Warm honey-gold glaze & drips (Sequel Pro homage) -->
+  <path d="
+    M238 336
+    C234 252, 360 214, 512 214
+    C664 214, 790 252, 786 336
+    C784 378, 766 400, 764 434
+    C762 496, 786 670, 774 756
+    C768 784, 720 784, 718 750
+    C716 670, 728 504, 708 446
+    C696 412, 650 420, 610 426
+    C554 434, 466 434, 412 426
+    C368 418, 330 412, 316 446
+    C298 498, 308 666, 304 748
+    C302 782, 254 784, 248 752
+    C236 668, 260 492, 258 430
+    C256 396, 240 374, 238 336 Z
+  " fill="url(#honey)" stroke="#9c5404" stroke-width="5" stroke-linejoin="round"/>
+
+  <!-- Honey gloss highlight -->
+  <ellipse cx="512" cy="284" rx="220" ry="56" fill="url(#honeyShine)"/>
+  <path d="M276 470 C272 548, 272 642, 276 720" stroke="#ffe7a3" stroke-width="11" stroke-linecap="round" opacity="0.6"/>
+  <path d="M746 470 C750 548, 750 642, 746 720" stroke="#ffe7a3" stroke-width="11" stroke-linecap="round" opacity="0.55"/>
+
+  <!-- Pat of butter on top -->
+  <g filter="url(#shadow)">
+    <rect x="386" y="246" width="252" height="122" rx="24" fill="url(#butter)" stroke="#d19a1c" stroke-width="6"/>
+    <rect x="406" y="262" width="140" height="32" rx="14" fill="#ffffff" opacity="0.55"/>
+  </g>
+</svg>

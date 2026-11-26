@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"jsx": "preserve",
+		"jsxImportSource": "@solidjs/web",
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"isolatedModules": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"types": ["bun", "vite/client"]
+	},
+	"include": ["server", "src", "vite.config.ts"]
+}

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Builds DataDip.app from mac/DataDip.swift and public/icon-1024.png into ~/Applications/DataDip.app.
+set -euo pipefail
+
+mac="$(cd "$(dirname "$0")" && pwd)"
+checkout="$(dirname "$mac")"
+if_changed=""
+[ "${1:-}" = --if-changed ] && { if_changed=1; shift; }
+app="${1:-$HOME/Applications/DataDip.app}"
+bun="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+icon_src="$checkout/public/icon-1024.png"
+
+hash="$((cat "$mac/build" "$mac/DataDip.swift"; [ -f "$icon_src" ] && cat "$icon_src"; echo "$checkout $bun") | shasum | cut -d' ' -f1)"
+if [ -n "$if_changed" ] && [ "$(cat "$app/Contents/Resources/source-hash" 2>/dev/null)" = "$hash" ]; then
+	exit 0
+fi
+
+command -v swiftc >/dev/null || { echo "swiftc is missing: run xcode-select --install" >&2; exit 1; }
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/datadip-app.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
+contents="$tmp/DataDip.app/Contents"
+mkdir -p "$contents/MacOS" "$contents/Resources"
+
+swiftc -O -o "$contents/MacOS/DataDip" "$mac/DataDip.swift"
+
+# Build AppIcon.icns from icon-1024.png using native macOS sips + iconutil
+if [ -f "$icon_src" ] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
+	iconset="$tmp/AppIcon.iconset"
+	mkdir -p "$iconset"
+	for s in 16 32 128 256 512; do
+		sips -z "$s" "$s" "$icon_src" --out "$iconset/icon_${s}x${s}.png" >/dev/null
+		s2=$((s * 2))
+		sips -z "$s2" "$s2" "$icon_src" --out "$iconset/icon_${s}x${s}@2x.png" >/dev/null
+	done
+	iconutil -c icns "$iconset" -o "$contents/Resources/AppIcon.icns"
+fi
+
+cat > "$contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+	<key>CFBundleName</key><string>DataDip</string>
+	<key>CFBundleDisplayName</key><string>DataDip</string>
+	<key>CFBundleIdentifier</key><string>local.datadip.DataDip</string>
+	<key>CFBundleExecutable</key><string>DataDip</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>LSMinimumSystemVersion</key><string>13.3</string>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>DataDipCheckout</key><string>$checkout</string>
+	<key>DataDipBun</key><string>$bun</string>
+</dict></plist>
+EOF
+
+echo "$hash" > "$contents/Resources/source-hash"
+codesign --force --sign - "$tmp/DataDip.app" 2>/dev/null
+mkdir -p "$(dirname "$app")"
+rm -rf "$app"
+mv "$tmp/DataDip.app" "$app"
+echo "Built ${app/#$HOME/~}"

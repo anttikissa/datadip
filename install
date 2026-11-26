@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# DataDip installer: ensures Bun, installs dependencies, builds the web client, links ~/.local/bin/datadip,
+# and builds ~/Applications/DataDip.app on macOS.
+set -euo pipefail
+
+app_dir="$(cd "$(dirname "$0")" && pwd)"
+bin_dir="$HOME/.local/bin"
+yes=""
+for arg in "$@"; do
+	case "$arg" in
+		-y) yes=1 ;;
+		*) echo "unknown option: $arg (only -y)" >&2; exit 1 ;;
+	esac
+done
+
+pretty() { echo "${1/#$HOME/~}"; }
+
+case "$(basename "${SHELL:-/bin/sh}")" in
+	zsh) rc="$HOME/.zshenv"; fmt='export PATH="$HOME/%s:$PATH"' ;;
+	bash) [ "$(uname -s)" = Darwin ] && rc="$HOME/.bash_profile" || rc="$HOME/.bashrc"; fmt='export PATH="$HOME/%s:$PATH"' ;;
+	fish) rc="$HOME/.config/fish/config.fish"; fmt='fish_add_path $HOME/%s' ;;
+	*) rc=""; fmt='export PATH="$HOME/%s:$PATH"' ;;
+esac
+
+if ! command -v bun >/dev/null && [ ! -x "$HOME/.bun/bin/bun" ]; then
+	echo "Installing bun..."
+	curl -fsSL https://bun.sh/install | bash
+fi
+export PATH="$HOME/.bun/bin:$PATH"
+
+echo "Installing dependencies..."
+bun install --cwd "$app_dir"
+
+echo "Building DataDip web client..."
+(cd "$app_dir" && bun run build)
+
+chmod +x "$app_dir/run" "$app_dir/install" "$app_dir/mac/build" "$app_dir/test"
+
+mkdir -p "$bin_dir"
+ln -sfn "$app_dir/run" "$bin_dir/datadip"
+echo "Linked $(pretty "$bin_dir")/datadip -> $(pretty "$app_dir")/run"
+
+case ":$PATH:" in
+	*":$bin_dir:"*) ;;
+	*)
+		if [ -n "$rc" ] && ! ( [ -f "$rc" ] && grep -v '^#' "$rc" | grep -qF ".local/bin" ); then
+			mkdir -p "$(dirname "$rc")"
+			printf '\n# Added by datadip installer\n%s\n' "$(printf "$fmt" ".local/bin")" >> "$rc"
+			echo "Added ~/.local/bin to PATH in $(pretty "$rc")"
+		fi
+		;;
+esac
+
+if [ "$(uname -s)" = Darwin ]; then
+	if command -v swiftc >/dev/null; then
+		"$app_dir/mac/build" "$HOME/Applications/DataDip.app"
+	else
+		echo "swiftc not found; skipping DataDip.app (CLI and web UI still work)."
+	fi
+fi
+
+echo
+echo "DataDip installed. Run 'datadip' or open ~/Applications/DataDip.app."

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6f7f9"/>
+      <stop offset="100%" stop-color="#e3e7ee"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d8dde6"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8b95a5"/>
+      <stop offset="22%" stop-color="#d5dce6"/>
+      <stop offset="50%" stop-color="#eef2f7"/>
+      <stop offset="78%" stop-color="#b4bfce"/>
+      <stop offset="100%" stop-color="#768091"/>
+    </linearGradient>
+    <linearGradient id="steelDark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#556070"/>
+      <stop offset="50%" stop-color="#6e7a8c"/>
+      <stop offset="100%" stop-color="#485160"/>
+    </linearGradient>
+    <linearGradient id="honey" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#f6b93b"/>
+      <stop offset="45%" stop-color="#d98a12"/>
+      <stop offset="100%" stop-color="#b06106"/>
+    </linearGradient>
+    <linearGradient id="butter" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff8bf"/>
+      <stop offset="60%" stop-color="#ffe878"/>
+      <stop offset="100%" stop-color="#f2c43d"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="40" y="40" width="944" height="944" rx="210" fill="url(#bg)"/>
+  <ellipse cx="512" cy="706" rx="355" ry="158" fill="url(#plate)" stroke="#aeb7c4" stroke-width="8"/>
+  <path d="M240 584 L240 658 A272 114 0 0 0 784 658 L784 584 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="584" rx="272" ry="114" fill="url(#steelDark)" stroke="#687385" stroke-width="6"/>
+  <path d="M240 468 L240 546 A272 114 0 0 0 784 546 L784 468 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="468" rx="272" ry="114" fill="url(#steelDark)" stroke="#687385" stroke-width="6"/>
+  <path d="M240 350 L240 432 A272 114 0 0 0 784 432 L784 350 Z" fill="url(#steel)" stroke="#687385" stroke-width="7"/>
+  <ellipse cx="512" cy="350" rx="272" ry="114" fill="#dfe5ee" stroke="#687385" stroke-width="7"/>
+  <path d="M266 358 C264 282, 376 248, 512 248 C648 248, 760 282, 758 358 C756 394, 740 416, 738 446 C736 502, 754 648, 744 720 C738 746, 696 746, 694 714 C692 646, 704 504, 686 456 C676 426, 636 432, 600 438 C550 446, 472 446, 424 438 C384 430, 350 426, 338 456 C322 504, 330 644, 326 714 C324 744, 282 746, 276 718 C266 646, 286 500, 284 446 C282 414, 268 394, 266 358 Z" fill="url(#honey)" stroke="#9c5404" stroke-width="5"/>
+  <rect x="400" y="276" width="224" height="108" rx="20" fill="url(#butter)" stroke="#d19a1c" stroke-width="6"/>
+
+  <!-- Dev environment orange ring per STYLE.md -->
+  <rect x="64" y="64" width="896" height="896" rx="192" fill="none" stroke="#f3821d" stroke-width="48"/>
+</svg>

@@ -1,0 +1,61 @@
+# Decisions
+
+By topic. Each entry: the decision, then the reason when it is not
+obvious.
+
+## Architecture (v1)
+
+- Local-first Bun server (`datadip serve` on `127.0.0.1:4747`) with a
+  Solid 2 + Vite web client and a thin native macOS `WKWebView` shell
+  (`DataDip.app`). All API traffic lives under `/api/*` using ASON so v2
+  can add remote deployment, authentication, and AI query features
+  without reshaping the client.
+- Adapter abstraction (`server/db/types.ts`): all table listing, schema
+  inspection, browsing, querying, mutations, FK peeks, and reverse-FK
+  counts flow through `DbAdapter` so Postgres and other drivers can be
+  added without changing the UI or routes.
+- Multiplexed SSH transport (`server/db/ssh-mux.ts`): one persistent SSH
+  process per remote host runs an inline Bun SQLite worker speaking
+  NDJSON-RPC over stdin/stdout. Concurrent queries share one connection
+  without repeated SSH handshakes, and using remote Bun avoids stale
+  system `sqlite3` binaries.
+
+## Safety & Production Mode
+
+- Every connection defaults to Read-Only. In Read-Only mode, SQLite
+  handles are opened `{ readonly: true }` AND the server rejects write
+  statements before execution.
+- Connections marked `isProduction: true` display a persistent crimson
+  top edge and `PROD` alert badge. Arming Read-Write on a production
+  connection automatically relocks to Read-Only after 10 minutes of
+  inactivity.
+- Destructive SQL (`DROP`, `TRUNCATE`, `ALTER`, or `DELETE`/`UPDATE`
+  without a `WHERE` clause) requires explicit confirmation via an in-app
+  `<dialog>` on every database, not only production.
+- Inline table edits are staged client-side and shown in a pending-edits
+  bar with SQL preview before committing in a single transaction.
+
+## Navigation & URLs
+
+- Browser history (`history.pushState` / `popstate`) drives all table
+  navigation and foreign-key traversal, so browser Back/Forward,
+  trackpad swipes, and `Cmd+[` / `Cmd+]` work naturally.
+- Table URLs encode connection, table, selected fields, filters, sort
+  order, limit, and keyset cursor (`start=...`) or offset.
+
+## UI & Defaults
+
+- English only, ISO 8601 timestamps (`YYYY-MM-DD HH:mm:ss` / UTC).
+- Light theme by default with an optional dark theme toggle persisted in
+  local state.
+- CodeMirror 6 provides SQL editing with SQLite syntax highlighting,
+  live schema autocomplete, custom SQLite linting, active-statement
+  highlighting, and SQL formatting.
+- Dialogs use native `<dialog>` elements (never `alert`/`confirm`).
+- Focus uses `:focus-visible` with a single 2px ring across the app.
+
+## Local Data
+
+- Gitignored `data/` directory holds `connections.ason`, `state.db`
+  (opened with `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`),
+  and `server.ason`. Private hostnames and local paths never enter git.

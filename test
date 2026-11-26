@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Fast checks for every change: types and unit tests, side by side.
+set -e
+cd "$(dirname "$0")"
+bun check &
+check=$!
+status=0
+bun test --parallel server src || status=$?
+wait $check
+exit $status

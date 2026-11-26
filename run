@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# DataDip CLI entrypoint. Defaults to opening the app in the browser; passes through serve/url/status/open.
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+	dir="$(cd -P "$(dirname "$src")" && pwd)"
+	src="$(readlink "$src")"
+	[[ "$src" != /* ]] && src="$dir/$src"
+done
+root="$(cd -P "$(dirname "$src")" && pwd)"
+bun="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+
+if [ $# -eq 0 ]; then
+	exec "$bun" "$root/server/index.ts" open
+fi
+exec "$bun" "$root/server/index.ts" "$@"

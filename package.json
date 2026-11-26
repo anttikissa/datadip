@@ -1,0 +1,31 @@
+{
+	"name": "datadip",
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"serve": "bun server/index.ts serve",
+		"format": "oxfmt",
+		"typecheck": "bun check"
+	},
+	"devDependencies": {
+		"@solidjs/vite-plugin": "^3.0.1",
+		"@types/bun": "^1.4.5",
+		"oxfmt": "^0.80.0",
+		"vite": "^8.4.0"
+	},
+	"dependencies": {
+		"@codemirror/autocomplete": "^6.20.4",
+		"@codemirror/commands": "^6.11.2",
+		"@codemirror/lang-sql": "^6.10.0",
+		"@codemirror/language": "^6.13.1",
+		"@codemirror/lint": "^6.9.8",
+		"@codemirror/search": "^6.7.3",
+		"@codemirror/state": "^6.7.6",
+		"@codemirror/view": "^6.44.1",
+		"@lezer/highlight": "^1.2.5",
+		"@solidjs/web": "2.0.0",
+		"solid-js": "2.0.0"
+	}
+}
