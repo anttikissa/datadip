@@ -93,6 +93,20 @@ export function exportRowsCsv(columns: string[], rows: Record<string, unknown>[]
 	return lines.join('\n')
 }
 
+export function exportRowsTsv(columns: string[], rows: Record<string, unknown>[]): string {
+	const esc = (v: unknown) => {
+		if (v === null || v === undefined) return ''
+		const s =
+			typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : JSON.stringify(v)
+		return /[\t"\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
+	}
+	const lines = [columns.map(esc).join('\t')]
+	for (const r of rows) {
+		lines.push(columns.map((c) => esc(r[c])).join('\t'))
+	}
+	return lines.join('\n')
+}
+
 export function exportRowsJson(rows: Record<string, unknown>[]): string {
 	return JSON.stringify(rows, null, 2)
 }

@@ -6,7 +6,7 @@ import {
 	closeBracketsKeymap,
 	completionKeymap,
 } from '@codemirror/autocomplete'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, indentWithTab, toggleLineComment } from '@codemirror/commands'
 import { sql as sqlLang, SQLite } from '@codemirror/lang-sql'
 import {
 	bracketMatching,
@@ -194,6 +194,10 @@ export function SqlEditor(props: {
 					props.onFormat()
 					return true
 				},
+			},
+			{
+				key: 'Mod-/',
+				run: toggleLineComment,
 			},
 		])
 

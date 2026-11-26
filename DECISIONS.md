@@ -113,14 +113,42 @@ obvious.
   compact Active Connections list (plus live green dots, `RW` badges,
   and `Disconnect` via `POST /api/connections/:id/disconnect`), and the
   top-bar switcher groups active connections first.
-- `Ctrl+R` opens the Recent Databases & Tables modal (WebStorm/IDEA
-  style, distinct from `Cmd+R` page reload) with MRU switching and
-  instant filtering.
-- SQL documents are called "Console" (matching DataGrip/DBeaver
-  terminology). `Cmd+Shift+L` (DataGrip) and `Cmd+E` (TablePlus) open or
-  focus the active connection's Console (`Ctrl+E` stays unbound on macOS
-  so Emacs end-of-line still works in inputs); `EXPLAIN QUERY PLAN` uses
-  `Cmd+Shift+E`.
+- Keyboard shortcuts follow TablePlus / DataGrip / VS Code conventions
+  while preserving OS and browser hygiene (`src/lib/shortcuts.ts`):
+  - App shortcuts use `isPrimaryMod` (`Cmd` without `Ctrl` on macOS;
+    `Ctrl` without `Cmd` elsewhere) so macOS Emacs editing keys
+    (`Ctrl+A/E/K/B/L/P/N`) always work in inputs and CodeMirror.
+  - `Ctrl+R` opens Recent Databases & Tables on macOS (`Alt+R` on
+    non-Mac so browser `Ctrl+R` reload is never broken).
+  - `Cmd+K` / `Cmd+P` open the Omnibar; `Cmd+B` toggles the sidebar;
+    `Cmd+E` / `Cmd+Shift+L` open or focus the active Console; `Cmd+[` /
+    `Cmd+]` navigate Back/Forward only outside editors (and are not
+    bound as `NSMenu` key equivalents in `DataDip.app`) so CodeMirror
+    indent/dedent works cleanly.
+  - Browser-owned shortcuts (`Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`) are
+    only intercepted inside `DataDip.app`: `Cmd+R` (`View -> Refresh
+    Data`) dispatches `datadip:refresh` to refresh rows/schema without
+    reloading the WebView or wiping staged edits/scroll/widths (full
+    reload moves to `Cmd+Shift+R`), `Cmd+T` (`File -> New Console Tab`)
+    dispatches `datadip:new-tab`, and `Cmd+W` (`File -> Close Tab`)
+    dispatches cancelable `datadip:close-tab` so closing a console tab
+    never closes or quits `DataDip.app` (`Cmd+Shift+W` closes the
+    window).
+  - Table Browser: `Cmd+1` / `Cmd+2` switch Data/Schema tabs, `Cmd+F` /
+    `/` focus quick-search, `Cmd+S` commits staged edits, `Cmd+Enter` /
+    `Cmd+ArrowDown` follow a focused FK cell in both Read-Only and
+    Read-Write modes, `Cmd+C` / `c` copy the focused cell when no text
+    is selected, and `Cmd+Shift+C` copies the focused row with headers
+    as TSV.
+  - SQL Console: `Cmd+Enter` runs the active statement, `Cmd+Shift+Enter`
+    runs all, `Cmd+Shift+E` explains, `Cmd+Shift+F` formats, `Cmd+/`
+    toggles `-- ` line comments, `Cmd+.` (and `Ctrl+C` without text
+    selection) cancels a running query, `Cmd+Shift+H` toggles Query
+    History (leaving `Cmd+H` for macOS Hide App), `Ctrl+Tab` /
+    `Ctrl+Shift+Tab` and `Cmd+Shift+[` / `Cmd+Shift+]` cycle console
+    tabs, and result grids support arrow/`hjkl` cell navigation, `Cmd+C`
+    / `c`, `Cmd+Shift+C` (row TSV), and `Enter` / `Cmd+Enter` to follow
+    FKs or open CellViewer.
 - SQL query execution runs on dedicated Bun `Worker` threads both locally
   (`server/db/sqlite-query-worker.ts`) and inside the remote SSH Bun
   worker (`server/db/remote-worker.ts`), so multiple long-running queries

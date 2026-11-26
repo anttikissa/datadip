@@ -12,6 +12,7 @@ import { TableView } from './components/TableView.tsx'
 import { api } from './lib/api.ts'
 import { clearConsoleRun, getConsoleRun } from './lib/console-runs.ts'
 import { copyToClipboard, formatCountdown } from './lib/format.ts'
+import { isEditableTarget, isMac, isNativeApp, isPrimaryMod, modKeyLabel, recentsKeyLabel } from './lib/shortcuts.ts'
 import {
 	IconAlert,
 	IconBack,
@@ -317,6 +318,21 @@ export function App() {
 		if (created) setSplitConsoleId(created.id)
 	}
 
+	function cycleConsoleTab(delta: 1 | -1) {
+		const r = route()
+		if (r.kind !== 'sql') return
+		const list = orderedConsoles()
+		if (list.length <= 1) return
+		const curId = activeConsole()?.id
+		const idx = Math.max(
+			0,
+			list.findIndex((c) => c.id === curId),
+		)
+		const next = list[(idx + delta + list.length) % list.length]!
+		if (splitConsoleId() === next.id) setSplitConsoleId(curId ?? null)
+		navigate({ kind: 'sql', connId: r.connId, consoleId: next.id })
+	}
+
 	async function setRw(armed: boolean) {
 		const conn = activeConn()
 		if (!conn) return
@@ -374,27 +390,53 @@ export function App() {
 		}
 		window.addEventListener('popstate', onPop)
 
-		const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-
 		const onKey = (e: KeyboardEvent) => {
 			const key = e.key.toLowerCase()
-			const primaryMod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-			if (e.ctrlKey && !e.metaKey && !e.altKey && key === 'r') {
+			const primaryMod = isPrimaryMod(e)
+			const modalOpen = Boolean(document.querySelector('dialog[open]'))
+			const isRecentsKey = isMac
+				? e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'r'
+				: e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && key === 'r'
+
+			if (isRecentsKey) {
 				e.preventDefault()
 				setOmnibarOpen(false)
 				setRecentModalOpen((v) => !v)
 				void refreshConnections()
-			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'k') {
+			} else if (primaryMod && !e.altKey && !e.shiftKey && (key === 'k' || key === 'p')) {
 				e.preventDefault()
 				setRecentModalOpen(false)
 				setOmnibarOpen((v) => !v)
-			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'b') {
+			} else if (primaryMod && !e.altKey && !e.shiftKey && key === 'b') {
 				e.preventDefault()
 				setSidebarOpen((v) => !v)
-			} else if (e.metaKey && e.key === '[') {
+			} else if (route().kind === 'sql' && !modalOpen && e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
+				e.preventDefault()
+				cycleConsoleTab(e.shiftKey ? -1 : 1)
+			} else if (
+				route().kind === 'sql' &&
+				!modalOpen &&
+				primaryMod &&
+				e.shiftKey &&
+				!e.altKey &&
+				(e.key === '{' || e.key === '[' || e.code === 'BracketLeft')
+			) {
+				e.preventDefault()
+				cycleConsoleTab(-1)
+			} else if (
+				route().kind === 'sql' &&
+				!modalOpen &&
+				primaryMod &&
+				e.shiftKey &&
+				!e.altKey &&
+				(e.key === '}' || e.key === ']' || e.code === 'BracketRight')
+			) {
+				e.preventDefault()
+				cycleConsoleTab(1)
+			} else if (primaryMod && !e.altKey && !e.shiftKey && e.key === '[' && !isEditableTarget(e.target)) {
 				e.preventDefault()
 				window.history.back()
-			} else if (e.metaKey && e.key === ']') {
+			} else if (primaryMod && !e.altKey && !e.shiftKey && e.key === ']' && !isEditableTarget(e.target)) {
 				e.preventDefault()
 				window.history.forward()
 			} else if (primaryMod && !e.altKey && ((e.shiftKey && key === 'l') || (!e.shiftKey && key === 'e'))) {
@@ -411,14 +453,43 @@ export function App() {
 				} else {
 					void openOrCreateConsole(id).then(() => setConsoleFocusTick((n) => n + 1))
 				}
-			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key === 'l') {
+			} else if (isNativeApp() && primaryMod && !e.altKey && !e.shiftKey && key === 'l') {
 				e.preventDefault()
 				void copyToClipboard(window.location.href).then((ok) => {
 					if (ok) notify('Copied current URL', 'ok')
 				})
+			} else if (isNativeApp() && primaryMod && !e.altKey && !e.shiftKey && key === 'r') {
+				e.preventDefault()
+				window.dispatchEvent(new CustomEvent('datadip:refresh'))
 			}
 		}
 		window.addEventListener('keydown', onKey, true)
+
+		const onRefresh = () => {
+			const id = activeConnId()
+			if (id) void loadConnectionData(id)
+			else void refreshConnections()
+		}
+		const onNewTab = () => {
+			const id = activeConnId()
+			if (!id) {
+				notify('Select a database first', 'info')
+				return
+			}
+			void openOrCreateConsole(id, '-- Press Cmd+Enter to run the highlighted statement\n').then(() =>
+				setConsoleFocusTick((n) => n + 1),
+			)
+		}
+		const onCloseTab = (e: Event) => {
+			if (route().kind !== 'sql') return
+			const cur = activeConsole()
+			if (!cur) return
+			e.preventDefault()
+			if (!confirmState()) requestCloseConsole(cur)
+		}
+		window.addEventListener('datadip:refresh', onRefresh)
+		window.addEventListener('datadip:new-tab', onNewTab)
+		window.addEventListener('datadip:close-tab', onCloseTab)
 
 		const DIALOG_FOCUSABLE =
 			'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
@@ -529,6 +600,9 @@ export function App() {
 			window.removeEventListener('popstate', onPop)
 			window.removeEventListener('keydown', onKey, true)
 			window.removeEventListener('keydown', onModalTab)
+			window.removeEventListener('datadip:refresh', onRefresh)
+			window.removeEventListener('datadip:new-tab', onNewTab)
+			window.removeEventListener('datadip:close-tab', onCloseTab)
 			if (reconnectTimer) clearTimeout(reconnectTimer)
 			es?.close()
 			clearInterval(timer)
@@ -652,17 +726,28 @@ export function App() {
 						type="button"
 						class="icon-btn ghost"
 						onClick={() => setSidebarOpen((v) => !v)}
-						aria-label="Toggle sidebar (Cmd+B)"
+						aria-label={`Toggle sidebar (${modKeyLabel('B')})`}
+						title={`Toggle sidebar (${modKeyLabel('B')})`}
 					>
 						<IconSidebar />
 					</button>
 				</Show>
 
 				<div class="nav-arrows">
-					<button type="button" onClick={() => window.history.back()} aria-label="Back (Cmd+[)">
+					<button
+						type="button"
+						onClick={() => window.history.back()}
+						aria-label={`Back (${modKeyLabel('[')})`}
+						title={`Back (${modKeyLabel('[')})`}
+					>
 						<IconBack />
 					</button>
-					<button type="button" onClick={() => window.history.forward()} aria-label="Forward (Cmd+])">
+					<button
+						type="button"
+						onClick={() => window.history.forward()}
+						aria-label={`Forward (${modKeyLabel(']')})`}
+						title={`Forward (${modKeyLabel(']')})`}
+					>
 						<IconForward />
 					</button>
 				</div>
@@ -761,7 +846,8 @@ export function App() {
 					<button
 						type="button"
 						class="icon-btn ghost"
-						aria-label="Copy location URL (Cmd+L)"
+						aria-label={isNativeApp() ? `Copy location URL (${modKeyLabel('L')})` : 'Copy location URL'}
+						title={isNativeApp() ? `Copy location URL (${modKeyLabel('L')})` : 'Copy location URL'}
 						onClick={async () => {
 							if (await copyToClipboard(window.location.href)) notify('Copied URL to clipboard', 'ok')
 						}}
@@ -777,16 +863,22 @@ export function App() {
 						setRecentModalOpen(true)
 						void refreshConnections()
 					}}
-					aria-label="Open recent databases and tables (Ctrl+R)"
+					aria-label={`Open recent databases and tables (${recentsKeyLabel()})`}
+					title={`Open recent databases and tables (${recentsKeyLabel()})`}
 				>
 					<span>Recent</span>
-					<span class="kbd">^R</span>
+					<span class="kbd">{recentsKeyLabel()}</span>
 				</button>
 
-				<button type="button" class="omnibar-trigger" onClick={() => setOmnibarOpen(true)}>
+				<button
+					type="button"
+					class="omnibar-trigger"
+					onClick={() => setOmnibarOpen(true)}
+					title={`Jump to table, column, console, or ID (${modKeyLabel('K')} or ${modKeyLabel('P')})`}
+				>
 					<IconSearch />
 					<span>Jump / Find ID</span>
-					<span class="kbd">⌘K</span>
+					<span class="kbd">{modKeyLabel('K')}</span>
 				</button>
 
 				{/* Always-visible Read-Only / Read-Write safety toggle */}
@@ -911,6 +1003,7 @@ export function App() {
 									class="icon-btn ghost"
 									style="width:24px;height:24px"
 									aria-label="Refresh schema"
+									title={isNativeApp() ? `Refresh schema (${modKeyLabel('R')})` : 'Refresh schema'}
 									onClick={() => {
 										const id = activeConnId()
 										if (id) void loadConnectionData(id)
@@ -933,15 +1026,19 @@ export function App() {
 							<div class="sidebar-section-head">
 								<span>Consoles</span>
 								<span style="display:inline-flex;align-items:center;gap:4px">
-									<span class="kbd" style="text-transform:none" title="Open Console (Cmd+E or Cmd+Shift+L)">
-										⌘E
+									<span
+										class="kbd"
+										style="text-transform:none"
+										title={`Open Console (${modKeyLabel('E')} or ${modKeyLabel('L', true)})`}
+									>
+										{modKeyLabel('E')}
 									</span>
 									<button
 										type="button"
 										class="icon-btn ghost"
 										style="width:20px;height:20px"
 										aria-label="New console"
-										title="New Console"
+										title={isNativeApp() ? `New Console (${modKeyLabel('T')})` : 'New Console'}
 										onClick={() => {
 											const id = activeConnId()
 											if (id) void openOrCreateConsole(id, '-- Write SQL and press Cmd+Enter\n')
@@ -1213,7 +1310,11 @@ export function App() {
 														type="button"
 														class="console-tab-close"
 														aria-label={`Close ${sqlConsole.title}`}
-														title={`Close ${sqlConsole.title}`}
+														title={
+															isNativeApp()
+																? `Close ${sqlConsole.title} (${modKeyLabel('W')})`
+																: `Close ${sqlConsole.title}`
+														}
 														onClick={(e) => {
 															e.stopPropagation()
 															requestCloseConsole(sqlConsole)
@@ -1229,7 +1330,7 @@ export function App() {
 										type="button"
 										class="console-tab-add"
 										aria-label="New console"
-										title="New Console"
+										title={isNativeApp() ? `New Console (${modKeyLabel('T')})` : 'New Console'}
 										onClick={() => void openOrCreateConsole(r().connId, '-- Write SQL and press Cmd+Enter\n')}
 									>
 										<IconPlus />

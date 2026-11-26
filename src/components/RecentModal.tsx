@@ -1,7 +1,8 @@
-// Ctrl+R "Open Recent" dialog (WebStorm/IDEA style) listing recent databases/connections and recent tables with fuzzy filtering.
+// Ctrl+R (macOS) / Alt+R "Open Recent" dialog listing recent databases/connections and recent tables with fuzzy filtering.
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { formatRelative } from '../lib/format.ts'
 import { IconAlert, IconDisk, IconSearch, IconServer, IconTable, IconTrash } from '../lib/icons.tsx'
+import { recentsKeyLabel } from '../lib/shortcuts.ts'
 import type { ConnectionWithStatus, RecentTable } from '../shared/types.ts'
 
 type RecentEntry =
@@ -146,7 +147,7 @@ export function RecentModal(props: {
 					}}
 					onKeyDown={handleKeyDown}
 				/>
-				<span class="kbd">⌃R</span>
+				<span class="kbd">{recentsKeyLabel()}</span>
 				<span class="kbd">ESC</span>
 			</div>
 

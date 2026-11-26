@@ -1,12 +1,21 @@
 // Multi-statement SQL Console with auto-save, CodeMirror 6, concurrent per-console runs, Stop/Cancel, Split view, History, and FK links.
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { clearConsoleRun, getConsoleRun, updateConsoleRun } from '../lib/console-runs.ts'
-import { copyToClipboard, exportRowsCsv, exportRowsJson, formatCellText, formatIsoShort } from '../lib/format.ts'
+import {
+	copyToClipboard,
+	exportRowsCsv,
+	exportRowsJson,
+	exportRowsTsv,
+	formatCellText,
+	formatIsoShort,
+} from '../lib/format.ts'
 import { IconAlert, IconArrowRight, IconClose, IconCopy, IconPlay, IconTable, IconTrash } from '../lib/icons.tsx'
+import { hasTextSelection, isEditableTarget, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
 import { formatSql, statementAtCursor } from '../shared/sql.ts'
 import { tid } from '../shared/tid.ts'
 import type { DatabaseSchema, ForeignKeyInfo, QueryHistoryEntry, Console } from '../shared/types.ts'
+import { CellViewer, type CellViewerState } from './CellViewer.tsx'
 import type { ConfirmState } from './ConfirmDialog.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
 import { SqlEditor, type SqlEditorHandle } from './SqlEditor.tsx'
@@ -48,7 +57,11 @@ export function ConsoleView(props: {
 	const [showHistory, setShowHistory] = createSignal(false)
 	const [history, setHistory] = createSignal<QueryHistoryEntry[]>([])
 	const [peek, setPeek] = createSignal<FkPeekState | null>(null)
+	const [activeCell, setActiveCell] = createSignal<{ row: number; col: number } | null>(null)
+	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
 
+	let wrapEl: HTMLDivElement | undefined
+	let gridScrollEl: HTMLDivElement | undefined
 	let editorHandle: SqlEditorHandle | undefined
 	let consoleSelectEl: HTMLSelectElement | undefined
 	let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -210,6 +223,215 @@ export function ConsoleView(props: {
 
 	const currentResult = createMemo(() => results()[activeTab()] ?? null)
 
+	createEffect(
+		() => currentResult(),
+		(res) => {
+			setCellViewer(null)
+			if (res && !res.error && res.columns.length > 0 && res.rows.length > 0) {
+				setActiveCell({ row: 0, col: 0 })
+			} else {
+				setActiveCell(null)
+			}
+		},
+	)
+
+	function isPaneActive(): boolean {
+		if (!wrapEl) return !props.isSplitPane
+		const active = document.activeElement
+		if (active && wrapEl.contains(active)) return true
+		if (props.isSplitPane) return false
+		const activeWrap = active instanceof HTMLElement ? active.closest('.console-wrap') : null
+		return !activeWrap || activeWrap === wrapEl
+	}
+
+	function scrollActiveCellIntoView(row: number, col: number) {
+		gridScrollEl
+			?.querySelector<HTMLElement>(`td[data-r="${row}"][data-c="${col}"]`)
+			?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+	}
+
+	function openResultCellViewer(rowIdx: number, colName: string, value: unknown, el?: HTMLElement) {
+		const anchor = el
+			? (() => {
+					const r = el.getBoundingClientRect()
+					return { left: r.left, top: r.top, bottom: r.bottom, right: r.right }
+				})()
+			: {
+					left: Math.round(window.innerWidth / 2 - 240),
+					top: 180,
+					bottom: 210,
+					right: Math.round(window.innerWidth / 2 + 240),
+				}
+		setCellViewer({
+			rowIdx,
+			colName,
+			colType: '',
+			value,
+			mode: 'view',
+			anchor,
+		})
+	}
+
+	function copyActiveResultCell(e?: ClipboardEvent) {
+		const res = currentResult()
+		const cur = activeCell()
+		if (!res || res.error || !cur) return
+		const colName = res.columns[cur.col]
+		const row = res.rows[cur.row]
+		if (!colName || !row) return
+		const text = formatCellText(row[colName])
+		if (e?.clipboardData) {
+			e.preventDefault()
+			e.clipboardData.setData('text/plain', text)
+			props.onNotify(`Copied ${colName}`)
+			return
+		}
+		void copyToClipboard(text).then((ok) => {
+			if (ok) props.onNotify(`Copied ${colName}`)
+		})
+	}
+
+	function copyActiveResultRowTsv() {
+		const res = currentResult()
+		const cur = activeCell()
+		if (!res || res.error || !cur) return
+		const row = res.rows[cur.row]
+		if (!row) return
+		void copyToClipboard(exportRowsTsv(res.columns, [row])).then((ok) => {
+			if (ok) props.onNotify(`Copied row ${cur.row + 1} with headers (TSV)`)
+		})
+	}
+
+	onSettled(() => {
+		const onCopy = (e: ClipboardEvent) => {
+			if (!isPaneActive()) return
+			if (isEditableTarget(e.target) || document.querySelector('dialog[open]') || cellViewer()) return
+			if (hasTextSelection(e.target)) return
+			copyActiveResultCell(e)
+		}
+
+		const onKey = (e: KeyboardEvent) => {
+			if (document.querySelector('dialog[open]')) return
+			if (!isPaneActive()) return
+			const key = e.key.toLowerCase()
+			const primaryMod = isPrimaryMod(e)
+			const target = e.target as HTMLElement | null
+
+			// Cmd+. cancels the running query in the active console
+			if (primaryMod && !e.altKey && !e.shiftKey && e.key === '.') {
+				if (running()) {
+					e.preventDefault()
+					void cancelCurrent()
+				}
+				return
+			}
+
+			// Ctrl+C cancels running query when there is no active text selection
+			if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'c' && running()) {
+				const cmSelected = Boolean(target?.closest('.cm-editor') && editorHandle?.getSelection())
+				if (!hasTextSelection(target) && !cmSelected) {
+					e.preventDefault()
+					void cancelCurrent()
+					return
+				}
+			}
+
+			// Cmd+Shift+H toggles Query History panel (avoids Cmd+H macOS Hide App)
+			if (!props.isSplitPane && primaryMod && e.shiftKey && !e.altKey && key === 'h') {
+				e.preventDefault()
+				const next = !showHistory()
+				setShowHistory(next)
+				if (next) void loadHistory()
+				return
+			}
+
+			if (isEditableTarget(target) || cellViewer()) return
+
+			if (e.key === 'Escape' && showHistory()) {
+				setShowHistory(false)
+				return
+			}
+
+			const res = currentResult()
+			const cur = activeCell()
+			if (!res || res.error || !cur || res.rows.length === 0 || res.columns.length === 0) return
+
+			if (primaryMod && !e.altKey && !e.shiftKey && (e.key === 'Enter' || e.key === 'ArrowDown')) {
+				const colName = res.columns[cur.col]
+				const row = res.rows[cur.row]
+				if (colName && row) {
+					const fk = currentFkMap().get(colName)
+					const val = row[colName]
+					if (fk && val !== null && val !== undefined) {
+						e.preventDefault()
+						props.onFollowFk(fk.toTable, fk.toColumn, val)
+						return
+					}
+				}
+			}
+
+			if (primaryMod && e.shiftKey && !e.altKey && key === 'c') {
+				e.preventDefault()
+				copyActiveResultRowTsv()
+				return
+			}
+
+			if (primaryMod && !e.shiftKey && !e.altKey && key === 'c') {
+				if (!hasTextSelection(target)) {
+					e.preventDefault()
+					copyActiveResultCell()
+				}
+				return
+			}
+
+			const noMods = !e.metaKey && !e.ctrlKey && !e.altKey
+			if (noMods && (e.key === 'ArrowDown' || e.key === 'j')) {
+				e.preventDefault()
+				const next = { row: Math.min(res.rows.length - 1, cur.row + 1), col: cur.col }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowUp' || e.key === 'k')) {
+				e.preventDefault()
+				const next = { row: Math.max(0, cur.row - 1), col: cur.col }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowRight' || e.key === 'l')) {
+				e.preventDefault()
+				const next = { row: cur.row, col: Math.min(res.columns.length - 1, cur.col + 1) }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowLeft' || e.key === 'h')) {
+				e.preventDefault()
+				const next = { row: cur.row, col: Math.max(0, cur.col - 1) }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && !e.shiftKey && key === 'c') {
+				copyActiveResultCell()
+			} else if (noMods && e.key === 'Enter') {
+				const colName = res.columns[cur.col]
+				const row = res.rows[cur.row]
+				if (!colName || !row) return
+				const fk = currentFkMap().get(colName)
+				const val = row[colName]
+				if (fk && val !== null && val !== undefined) {
+					e.preventDefault()
+					props.onFollowFk(fk.toTable, fk.toColumn, val)
+				} else {
+					e.preventDefault()
+					const td = gridScrollEl?.querySelector<HTMLElement>(`td[data-r="${cur.row}"][data-c="${cur.col}"]`)
+					openResultCellViewer(cur.row, colName, val, td ?? undefined)
+				}
+			}
+		}
+
+		window.addEventListener('copy', onCopy)
+		window.addEventListener('keydown', onKey)
+		return () => {
+			window.removeEventListener('copy', onCopy)
+			window.removeEventListener('keydown', onKey)
+		}
+	})
+
 	const currentFkMap = createMemo(() => {
 		const map = new Map<string, ForeignKeyInfo>()
 		const src = currentResult()?.sourceTable
@@ -258,7 +480,7 @@ export function ConsoleView(props: {
 	const elapsedText = () => formatElapsed(runState().startedAt, props.nowMs ?? Date.now())
 
 	return (
-		<div class="console-wrap">
+		<div ref={(el) => (wrapEl = el)} class="console-wrap">
 			{/* Console toolbar */}
 			<div class="view-toolbar">
 				<Show
@@ -314,9 +536,17 @@ export function ConsoleView(props: {
 				<Show
 					when={!running()}
 					fallback={
-						<button type="button" class="btn sm stop-btn" onClick={() => void cancelCurrent()}>
+						<button
+							type="button"
+							class="btn sm stop-btn"
+							title={`Cancel running query (${modKeyLabel('.')} or Ctrl+C)`}
+							onClick={() => void cancelCurrent()}
+						>
 							<span class="status-pulse" />
 							Stop ({elapsedText()})
+							<span class="kbd" style="border-color:rgba(255,255,255,0.35);background:transparent;color:inherit">
+								{modKeyLabel('.')}
+							</span>
 						</button>
 					}
 				>
@@ -324,25 +554,26 @@ export function ConsoleView(props: {
 						<IconPlay />
 						Run
 						<span class="kbd" style="border-color:rgba(255,255,255,0.35);background:transparent;color:inherit">
-							⌘↵
+							{modKeyLabel('↵')}
 						</span>
 					</button>
 				</Show>
 
 				<button type="button" class="btn sm" disabled={running()} onClick={runAll}>
 					Run All
-					<span class="kbd">⇧⌘↵</span>
+					<span class="kbd">{modKeyLabel('↵', true)}</span>
 				</button>
 
 				<Show when={!props.isSplitPane}>
 					<button type="button" class="btn sm" disabled={running()} onClick={() => runExplain()}>
 						Explain
-						<span class="kbd">⇧⌘E</span>
+						<span class="kbd">{modKeyLabel('E', true)}</span>
 					</button>
 				</Show>
 
-				<button type="button" class="btn sm" onClick={handleFormat}>
+				<button type="button" class="btn sm" title={`Format SQL (${modKeyLabel('F', true)})`} onClick={handleFormat}>
 					Format
+					<span class="kbd">{modKeyLabel('F', true)}</span>
 				</button>
 
 				<div style="flex:1" />
@@ -362,6 +593,7 @@ export function ConsoleView(props: {
 					<button
 						type="button"
 						class={['btn sm', { primary: showHistory() }]}
+						title={`Toggle Query History (${modKeyLabel('H', true)})`}
 						onClick={() => {
 							const next = !showHistory()
 							setShowHistory(next)
@@ -369,6 +601,14 @@ export function ConsoleView(props: {
 						}}
 					>
 						History
+						<span
+							class="kbd"
+							style={
+								showHistory() ? 'border-color:rgba(255,255,255,0.35);background:transparent;color:inherit' : undefined
+							}
+						>
+							{modKeyLabel('H', true)}
+						</span>
 					</button>
 				</Show>
 
@@ -441,8 +681,8 @@ export function ConsoleView(props: {
 								fallback={
 									<span style="font-size:12px;color:var(--ink-muted)">
 										{running()
-											? `Running query on ${props.connName || 'database'}… ${elapsedText()}`
-											: 'Press ⌘Enter to run the highlighted statement under cursor, or ⇧⌘Enter to run all statements.'}
+											? `Running query on ${props.connName || 'database'}… ${elapsedText()} (${modKeyLabel('.')} to cancel)`
+											: `Press ${modKeyLabel('↵')} to run statement, ${modKeyLabel('↵', true)} to run all, ${modKeyLabel('/')} to comment.`}
 									</span>
 								}
 							>
@@ -515,7 +755,7 @@ export function ConsoleView(props: {
 							</Show>
 						</div>
 
-						<div class="grid-scroll">
+						<div ref={(el) => (gridScrollEl = el)} class="grid-scroll" tabindex="-1">
 							<Show when={runError()}>{(err) => <div class="error-box">{err()}</div>}</Show>
 
 							<Show when={currentResult()}>
@@ -572,11 +812,23 @@ export function ConsoleView(props: {
 															<tr>
 																<td class="row-num">{rIdx() + 1}</td>
 																<For each={res().columns}>
-																	{(col) => {
+																	{(col, cIdx) => {
 																		const val = () => row[col]
 																		const fk = () => currentFkMap().get(col)
+																		const active = () => activeCell()?.row === rIdx() && activeCell()?.col === cIdx()
 																		return (
-																			<td>
+																			<td
+																				data-r={rIdx()}
+																				data-c={cIdx()}
+																				class={{ 'cell-active': active() }}
+																				onClick={() => {
+																					setActiveCell({ row: rIdx(), col: cIdx() })
+																					if (!window.getSelection()?.toString()) {
+																						gridScrollEl?.focus({ preventScroll: true })
+																					}
+																				}}
+																				onDblClick={(e) => openResultCellViewer(rIdx(), col, val(), e.currentTarget)}
+																			>
 																				<Show
 																					when={fk() && val() !== null && val() !== undefined}
 																					fallback={
@@ -592,7 +844,10 @@ export function ConsoleView(props: {
 																						class="fk-link"
 																						onMouseEnter={(e) => startFkPeek(e, fk()!, val())}
 																						onMouseLeave={cancelFkPeek}
-																						onClick={() => props.onFollowFk(fk()!.toTable, fk()!.toColumn, val())}
+																						onClick={(e) => {
+																							e.stopPropagation()
+																							props.onFollowFk(fk()!.toTable, fk()!.toColumn, val())
+																						}}
 																					>
 																						<span>{formatCellText(val())}</span>
 																						<IconArrowRight />
@@ -680,6 +935,16 @@ export function ConsoleView(props: {
 			</div>
 
 			<FkPeekCard state={peek()} />
+
+			<CellViewer
+				state={cellViewer()}
+				canEdit={false}
+				rwArmed={false}
+				onClose={() => setCellViewer(null)}
+				onCommitEdit={() => {}}
+				onSwitchToEdit={() => {}}
+				onNotify={props.onNotify}
+			/>
 		</div>
 	)
 }

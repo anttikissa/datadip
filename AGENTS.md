@@ -97,6 +97,14 @@ because `DataDip.app`'s `Edit -> Select All` menu invokes `selectAll:`
 on the `WKWebView` directly and selects the entire document when focus
 is on a non-input element like `<pre>`.
 
+Always use `isPrimaryMod(e)` (`src/lib/shortcuts.ts`) rather than
+`e.metaKey || e.ctrlKey` for app shortcuts so macOS Emacs editing keys
+(`Ctrl+A/E/K/B/L/P/N`) stay free; never intercept browser-owned
+shortcuts (`Cmd+L`, `Cmd+R`, `Cmd+T`, `Cmd+W`) outside `DataDip.app`;
+and never bind editor keys (`Cmd+[`, `Cmd+]`) as `NSMenu` key
+equivalents in `mac/DataDip.swift` or hijack them in capture-phase JS
+listeners when `isEditableTarget(e.target)` is true.
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

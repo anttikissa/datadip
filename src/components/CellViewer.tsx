@@ -2,6 +2,7 @@
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js'
 import { copyToClipboard, formatCellText, tryFormatTimestampHint, tryPrettyJson } from '../lib/format.ts'
 import { IconClose, IconCopy, IconLock, IconUnlock } from '../lib/icons.tsx'
+import { isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
 
 export interface CellViewerState {
 	rowIdx: number
@@ -55,7 +56,7 @@ export function CellViewer(props: {
 				props.onClose()
 				return
 			}
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+			if (isPrimaryMod(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
 				const target = props.state.mode === 'edit' ? textAreaEl : viewAreaEl
 				if (target) {
 					e.preventDefault()
@@ -219,7 +220,7 @@ export function CellViewer(props: {
 								value={draft()}
 								onInput={(e) => setDraft(e.currentTarget.value)}
 								onKeyDown={(e) => {
-									if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+									if (isPrimaryMod(e) && !e.altKey && !e.shiftKey && e.key === 'Enter') {
 										e.preventDefault()
 										props.onCommitEdit(st().rowIdx, st().colName, draft(), false)
 									}
@@ -243,7 +244,7 @@ export function CellViewer(props: {
 									class="btn sm primary"
 									onClick={() => props.onCommitEdit(st().rowIdx, st().colName, draft(), false)}
 								>
-									Stage Edit (⌘↵)
+									Stage Edit ({modKeyLabel('↵')})
 								</button>
 							</div>
 						</div>

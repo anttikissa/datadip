@@ -7,6 +7,7 @@ import {
 	exportRowsCsv,
 	exportRowsJson,
 	exportRowsSqlInsert,
+	exportRowsTsv,
 	formatCellText,
 } from '../lib/format.ts'
 import {
@@ -19,6 +20,7 @@ import {
 	IconSearch,
 	IconSql,
 } from '../lib/icons.tsx'
+import { hasTextSelection, isEditableTarget, isNativeApp, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
 import type {
 	BrowseResult,
 	FilterOp,
@@ -191,8 +193,15 @@ export function TableView(props: {
 				.then((res) => {
 					if (cancelled) return
 					setData(res)
-					setActiveCell(res.rows.length > 0 ? { row: 0, col: 0 } : null)
-					setInspectorRowIdx(null)
+					setActiveCell((prev) => {
+						if (res.rows.length === 0 || res.columns.length === 0) return null
+						if (!prev) return { row: 0, col: 0 }
+						return {
+							row: Math.min(prev.row, res.rows.length - 1),
+							col: Math.min(prev.col, res.columns.length - 1),
+						}
+					})
+					setInspectorRowIdx((prev) => (prev !== null && prev < res.rows.length ? prev : null))
 				})
 				.catch((err) => {
 					if (cancelled) return
@@ -208,91 +217,208 @@ export function TableView(props: {
 		},
 	)
 
-	// Clear staged edits and custom column widths when switching tables
+	// Clear staged edits, active cursor, and custom column widths when switching tables
 	createEffect(
 		() => [props.route.connId, props.route.table] as const,
 		() => {
 			setStaged(new Map())
 			setEditingCell(null)
 			setCellViewer(null)
+			setActiveCell(null)
+			setInspectorRowIdx(null)
 			setColWidths({})
 			peekCache.clear()
 		},
 	)
 
-	// Keyboard navigation inside Data tab
+	function scrollActiveCellIntoView(row: number, col: number) {
+		gridScrollEl
+			?.querySelector<HTMLElement>(`td[data-r="${row}"][data-c="${col}"]`)
+			?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+	}
+
+	function copyActiveCell(e?: ClipboardEvent) {
+		const res = data()
+		const cur = activeCell()
+		if (!res || !cur) return
+		const colName = res.columns[cur.col]
+		const row = res.rows[cur.row]
+		if (!colName || !row) return
+		const text = formatCellText(getEffectiveValue(row, cur.row, colName))
+		if (e?.clipboardData) {
+			e.preventDefault()
+			e.clipboardData.setData('text/plain', text)
+			props.onNotify(`Copied ${colName}`)
+			return
+		}
+		void copyToClipboard(text).then((ok) => {
+			if (ok) props.onNotify(`Copied ${colName}`)
+		})
+	}
+
+	function copyActiveRowTsv() {
+		const res = data()
+		const cur = activeCell()
+		if (!res || !cur) return
+		const row = res.rows[cur.row]
+		if (!row) return
+		const effectiveRow: Record<string, unknown> = {}
+		for (const c of res.columns) effectiveRow[c] = getEffectiveValue(row, cur.row, c)
+		void copyToClipboard(exportRowsTsv(res.columns, [effectiveRow])).then((ok) => {
+			if (ok) props.onNotify(`Copied row ${cur.row + 1} with headers (TSV)`)
+		})
+	}
+
+	// Keyboard navigation, copy, refresh, and view switching inside TableView
 	onSettled(() => {
-		const onKey = (e: KeyboardEvent) => {
+		const onRefresh = () => {
+			setReloadTick((n) => n + 1)
+		}
+
+		const onCopy = (e: ClipboardEvent) => {
 			if (props.route.tab !== 'data') return
+			if (isEditableTarget(e.target) || document.querySelector('dialog[open]') || cellViewer()) return
+			if (hasTextSelection(e.target)) return
+			copyActiveCell(e)
+		}
+
+		const onKey = (e: KeyboardEvent) => {
+			if (document.querySelector('dialog[open]')) return
+			const key = e.key.toLowerCase()
+			const primaryMod = isPrimaryMod(e)
 			const target = e.target as HTMLElement | null
-			if (
-				target &&
-				(target.tagName === 'INPUT' ||
-					target.tagName === 'TEXTAREA' ||
-					target.tagName === 'SELECT' ||
-					target.isContentEditable)
-			) {
+
+			// Cmd+S commits staged inline edits (and prevents browser Save Page)
+			if (primaryMod && !e.altKey && !e.shiftKey && key === 's') {
+				e.preventDefault()
+				if (editingCell()) commitCellDraft(false)
+				if (stagedCount() > 0) void commitStagedEdits()
 				return
 			}
-			if (document.querySelector('dialog[open]')) return
+
+			// Cmd+1 / Cmd+2 switches between Data and Schema tabs
+			if (primaryMod && !e.altKey && !e.shiftKey && (e.key === '1' || e.key === '2') && !isEditableTarget(target)) {
+				e.preventDefault()
+				updateRoute({ tab: e.key === '1' ? 'data' : 'schema' }, false)
+				return
+			}
+
+			// Cmd+F focuses quick-search input on Data tab (when not in CodeMirror, CellViewer, or inline cell editor)
+			if (
+				props.route.tab === 'data' &&
+				primaryMod &&
+				!e.altKey &&
+				!e.shiftKey &&
+				key === 'f' &&
+				!cellViewer() &&
+				!editingCell() &&
+				!target?.closest('.cm-editor')
+			) {
+				e.preventDefault()
+				searchInputEl?.focus()
+				searchInputEl?.select()
+				return
+			}
+
+			if (isEditableTarget(target)) return
+
+			// Bare `r` refreshes table rows & schema
+			if (key === 'r' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+				e.preventDefault()
+				if (props.route.tab === 'data') setReloadTick((n) => n + 1)
+				props.onSchemaChanged()
+				return
+			}
+
+			if (props.route.tab !== 'data' || cellViewer()) return
 
 			const res = data()
 			if (!res) return
 
-			if (e.key === '/') {
+			if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
 				e.preventDefault()
 				searchInputEl?.focus()
 				return
 			}
-			if (e.key === 'f' && !e.metaKey && !e.ctrlKey) {
+			if (key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
 				e.preventDefault()
 				setShowColPicker((v) => !v)
-				return
-			}
-			if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
-				e.preventDefault()
-				setReloadTick((n) => n + 1)
 				return
 			}
 
 			const cur = activeCell()
 			if (!cur || res.rows.length === 0) return
 
-			if (e.key === 'ArrowDown' || e.key === 'j') {
-				e.preventDefault()
-				setActiveCell({ row: Math.min(res.rows.length - 1, cur.row + 1), col: cur.col })
-			} else if (e.key === 'ArrowUp' || e.key === 'k') {
-				e.preventDefault()
-				setActiveCell({ row: Math.max(0, cur.row - 1), col: cur.col })
-			} else if (e.key === 'ArrowRight' || e.key === 'l') {
-				e.preventDefault()
-				setActiveCell({ row: cur.row, col: Math.min(res.columns.length - 1, cur.col + 1) })
-			} else if (e.key === 'ArrowLeft' || e.key === 'h') {
-				e.preventDefault()
-				setActiveCell({ row: cur.row, col: Math.max(0, cur.col - 1) })
-			} else if (e.key === ' ') {
-				e.preventDefault()
-				setInspectorRowIdx((prev) => (prev === cur.row ? null : cur.row))
-			} else if (e.key === 'c' && !e.metaKey && !e.ctrlKey) {
+			// Consistent FK-follow shortcut in both Read-Only and Read-Write modes
+			if (primaryMod && !e.altKey && !e.shiftKey && (e.key === 'Enter' || e.key === 'ArrowDown')) {
 				const colName = res.columns[cur.col]
 				const row = res.rows[cur.row]
 				if (colName && row) {
-					void copyToClipboard(formatCellText(row[colName])).then((ok) => {
-						if (ok) props.onNotify(`Copied ${colName}`)
-					})
+					const fk = fkByCol().get(colName)
+					const val = getEffectiveValue(row, cur.row, colName)
+					if (fk && val !== null && val !== undefined) {
+						e.preventDefault()
+						followFk(fk.toTable, fk.toColumn, val)
+						return
+					}
 				}
-			} else if (e.key === 'Enter') {
+			}
+
+			// Cmd+Shift+C copies focused row with column headers as TSV
+			if (primaryMod && e.shiftKey && !e.altKey && key === 'c') {
+				e.preventDefault()
+				copyActiveRowTsv()
+				return
+			}
+
+			// Cmd+C copies focused cell value when there is no active text selection
+			if (primaryMod && !e.shiftKey && !e.altKey && key === 'c') {
+				if (!hasTextSelection(target)) {
+					e.preventDefault()
+					copyActiveCell()
+				}
+				return
+			}
+
+			const noMods = !e.metaKey && !e.ctrlKey && !e.altKey
+			if (noMods && (e.key === 'ArrowDown' || e.key === 'j')) {
+				e.preventDefault()
+				const next = { row: Math.min(res.rows.length - 1, cur.row + 1), col: cur.col }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowUp' || e.key === 'k')) {
+				e.preventDefault()
+				const next = { row: Math.max(0, cur.row - 1), col: cur.col }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowRight' || e.key === 'l')) {
+				e.preventDefault()
+				const next = { row: cur.row, col: Math.min(res.columns.length - 1, cur.col + 1) }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && (e.key === 'ArrowLeft' || e.key === 'h')) {
+				e.preventDefault()
+				const next = { row: cur.row, col: Math.max(0, cur.col - 1) }
+				setActiveCell(next)
+				scrollActiveCellIntoView(next.row, next.col)
+			} else if (noMods && e.key === ' ') {
+				e.preventDefault()
+				setInspectorRowIdx((prev) => (prev === cur.row ? null : cur.row))
+			} else if (noMods && !e.shiftKey && key === 'c') {
+				copyActiveCell()
+			} else if (noMods && e.key === 'Enter') {
 				const colName = res.columns[cur.col]
 				const row = res.rows[cur.row]
 				if (!colName || !row) return
 				const fk = fkByCol().get(colName)
-				if (!props.rwArmed && fk && row[colName] !== null && row[colName] !== undefined) {
+				const val = getEffectiveValue(row, cur.row, colName)
+				if (!props.rwArmed && fk && val !== null && val !== undefined) {
 					e.preventDefault()
-					followFk(fk.toTable, fk.toColumn, row[colName])
+					followFk(fk.toTable, fk.toColumn, val)
 				} else {
 					e.preventDefault()
 					const td = gridScrollEl?.querySelector<HTMLElement>(`td[data-r="${cur.row}"][data-c="${cur.col}"]`)
-					openCellAction(cur.row, colName, getEffectiveValue(row, cur.row, colName), td ?? undefined)
+					openCellAction(cur.row, colName, val, td ?? undefined)
 				}
 			} else if (e.key === 'Escape') {
 				setCellViewer(null)
@@ -303,8 +429,14 @@ export function TableView(props: {
 			}
 		}
 
+		window.addEventListener('datadip:refresh', onRefresh)
+		window.addEventListener('copy', onCopy)
 		window.addEventListener('keydown', onKey)
-		return () => window.removeEventListener('keydown', onKey)
+		return () => {
+			window.removeEventListener('datadip:refresh', onRefresh)
+			window.removeEventListener('copy', onCopy)
+			window.removeEventListener('keydown', onKey)
+		}
 	})
 
 	function updateRoute(patch: Partial<TableRoute>, resetPage = true) {
@@ -724,6 +856,7 @@ export function TableView(props: {
 					<button
 						type="button"
 						class={['tab-btn', { active: props.route.tab === 'data' }]}
+						title={`Data view (${modKeyLabel('1')})`}
 						onClick={() => updateRoute({ tab: 'data' }, false)}
 					>
 						Data
@@ -731,6 +864,7 @@ export function TableView(props: {
 					<button
 						type="button"
 						class={['tab-btn', { active: props.route.tab === 'schema' }]}
+						title={`Schema view (${modKeyLabel('2')})`}
 						onClick={() => updateRoute({ tab: 'schema' }, false)}
 					>
 						Schema
@@ -761,7 +895,7 @@ export function TableView(props: {
 							ref={(el) => (searchInputEl = el)}
 							class="input mono"
 							style="padding-left:26px;width:190px;height:26px;font-size:12px"
-							placeholder="Search rows (/)…"
+							placeholder={`Search rows (/ · ${modKeyLabel('F')})…`}
 							value={searchDraft()}
 							onInput={(e) => setSearchDraft(e.currentTarget.value)}
 							onKeyDown={(e) => {
@@ -893,8 +1027,12 @@ export function TableView(props: {
 						type="button"
 						class="icon-btn"
 						style="height:26px;width:26px"
-						onClick={() => setReloadTick((n) => n + 1)}
-						aria-label="Refresh rows"
+						onClick={() => {
+							setReloadTick((n) => n + 1)
+							props.onSchemaChanged()
+						}}
+						aria-label={isNativeApp() ? `Refresh rows (r or ${modKeyLabel('R')})` : 'Refresh rows (r)'}
+						title={isNativeApp() ? `Refresh rows (r or ${modKeyLabel('R')})` : 'Refresh rows (r)'}
 					>
 						<IconRefresh />
 					</button>
@@ -997,8 +1135,9 @@ export function TableView(props: {
 
 					<div style="flex:1" />
 					<span style="font-size:11px;color:var(--ink-muted)">
-						<span class="kbd">Space</span> inspect · Double-click view/edit · <span class="kbd">hjkl</span> navigate ·{' '}
-						<span class="kbd">f</span> columns
+						<span class="kbd">Space</span> inspect · <span class="kbd">{modKeyLabel('C')}</span> copy ·{' '}
+						<span class="kbd">{modKeyLabel('C', true)}</span> row TSV · <span class="kbd">{modKeyLabel('↵')}</span> FK ·{' '}
+						<span class="kbd">f</span> columns · <span class="kbd">r</span> refresh
 					</span>
 				</div>
 
@@ -1138,7 +1277,7 @@ export function TableView(props: {
 																					} else if (e.key === 'Escape') {
 																						e.preventDefault()
 																						setEditingCell(null)
-																					} else if (e.key === 'Backspace' && e.metaKey) {
+																					} else if (e.key === 'Backspace' && isPrimaryMod(e)) {
 																						e.preventDefault()
 																						commitCellDraft(true)
 																					}
@@ -1203,6 +1342,9 @@ export function TableView(props: {
 							</button>
 							<button type="button" class="btn sm primary" onClick={commitStagedEdits}>
 								Commit Changes
+								<span class="kbd" style="border-color:rgba(255,255,255,0.35);background:transparent;color:inherit">
+									{modKeyLabel('S')}
+								</span>
 							</button>
 						</div>
 					</div>

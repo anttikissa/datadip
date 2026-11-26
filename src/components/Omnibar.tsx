@@ -1,4 +1,4 @@
-// Cmd+K Omnibar for jumping to tables, columns, consoles, connections, actions, or searching an ID across tables.
+// Cmd+K / Cmd+P Omnibar for jumping to tables, columns, consoles, connections, actions, or searching an ID across tables.
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { api } from '../lib/api.ts'
 import { formatCellText } from '../lib/format.ts'

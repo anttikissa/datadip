@@ -324,6 +324,29 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 
 	@objc func goBack(_ sender: Any?) { web.goBack() }
 	@objc func goForward(_ sender: Any?) { web.goForward() }
+	@objc func newConsoleTab(_ sender: Any?) {
+		guard let u = web.url, u.scheme == "http" || u.scheme == "https" else { return }
+		web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('datadip:new-tab'))", completionHandler: nil)
+	}
+	@objc func closeTabOrWindow(_ sender: Any?) {
+		guard let u = web.url, u.scheme == "http" || u.scheme == "https" else {
+			window.performClose(sender)
+			return
+		}
+		web.evaluateJavaScript("!window.dispatchEvent(new CustomEvent('datadip:close-tab', { cancelable: true }))") { [weak self] result, _ in
+			let handled = (result as? Bool) ?? false
+			if !handled {
+				DispatchQueue.main.async { self?.window.performClose(sender) }
+			}
+		}
+	}
+	@objc func refreshData(_ sender: Any?) {
+		if let u = web.url, u.scheme == "http" || u.scheme == "https" {
+			web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('datadip:refresh'))", completionHandler: nil)
+		} else {
+			ensureServerRunning(forceReload: true, pathQuery: "/")
+		}
+	}
 	@objc func reloadPage(_ sender: Any?) {
 		if let u = web.url, u.scheme == "http" || u.scheme == "https" {
 			web.reload()
@@ -398,6 +421,12 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 			("-", nil, ""),
 			("Quit DataDip", #selector(NSApplication.terminate(_:)), "q"),
 		])
+		sub("File", [
+			("New Console Tab", #selector(newConsoleTab(_:)), "t"),
+			("-", nil, ""),
+			("Close Tab", #selector(closeTabOrWindow(_:)), "w"),
+			("Close Window", #selector(NSWindow.performClose(_:)), "W"),
+		])
 		sub("Edit", [
 			("Undo", Selector(("undo:")), "z"),
 			("Redo", Selector(("redo:")), "Z"),
@@ -409,15 +438,16 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 			("-", nil, ""),
 			("Copy Page URL", #selector(copyPageUrl(_:)), "l"),
 		])
+		sub("View", [
+			("Refresh Data", #selector(refreshData(_:)), "r"),
+			("Reload Page", #selector(reloadPage(_:)), "R"),
+		])
 		sub("Navigate", [
-			("Back", #selector(goBack(_:)), "["),
-			("Forward", #selector(goForward(_:)), "]"),
-			("-", nil, ""),
-			("Reload", #selector(reloadPage(_:)), "r"),
+			("Back", #selector(goBack(_:)), ""),
+			("Forward", #selector(goForward(_:)), ""),
 		])
 		sub("Window", [
 			("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
-			("Close", #selector(NSWindow.performClose(_:)), "w"),
 		])
 		return bar
 	}
