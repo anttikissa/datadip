@@ -475,6 +475,21 @@ export function App() {
 	})
 
 	const defaultSshHost = createMemo(() => connections().find((c) => c.location === 'ssh' && c.sshHost)?.sshHost)
+	const activeConnections = createMemo(() => connections().filter((c) => c.connected))
+	const inactiveConnections = createMemo(() => connections().filter((c) => !c.connected))
+
+	async function disconnectConnection(conn: ConnectionWithStatus) {
+		try {
+			await api.disconnectConnection(conn.id)
+			await refreshConnections()
+			if (activeConnId() === conn.id) {
+				navigate({ kind: 'home' })
+			}
+			notify(conn.orphaned ? `Closed orphaned connection "${conn.name}"` : `Disconnected "${conn.name}"`, 'ok')
+		} catch (err) {
+			notify(err instanceof Error ? err.message : String(err), 'error')
+		}
+	}
 
 	const activeTableRoute = createMemo(() => {
 		const r = route()
@@ -531,15 +546,44 @@ export function App() {
 					}}
 				>
 					<option value="">All Connections…</option>
-					<For each={connections()}>
-						{(c) => (
-							<option value={c.id}>
-								{c.orphaned ? '[ORPHANED] ' : ''}
-								{c.isProduction ? '[PROD] ' : ''}
-								{c.name}
-							</option>
-						)}
-					</For>
+					<Show
+						when={activeConnections().length > 0}
+						fallback={
+							<For each={connections()}>
+								{(c) => (
+									<option value={c.id}>
+										{c.isProduction ? '[PROD] ' : ''}
+										{c.name}
+									</option>
+								)}
+							</For>
+						}
+					>
+						<optgroup label={`Active (${activeConnections().length})`}>
+							<For each={activeConnections()}>
+								{(c) => (
+									<option value={c.id}>
+										● {c.orphaned ? '[ORPHANED] ' : ''}
+										{c.rwArmed ? '[RW] ' : ''}
+										{c.isProduction ? '[PROD] ' : ''}
+										{c.name}
+									</option>
+								)}
+							</For>
+						</optgroup>
+						<Show when={inactiveConnections().length > 0}>
+							<optgroup label="Saved">
+								<For each={inactiveConnections()}>
+									{(c) => (
+										<option value={c.id}>
+											{c.isProduction ? '[PROD] ' : ''}
+											{c.name}
+										</option>
+									)}
+								</For>
+							</optgroup>
+						</Show>
+					</Show>
 				</select>
 
 				<Show when={activeConn()?.orphaned}>
@@ -906,6 +950,7 @@ export function App() {
 							})
 						}}
 						onRestoreConnection={(c) => void restoreOrphaned(c)}
+						onDisconnectConnection={(c) => void disconnectConnection(c)}
 						onOpenDiscover={() => setDiscoverOpen(true)}
 					/>
 				</Show>

@@ -142,6 +142,7 @@ export class ConnectionManager {
 		}
 
 		this.adapters.set(conn.id, { sig, adapter, config: conn, lastLatencyMs: null })
+		this.notifySubscribers()
 		return adapter
 	}
 
@@ -372,8 +373,8 @@ export class ConnectionManager {
 			cached.adapter.close()
 			this.adapters.delete(id)
 		}
-		this.rwStates.delete(id)
-		if (had) this.notifySubscribers()
+		const hadRw = this.rwStates.delete(id)
+		if (had || hadRw) this.notifySubscribers()
 		return had
 	}
 

@@ -25,10 +25,13 @@ export function HomeView(props: {
 	onEditConnection: (conn: ConnectionConfig) => void
 	onDeleteConnection: (conn: ConnectionConfig) => void
 	onRestoreConnection: (conn: ConnectionWithStatus) => void
+	onDisconnectConnection: (conn: ConnectionWithStatus) => void
 	onOpenDiscover: () => void
 }) {
 	const [query, setQuery] = createSignal('')
 	const [scope, setScope] = createSignal<ScopeFilter>('all')
+
+	const activeConnections = createMemo(() => props.connections.filter((c) => c.connected))
 
 	const filteredConnections = createMemo(() => {
 		const q = query().trim().toLowerCase()
@@ -66,6 +69,54 @@ export function HomeView(props: {
 					</button>
 				</div>
 			</div>
+
+			<Show when={activeConnections().length > 0}>
+				<div class="active-section">
+					<div class="section-label active-section-label">
+						<span class="status-dot" />
+						<span>Active Connections ({activeConnections().length})</span>
+					</div>
+					<div class="recents-list active-list">
+						<For each={activeConnections()}>
+							{(conn) => (
+								<div class={['recent-row active-row', { 'is-orphan': conn.orphaned }]}>
+									<button type="button" class="recent-main active-main" onClick={() => props.onOpenConnection(conn.id)}>
+										<span class="status-dot" />
+										<span class="active-name">{conn.name}</span>
+										<span class="mono active-path">{conn.path}</span>
+										<Show when={conn.orphaned}>
+											<span class="tag orphan">ORPHANED</span>
+										</Show>
+										<Show when={conn.rwArmed}>
+											<span class="tag rw">RW</span>
+										</Show>
+										<Show when={conn.isProduction}>
+											<span class="tag prod">
+												<IconAlert />
+												PROD
+											</span>
+										</Show>
+										<span class={['tag', { ssh: conn.location === 'ssh' }]}>
+											{conn.location === 'ssh' ? <IconServer /> : <IconDisk />}
+											{conn.location === 'ssh' ? conn.sshHost : 'local'}
+										</span>
+									</button>
+									<div class="active-row-actions">
+										<Show when={conn.orphaned}>
+											<button type="button" class="btn sm primary" onClick={() => props.onRestoreConnection(conn)}>
+												Re-save
+											</button>
+										</Show>
+										<button type="button" class="btn sm" onClick={() => props.onDisconnectConnection(conn)}>
+											{conn.orphaned ? 'Close' : 'Disconnect'}
+										</button>
+									</div>
+								</div>
+							)}
+						</For>
+					</div>
+				</div>
+			</Show>
 
 			<Show
 				when={props.connections.length > 0}
@@ -130,7 +181,10 @@ export function HomeView(props: {
 						<For each={filteredConnections()}>
 							{(conn) => (
 								<div
-									class={['conn-card', { 'is-prod': conn.isProduction, 'is-orphan': conn.orphaned }]}
+									class={[
+										'conn-card',
+										{ 'is-prod': conn.isProduction, 'is-orphan': conn.orphaned, 'is-connected': conn.connected },
+									]}
 									role="button"
 									tabindex={0}
 									onClick={() => props.onOpenConnection(conn.id)}
@@ -142,10 +196,18 @@ export function HomeView(props: {
 									}}
 								>
 									<div class="conn-card-top">
-										<span class="conn-card-name">{conn.name}</span>
-										<div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+										<span class="conn-card-name">
+											<Show when={conn.connected}>
+												<span class="status-dot" title="Active connection" />
+											</Show>
+											<span class="conn-card-name-text">{conn.name}</span>
+										</span>
+										<div class="conn-card-tags">
 											<Show when={conn.orphaned}>
 												<span class="tag orphan">ORPHANED</span>
+											</Show>
+											<Show when={conn.rwArmed}>
+												<span class="tag rw">RW</span>
 											</Show>
 											<Show when={conn.isProduction}>
 												<span class="tag prod">
@@ -190,7 +252,7 @@ export function HomeView(props: {
 															class="btn sm"
 															onClick={(e) => {
 																e.stopPropagation()
-																props.onDeleteConnection(conn)
+																props.onDisconnectConnection(conn)
 															}}
 														>
 															Close
@@ -198,6 +260,18 @@ export function HomeView(props: {
 													</>
 												}
 											>
+												<Show when={conn.connected}>
+													<button
+														type="button"
+														class="btn sm ghost-btn"
+														onClick={(e) => {
+															e.stopPropagation()
+															props.onDisconnectConnection(conn)
+														}}
+													>
+														Disconnect
+													</button>
+												</Show>
 												<button
 													type="button"
 													class="btn sm ghost-btn"

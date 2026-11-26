@@ -97,6 +97,11 @@ obvious.
   queries/tabs keep working; the UI shows an orphaned banner with
   Re-save to config (`POST /api/connections/:id/restore`) and Close
   actions.
+- Active (open) connections are honest, visible state: opening or closing
+  an adapter pushes live updates over `/api/events`, Home displays a
+  compact Active Connections list (plus live green dots, `RW` badges,
+  and `Disconnect` via `POST /api/connections/:id/disconnect`), and the
+  top-bar switcher groups active connections first.
 - `Ctrl+R` opens the Recent Databases & Tables modal (WebStorm/IDEA
   style, distinct from `Cmd+R` page reload) with MRU switching and
   instant filtering.

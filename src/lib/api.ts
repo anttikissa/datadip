@@ -61,6 +61,8 @@ export const api = {
 	deleteConnection: (id: string) => request<{ ok: true }>('DELETE', `/api/connections/${encodeURIComponent(id)}`),
 	restoreConnection: (id: string) =>
 		request<{ connection: ConnectionConfig }>('POST', `/api/connections/${encodeURIComponent(id)}/restore`),
+	disconnectConnection: (id: string) =>
+		request<{ ok: true; disconnected: boolean }>('POST', `/api/connections/${encodeURIComponent(id)}/disconnect`),
 	testConnection: (draft: Omit<ConnectionConfig, 'id' | 'createdAt'>) =>
 		request<{ ok: true; latencyMs: number; version?: string; tableCount: number }>(
 			'POST',

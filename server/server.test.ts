@@ -281,6 +281,37 @@ describe('DataDip server API & safety boundaries', () => {
 		}
 	})
 
+	test('POST /api/connections/:id/disconnect closes active adapter & clears RW without deleting config', async () => {
+		const events: boolean[] = []
+		const unsub = manager.subscribe((payload) => {
+			const c = payload.connections.find((x) => x.id === connId)
+			if (c) events.push(c.connected)
+		})
+		try {
+			manager.dropConnection(connId)
+			events.length = 0
+
+			// Opening adapter marks connection active and notifies SSE subscribers
+			await manager.pingConnection(connId)
+			manager.setRwMode(connId, true)
+			expect(manager.listConnectionsWithStatus().find((c) => c.id === connId)?.connected).toBe(true)
+			expect(manager.listConnectionsWithStatus().find((c) => c.id === connId)?.rwArmed).toBe(true)
+			expect(events).toContain(true)
+
+			// Disconnecting drops adapter & RW lock while keeping saved connection
+			const req = new Request(`http://127.0.0.1:4747/api/connections/${connId}/disconnect`, { method: 'POST' })
+			const res = await handleApiRequest(req, manager)
+			expect(res.status).toBe(200)
+			const after = manager.listConnectionsWithStatus().find((c) => c.id === connId)
+			expect(after).toBeDefined()
+			expect(after?.connected).toBe(false)
+			expect(after?.rwArmed).toBe(false)
+			expect(events[events.length - 1]).toBe(false)
+		} finally {
+			unsub()
+		}
+	})
+
 	test('readServerInfo reads server.ason without opening state.db', () => {
 		const probeDir = mkdtempSync(join(tmpdir(), 'datadip-probe-'))
 		try {

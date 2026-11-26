@@ -171,6 +171,11 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ connection: restored })
 			}
 
+			if (rest === 'disconnect' && method === 'POST') {
+				const disconnected = manager.dropConnection(connId)
+				return asonResponse({ ok: true, disconnected })
+			}
+
 			if (rest === 'ping' && method === 'POST') {
 				const res = await manager.pingConnection(connId)
 				return asonResponse(res)
