@@ -145,6 +145,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
 	func applicationDidFinishLaunching(_ note: Notification) {
 		NSApp.mainMenu = buildMenu()
 		let config = WKWebViewConfiguration()
+		config.preferences.tabFocusesLinks = true
 		config.userContentController.add(ScriptBridge(self), name: "datadip")
 		web = makeWebView(config)
 		window = makeWindow(web)

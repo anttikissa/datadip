@@ -326,6 +326,27 @@ export function App() {
 		}
 		window.addEventListener('keydown', onKey, true)
 
+		const DIALOG_FOCUSABLE =
+			'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+		const onModalTab = (e: KeyboardEvent) => {
+			if (e.key !== 'Tab' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+			const dialogs = document.querySelectorAll<HTMLDialogElement>('dialog:modal')
+			const dlg = dialogs[dialogs.length - 1]
+			if (!dlg) return
+			const focusables = Array.from(dlg.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE)).filter(
+				(el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
+			)
+			e.preventDefault()
+			if (focusables.length === 0) return
+			const idx = focusables.indexOf(document.activeElement as HTMLElement)
+			const next =
+				idx === -1
+					? focusables[e.shiftKey ? focusables.length - 1 : 0]!
+					: focusables[(idx + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length]!
+			next.focus()
+		}
+		window.addEventListener('keydown', onModalTab)
+
 		// Live sync & server-liveness monitor via SSE /api/events (auto-reconnects & nudges DataDip.app to restart if stopped)
 		let initialEvent = true
 		let disposed = false
@@ -406,6 +427,7 @@ export function App() {
 			disposed = true
 			window.removeEventListener('popstate', onPop)
 			window.removeEventListener('keydown', onKey, true)
+			window.removeEventListener('keydown', onModalTab)
 			if (reconnectTimer) clearTimeout(reconnectTimer)
 			es?.close()
 			clearInterval(timer)

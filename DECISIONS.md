@@ -56,7 +56,13 @@ obvious.
 - CodeMirror 6 provides SQL editing with SQLite syntax highlighting,
   live schema autocomplete, custom SQLite linting, active-statement
   highlighting, and SQL formatting.
-- Dialogs use native `<dialog>` elements (never `alert`/`confirm`).
+- Dialogs use native `<dialog>` elements (never `alert`/`confirm`) and
+  trap/wrap `Tab` and `Shift-Tab` across visible focusable controls
+  inside the topmost open `dialog:modal`, preventing WebKit/Safari focus
+  escape to `document.body` or the `<dialog>` frame itself.
+- `DataDip.app` sets `WKPreferences.tabFocusesLinks = true` so `Tab`
+  navigates buttons, links, and form controls across the native app even
+  when macOS system Keyboard Navigation is off.
 - Focus uses `:focus-visible` with a single 2px ring across the app.
 - Auto-Discover follows directory symlinks safely (deduplicating via
   `realpathSync`) so symlinked storage volumes (e.g. `~/disk`) are found.

@@ -70,6 +70,14 @@ In `mac/DataDip.swift`, `WKWebView` error delegates
 HTML with the live URL (or reloading) cancels the prior provisional
 navigation and calling `showError` would abort the real page load.
 
+In `mac/DataDip.swift`, set `config.preferences.tabFocusesLinks = true`
+on `WKWebViewConfiguration`, because macOS WebKit omits `<button>`,
+`<a>`, `<select>`, and checkboxes from Tab navigation by default when
+macOS Keyboard Navigation is off. In the web client, trap and wrap
+`Tab` / `Shift-Tab` across visible focusable descendants of the topmost
+open `dialog:modal` so focus never escapes to `document.body` or lands
+on the `<dialog>` container itself in WebKit or Safari.
+
 The web client must track local server reachability via `/api/events`
 (SSE) and display a clear offline status banner that auto-reconnects;
 `DataDip.app` must auto-restart `datadip serve` when the server goes
