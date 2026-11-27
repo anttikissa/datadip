@@ -174,6 +174,10 @@ export function App() {
 			setTrail((prev) => [...prev.slice(-5), { label: options.trailLabel!, url }])
 		} else if (next.kind === 'home' || next.kind === 'connection' || next.kind === 'sql') {
 			setTrail([])
+		} else if (next.kind === 'analytics') {
+			setTrail([{ label: 'Analytics', url }])
+		} else if (next.kind === 'er') {
+			setTrail([{ label: 'ER Diagram', url }])
 		} else if (next.kind === 'table' && next.filters.length === 0) {
 			setTrail([{ label: next.table, url }])
 		}

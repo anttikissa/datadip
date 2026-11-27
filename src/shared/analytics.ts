@@ -23,6 +23,26 @@ export interface AnalyticsTopEvent {
 	sparkline?: number[]
 }
 
+export interface AnalyticsUserMeta {
+	id: string
+	label: string | null
+	isAdmin: boolean
+	isTest: boolean
+	looksLikeTest: boolean
+}
+
+export interface AnalyticsUserDirectory {
+	table: string
+	pkColumn: string
+	labelColumn: string | null
+	adminColumn: string | null
+	testColumn: string | null
+	totalUsers: number
+	adminCount: number
+	testCount: number
+	users: AnalyticsUserMeta[]
+}
+
 export interface AnalyticsDetection {
 	table: string
 	timeColumn: string | null
@@ -35,6 +55,7 @@ export interface AnalyticsDetection {
 	statusColumn: string | null
 	adminColumn: string | null
 	payloadColumn: string | null
+	userDirectory: AnalyticsUserDirectory | null
 	looksLikeHttpEvents: boolean
 	minTimeMs: number | null
 	maxTimeMs: number | null
@@ -57,6 +78,10 @@ export interface AnalyticsBaseConfig {
 	anchorEndMs?: number | null
 	filters?: AnalyticsFilter[]
 	normalizeUrls?: boolean
+	excludeAdmin?: boolean
+	excludeTestUsers?: boolean
+	signedInOnly?: boolean
+	excludedActors?: string[]
 }
 
 export interface TrendsRequest extends AnalyticsBaseConfig {
@@ -78,6 +103,8 @@ export interface TrendsSeries {
 export interface TrendsKpis {
 	totalEvents: number
 	uniqueActors: number
+	uniqueUsers?: number | null
+	uniqueAnonVisitors?: number | null
 	avgPerActor: number
 	errorCount: number | null
 	errorRatePct: number | null
@@ -342,7 +369,8 @@ export function detectTableColumns(table: TableSchema): StaticTableColumns {
 
 	const userIdColumn = actorColumns.find((c) => /^(user_id|userid|uid)$/i.test(c)) ?? null
 	const visitorIdColumn = actorColumns.find((c) => /^(visitor_id|visitorid|anon_id|anonymous_id)$/i.test(c)) ?? null
-	const defaultActorColumn = userIdColumn && visitorIdColumn ? STITCHED_ACTOR_SENTINEL : (actorColumns[0] ?? null)
+	// Prefer signed-in user_id by default so anonymous 1-hit bots/visitors aren't silently lumped into "Unique People".
+	const defaultActorColumn = userIdColumn ?? actorColumns[0] ?? null
 
 	return {
 		timeColumn: bestTime?.name ?? null,
@@ -354,6 +382,85 @@ export function detectTableColumns(table: TableSchema): StaticTableColumns {
 		statusColumn: bestStatus?.name ?? null,
 		adminColumn: bestAdmin?.name ?? null,
 		payloadColumn: bestPayload?.name ?? null,
+	}
+}
+
+export interface LinkedUserTableMeta {
+	table: string
+	pkColumn: string
+	labelColumn: string | null
+	adminColumn: string | null
+	testColumn: string | null
+}
+
+const USER_LABEL_PATTERNS: [RegExp, number][] = [
+	[/^(username|user_name|handle|login)$/i, 100],
+	[/^(display_name|full_name|name)$/i, 90],
+	[/^(email|email_address)$/i, 80],
+]
+
+const USER_ADMIN_PATTERNS: [RegExp, number][] = [[/^(admin|is_admin|is_superuser|is_staff|staff)$/i, 100]]
+
+const USER_TEST_PATTERNS: [RegExp, number][] = [
+	[/^(test|is_test|is_internal|is_bot|is_fake|is_demo|is_synthetic|bot|demo|fake)$/i, 100],
+]
+
+export function looksLikeTestLabel(label: string | null): boolean {
+	if (!label) return false
+	const s = label.trim()
+	if (!s) return false
+	return (
+		/(^|[._\-+\s])(test|testing|demo|qa|bot|fake|staging|dummy|sandbox|playwright|cypress|e2e|smoke)([0-9._\-+\s]|$)/i.test(
+			s,
+		) || /@(example\.com|test\.local|localhost)$/i.test(s)
+	)
+}
+
+export function detectUserTableMeta(
+	schema: DatabaseSchema,
+	ts: TableSchema,
+	userIdColumn: string | null | undefined,
+): LinkedUserTableMeta | null {
+	if (!userIdColumn) return null
+	let targetTable: TableSchema | null = null
+	let targetPk = 'id'
+
+	const fk = ts.foreignKeys.find((f) => f.fromColumn === userIdColumn)
+	if (fk && schema.schemas[fk.toTable]) {
+		targetTable = schema.schemas[fk.toTable]!
+		targetPk = fk.toColumn
+	} else {
+		for (const candidate of ['users', 'user', 'accounts', 'members', 'profiles']) {
+			const found = schema.schemas[candidate]
+			if (found && found.primaryKeyColumns.length === 1) {
+				targetTable = found
+				targetPk = found.primaryKeyColumns[0]!
+				break
+			}
+		}
+	}
+	if (!targetTable) return null
+	if (!targetTable.columns.some((c) => c.name === targetPk)) return null
+
+	let bestLabel: { name: string; score: number } | null = null
+	let bestAdmin: { name: string; score: number } | null = null
+	let bestTest: { name: string; score: number } | null = null
+
+	for (const col of targetTable.columns) {
+		const lScore = scorePatterns(col.name, USER_LABEL_PATTERNS)
+		if (lScore > 0 && (!bestLabel || lScore > bestLabel.score)) bestLabel = { name: col.name, score: lScore }
+		const aScore = scorePatterns(col.name, USER_ADMIN_PATTERNS)
+		if (aScore > 0 && (!bestAdmin || aScore > bestAdmin.score)) bestAdmin = { name: col.name, score: aScore }
+		const tScore = scorePatterns(col.name, USER_TEST_PATTERNS)
+		if (tScore > 0 && (!bestTest || tScore > bestTest.score)) bestTest = { name: col.name, score: tScore }
+	}
+
+	return {
+		table: targetTable.name,
+		pkColumn: targetPk,
+		labelColumn: bestLabel?.name ?? null,
+		adminColumn: bestAdmin?.name ?? null,
+		testColumn: bestTest?.name ?? null,
 	}
 }
 

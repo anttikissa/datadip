@@ -64,7 +64,7 @@ describe('analytics schema detection', () => {
 		expect(detected.eventColumn).toBe('event')
 		expect(detected.userIdColumn).toBe('user_id')
 		expect(detected.visitorIdColumn).toBe('visitor_id')
-		expect(detected.defaultActorColumn).toBe(STITCHED_ACTOR_SENTINEL)
+		expect(detected.defaultActorColumn).toBe('user_id')
 		expect(detected.statusColumn).toBe('status')
 		expect(detected.adminColumn).toBe('admin_id')
 		expect(detected.payloadColumn).toBe('data')

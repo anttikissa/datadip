@@ -23,7 +23,7 @@ beforeAll(() => {
 	const dbPath = join(dir, 'app.db')
 	const db = new Database(dbPath)
 	db.exec(`
-		CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, created_at INTEGER);
+		CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, admin INTEGER DEFAULT 0, test INTEGER DEFAULT 0, created_at INTEGER);
 		CREATE TABLE events (
 			id TEXT PRIMARY KEY,
 			visitor_id TEXT,
@@ -37,6 +37,15 @@ beforeAll(() => {
 	`)
 	const day = 86_400_000
 	const base = Date.UTC(2026, 10, 10, 12, 0, 0)
+	db.query('INSERT INTO users (id, name, admin, test, created_at) VALUES (?, ?, ?, ?, ?)').run('u1', 'ada', 0, 0, base)
+	db.query('INSERT INTO users (id, name, admin, test, created_at) VALUES (?, ?, ?, ?, ?)').run('u3', 'boss', 1, 0, base)
+	db.query('INSERT INTO users (id, name, admin, test, created_at) VALUES (?, ?, ?, ?, ?)').run(
+		'u4',
+		'qa_bot',
+		0,
+		1,
+		base,
+	)
 	const ins = db.query(
 		'INSERT INTO events (id, visitor_id, user_id, event, data, status, created_at, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
 	)
@@ -46,9 +55,10 @@ beforeAll(() => {
 	ins.run('e3', 'v1', 'u1', 'GET /api/chats/c1m6e6d9bv26', null, 200, base + 50_000, null)
 	ins.run('e4', 'v2', null, 'POST /api/view', "{ path: '/' }", 200, base + 60_000, null)
 	ins.run('e5', 'v2', null, 'POST /api/claim', null, 404, base + 90_000, null)
-	// Day 1: u1 returns and visits another chat ID; admin event excluded when filtered
+	// Day 1: u1 returns and visits another chat ID; admin event and test user event
 	ins.run('e6', 'v1', 'u1', 'GET /api/chats/c1m7hq49z70a', null, 200, base + day, null)
 	ins.run('e7', 'v3', 'u3', 'POST /api/admin/action', null, 200, base + day + 1000, 'adm1')
+	ins.run('e8', 'v4', 'u4', 'POST /api/view', null, 200, base + day + 2000, null)
 	db.close()
 
 	adapter = new LocalSqliteAdapter(dbPath)
@@ -67,14 +77,20 @@ describe('server analytics engine (SQLite)', () => {
 		expect(det.timeColumn).toBe('created_at')
 		expect(det.timeFormat).toBe('epoch_ms')
 		expect(det.eventColumn).toBe('event')
-		expect(det.defaultActorColumn).toBe(STITCHED_ACTOR_SENTINEL)
+		expect(det.defaultActorColumn).toBe('user_id')
 		expect(det.statusColumn).toBe('status')
 		expect(det.adminColumn).toBe('admin_id')
+		expect(det.userDirectory?.table).toBe('users')
+		expect(det.userDirectory?.labelColumn).toBe('name')
+		expect(det.userDirectory?.adminColumn).toBe('admin')
+		expect(det.userDirectory?.testColumn).toBe('test')
+		expect(det.userDirectory?.adminCount).toBe(1)
+		expect(det.userDirectory?.testCount).toBe(1)
 		expect(det.looksLikeHttpEvents).toBe(true)
-		expect(det.totalRows).toBe(7)
+		expect(det.totalRows).toBe(8)
 	})
 
-	test('runs Trends with URL normalization and admin filter', async () => {
+	test('runs Trends with URL normalization and admin/test/signed-in exclusions', async () => {
 		const schema = await adapter.getSchema()
 		const res = await runAnalyticsTrends(adapter, 'sqlite', schema, {
 			table: 'events',
@@ -90,13 +106,38 @@ describe('server analytics engine (SQLite)', () => {
 			metric: 'events',
 			breakdownColumn: 'event',
 			normalizeUrls: true,
-			filters: [{ column: 'admin_id', op: 'isnull', value: '' }],
+			excludeAdmin: true,
+			excludeTestUsers: true,
 		})
 		expect(res.kpis.totalEvents).toBe(6)
+		expect(res.kpis.uniqueUsers).toBe(1)
+		expect(res.kpis.uniqueAnonVisitors).toBe(2)
 		expect(res.kpis.errorCount).toBe(1)
 		// Dynamic chat IDs collapse into one route
 		const chatsSeries = res.series.find((s) => s.key === 'GET /api/chats/:id')
 		expect(chatsSeries?.total).toBe(2)
+
+		// Signed-in only + excludeAdmin + excludeTestUsers yields strictly the 1 real user (u1) with 3 events
+		const signedIn = await runAnalyticsTrends(adapter, 'sqlite', schema, {
+			table: 'events',
+			timeColumn: 'created_at',
+			timeFormat: 'epoch_ms',
+			eventColumn: 'event',
+			actorColumn: 'user_id',
+			userIdColumn: 'user_id',
+			visitorIdColumn: 'visitor_id',
+			statusColumn: 'status',
+			range: '7d',
+			interval: 'day',
+			metric: 'events',
+			breakdownColumn: 'event',
+			normalizeUrls: true,
+			excludeAdmin: true,
+			excludeTestUsers: true,
+			signedInOnly: true,
+		})
+		expect(signedIn.kpis.totalEvents).toBe(3)
+		expect(signedIn.kpis.uniqueActors).toBe(1)
 	})
 
 	test('runs Funnel with visitor -> user identity stitching', async () => {
@@ -112,6 +153,8 @@ describe('server analytics engine (SQLite)', () => {
 			range: 'all',
 			normalizeUrls: true,
 			stitchIdentity: true,
+			excludeAdmin: true,
+			excludeTestUsers: true,
 			windowSeconds: 3600,
 			steps: [
 				{ pattern: 'POST /api/view', match: 'exact' },
@@ -140,7 +183,8 @@ describe('server analytics engine (SQLite)', () => {
 			granularity: 'day',
 			periods: 7,
 			stitchIdentity: true,
-			filters: [{ column: 'admin_id', op: 'isnull', value: '' }],
+			excludeAdmin: true,
+			excludeTestUsers: true,
 		})
 		expect(ret.cohorts).toHaveLength(1)
 		expect(ret.cohorts[0]!.size).toBe(2)

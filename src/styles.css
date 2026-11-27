@@ -3005,6 +3005,39 @@ dialog.omnibar-dialog::backdrop {
 	box-shadow: var(--shadow-pop);
 	padding: 10px 12px;
 }
+.exclude-people-list {
+	max-height: 230px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.exclude-person-row {
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+	padding: 4px 6px;
+	border-radius: 4px;
+	font-size: 12px;
+	cursor: pointer;
+}
+.exclude-person-row:hover {
+	background: var(--bg-hover);
+}
+.exclude-person-row input[type='checkbox'] {
+	align-self: center;
+	margin: 0;
+}
+.exclude-person-row.muted {
+	opacity: 0.52;
+}
+.exclude-person-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 
 .analytics-body {
 	flex: 1;

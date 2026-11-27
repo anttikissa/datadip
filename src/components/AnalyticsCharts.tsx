@@ -31,10 +31,13 @@ export function seriesColor(idx: number, key?: string): string {
 
 function niceMax(maxVal: number): number {
 	if (maxVal <= 0) return 4
-	const mag = 10 ** Math.floor(Math.log10(maxVal))
-	const norm = maxVal / mag
-	const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
-	return Math.ceil(maxVal / (step * mag * 0.25)) * (step * mag * 0.25)
+	if (maxVal <= 4 && Number.isInteger(maxVal)) return 4
+	const rawStep = maxVal / 4
+	const mag = 10 ** Math.floor(Math.log10(rawStep))
+	const norm = rawStep / mag
+	const niceStep =
+		norm <= 1 ? 1 * mag : norm <= 2 ? 2 * mag : norm <= 2.5 && rawStep < 1 ? 2.5 * mag : norm <= 5 ? 5 * mag : 10 * mag
+	return niceStep * 4
 }
 
 function formatAxisNum(n: number): string {
@@ -508,8 +511,13 @@ export function Sparkline(props: { values: number[]; color?: string; width?: num
 	)
 }
 
-export function FunnelChart(props: { steps: FunnelStepResult[]; onInspectActor?: (actorId: string) => void }) {
+export function FunnelChart(props: {
+	steps: FunnelStepResult[]
+	onInspectActor?: (actorId: string) => void
+	formatActor?: (actorId: string) => string
+}) {
 	const maxCount = createMemo(() => Math.max(1, props.steps[0]?.count ?? 1))
+	const fmtActor = (id: string) => props.formatActor?.(id) ?? id
 
 	return (
 		<div class="funnel-viz">
@@ -542,9 +550,10 @@ export function FunnelChart(props: { steps: FunnelStepResult[]; onInspectActor?:
 													type="button"
 													class="btn sm ghost-btn"
 													style="height:20px;font-size:11px;padding:0 6px"
+													title={step.dropoffSampleActors[0]}
 													onClick={() => props.onInspectActor?.(step.dropoffSampleActors[0]!)}
 												>
-													Inspect drop-off ({step.dropoffSampleActors[0]})
+													Inspect drop-off ({fmtActor(step.dropoffSampleActors[0]!)})
 												</button>
 											</Show>
 										</div>
@@ -569,9 +578,10 @@ export function FunnelChart(props: { steps: FunnelStepResult[]; onInspectActor?:
 															type="button"
 															class="fk-link mono"
 															style="font-size:11px;padding:1px 6px"
+															title={aid}
 															onClick={() => props.onInspectActor?.(aid)}
 														>
-															{aid}
+															{fmtActor(aid)}
 														</button>
 													)}
 												</For>

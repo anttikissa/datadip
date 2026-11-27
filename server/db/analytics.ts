@@ -10,17 +10,21 @@ import {
 	type AnalyticsFilter,
 	type AnalyticsInterval,
 	type AnalyticsTopEvent,
+	type AnalyticsUserDirectory,
+	type AnalyticsUserMeta,
 	buildIdentityResolver,
 	computeFunnel,
 	computeRetention,
 	detectBestAnalyticsTable,
 	detectTableColumns,
+	detectUserTableMeta,
 	floorBucketMs,
 	type FunnelRequest,
 	type FunnelResponse,
 	generateBuckets,
 	inferTimeFormat,
 	looksLikeHttpEventList,
+	looksLikeTestLabel,
 	normalizeEventName,
 	parseTimestampToMs,
 	rangeToDurationMs,
@@ -175,6 +179,68 @@ function buildFilterWhere(ts: TableSchema, filters: AnalyticsFilter[] | undefine
 	return out
 }
 
+function isTruthyColExpr(col: string): string {
+	return `LOWER(COALESCE(CAST(${quoteIdent(col)} AS TEXT), '0')) IN ('1', 'true', 't')`
+}
+
+function buildActorExclusionWhere(
+	ts: TableSchema,
+	schema: DatabaseSchema,
+	cfg: AnalyticsBaseConfig,
+	driver: DriverKind,
+): string[] {
+	const clauses: string[] = []
+	const cols = detectTableColumns(ts)
+	const uCol = optionalColumn(ts, cfg.userIdColumn) ?? cols.userIdColumn
+	const vCol = optionalColumn(ts, cfg.visitorIdColumn) ?? cols.visitorIdColumn
+	const userMeta = detectUserTableMeta(schema, ts, uCol)
+
+	if (cfg.signedInOnly && uCol) {
+		clauses.push(`NULLIF(CAST(${quoteIdent(uCol)} AS TEXT), '') IS NOT NULL`)
+	}
+
+	if (cfg.excludeAdmin) {
+		if (cols.adminColumn) {
+			clauses.push(`${quoteIdent(cols.adminColumn)} IS NULL`)
+		}
+		if (uCol && userMeta?.adminColumn) {
+			const qUserTbl = quoteTable(userMeta.table, driver)
+			const qPk = quoteIdent(userMeta.pkColumn)
+			clauses.push(
+				`(${quoteIdent(uCol)} IS NULL OR CAST(${quoteIdent(uCol)} AS TEXT) NOT IN (SELECT CAST(${qPk} AS TEXT) FROM ${qUserTbl} WHERE ${isTruthyColExpr(userMeta.adminColumn)}))`,
+			)
+		}
+	}
+
+	if (cfg.excludeTestUsers && uCol && userMeta?.testColumn) {
+		const qUserTbl = quoteTable(userMeta.table, driver)
+		const qPk = quoteIdent(userMeta.pkColumn)
+		clauses.push(
+			`(${quoteIdent(uCol)} IS NULL OR CAST(${quoteIdent(uCol)} AS TEXT) NOT IN (SELECT CAST(${qPk} AS TEXT) FROM ${qUserTbl} WHERE ${isTruthyColExpr(userMeta.testColumn)}))`,
+		)
+	}
+
+	const excluded = (cfg.excludedActors ?? [])
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.slice(0, 200)
+	if (excluded.length > 0) {
+		const inList = excluded.map(sqlLiteral).join(', ')
+		if (uCol) {
+			clauses.push(`(${quoteIdent(uCol)} IS NULL OR CAST(${quoteIdent(uCol)} AS TEXT) NOT IN (${inList}))`)
+		}
+		if (vCol) {
+			clauses.push(`(${quoteIdent(vCol)} IS NULL OR CAST(${quoteIdent(vCol)} AS TEXT) NOT IN (${inList}))`)
+		}
+		const single = optionalColumn(ts, cfg.actorColumn)
+		if (single && single !== uCol && single !== vCol) {
+			clauses.push(`(${quoteIdent(single)} IS NULL OR CAST(${quoteIdent(single)} AS TEXT) NOT IN (${inList}))`)
+		}
+	}
+
+	return clauses
+}
+
 function buildActorExpr(
 	ts: TableSchema,
 	actorColumn: string | null | undefined,
@@ -296,6 +362,78 @@ export async function detectAnalyticsTable(
 		looksLikeHttpEvents = looksLikeHttpEventList(topEvents.map((e) => e.event))
 	}
 
+	// Resolve linked users table metadata (labels, admin flag, test flag) via declared/inferred/learned FK
+	let userDirectory: AnalyticsUserDirectory | null = null
+	const userMeta = detectUserTableMeta(schema, ts, cols.userIdColumn)
+	if (userMeta) {
+		try {
+			const qUserTbl = quoteTable(userMeta.table, driver)
+			const qPk = quoteIdent(userMeta.pkColumn)
+			const adminExpr = userMeta.adminColumn ? isTruthyColExpr(userMeta.adminColumn) : '0 = 1'
+			const testExpr = userMeta.testColumn ? isTruthyColExpr(userMeta.testColumn) : '0 = 1'
+			const countRows = await execReadOnly(
+				adapter,
+				`SELECT COUNT(*) AS total,
+	SUM(CASE WHEN ${adminExpr} THEN 1 ELSE 0 END) AS admins,
+	SUM(CASE WHEN ${testExpr} THEN 1 ELSE 0 END) AS tests
+FROM ${qUserTbl}`,
+				1,
+			)
+			const totalUsers = Number(countRows[0]?.total ?? 0)
+			const adminCount = Number(countRows[0]?.admins ?? 0)
+			const testCount = Number(countRows[0]?.tests ?? 0)
+
+			const labelSelect = userMeta.labelColumn
+				? `CAST(${quoteIdent(userMeta.labelColumn)} AS TEXT) AS label`
+				: 'NULL AS label'
+			const isAdminSelect = userMeta.adminColumn
+				? `CASE WHEN ${adminExpr} THEN 1 ELSE 0 END AS is_admin`
+				: '0 AS is_admin'
+			const isTestSelect = userMeta.testColumn ? `CASE WHEN ${testExpr} THEN 1 ELSE 0 END AS is_test` : '0 AS is_test'
+			const orderParts = [
+				userMeta.labelColumn
+					? `CASE WHEN ${quoteIdent(userMeta.labelColumn)} IS NOT NULL AND CAST(${quoteIdent(userMeta.labelColumn)} AS TEXT) <> '' THEN 0 ELSE 1 END`
+					: null,
+				userMeta.adminColumn ? 'is_admin DESC' : null,
+				userMeta.testColumn ? 'is_test ASC' : null,
+				`${qPk} ASC`,
+			].filter(Boolean)
+
+			const userRows = await execReadOnly(
+				adapter,
+				`SELECT CAST(${qPk} AS TEXT) AS id, ${labelSelect}, ${isAdminSelect}, ${isTestSelect}
+FROM ${qUserTbl}
+ORDER BY ${orderParts.join(', ')}
+LIMIT 250`,
+				250,
+			)
+			const users: AnalyticsUserMeta[] = userRows.map((r) => {
+				const label =
+					r.label !== null && r.label !== undefined && String(r.label).trim() !== '' ? String(r.label) : null
+				return {
+					id: String(r.id ?? ''),
+					label,
+					isAdmin: Number(r.is_admin ?? 0) === 1,
+					isTest: Number(r.is_test ?? 0) === 1,
+					looksLikeTest: looksLikeTestLabel(label),
+				}
+			})
+			userDirectory = {
+				table: userMeta.table,
+				pkColumn: userMeta.pkColumn,
+				labelColumn: userMeta.labelColumn,
+				adminColumn: userMeta.adminColumn,
+				testColumn: userMeta.testColumn,
+				totalUsers,
+				adminCount,
+				testCount,
+				users,
+			}
+		} catch {
+			userDirectory = null
+		}
+	}
+
 	return {
 		table: ts.name,
 		timeColumn: cols.timeColumn,
@@ -308,6 +446,7 @@ export async function detectAnalyticsTable(
 		statusColumn: cols.statusColumn,
 		adminColumn: cols.adminColumn,
 		payloadColumn: cols.payloadColumn,
+		userDirectory,
 		looksLikeHttpEvents,
 		minTimeMs,
 		maxTimeMs,
@@ -333,11 +472,16 @@ export async function runAnalyticsTrends(
 	const bucketIdx = new Map<number, number>()
 	for (let i = 0; i < buckets.length; i++) bucketIdx.set(buckets[i]!, i)
 
-	const baseFilters = buildFilterWhere(ts, req.filters, driver)
+	const baseFilters = [
+		...buildFilterWhere(ts, req.filters, driver),
+		...buildActorExclusionWhere(ts, schema, req, driver),
+	]
 	const rangeWhere = [...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs, endMs, driver), ...baseFilters]
 	const whereSql = rangeWhere.length > 0 ? `WHERE ${rangeWhere.join(' AND ')}` : ''
 
 	const actorExpr = buildActorExpr(ts, req.actorColumn, req.userIdColumn, req.visitorIdColumn)
+	const uCol = optionalColumn(ts, req.userIdColumn)
+	const vCol = optionalColumn(ts, req.visitorIdColumn)
 	const statusCol = optionalColumn(ts, req.statusColumn)
 	const eventCol = optionalColumn(ts, req.eventColumn)
 	const breakdownCol = optionalColumn(ts, req.breakdownColumn)
@@ -345,14 +489,29 @@ export async function runAnalyticsTrends(
 
 	const bExpr = bucketMsExpr(req.timeColumn, req.timeFormat, req.interval, driver)
 
-	// 1. KPIs + Previous-period comparison
+	// 1. KPIs + Previous-period comparison (always report distinct signed-in users vs anonymous visitors honestly)
 	const errorExpr = statusCol
 		? `SUM(CASE WHEN CAST(${quoteIdent(statusCol)} AS INTEGER) >= 400 THEN 1 ELSE 0 END) AS errors`
 		: 'NULL AS errors'
-	const kpiSql = `SELECT COUNT(*) AS total, ${actorExpr ? `COUNT(DISTINCT ${actorExpr})` : '0'} AS actors, ${errorExpr} FROM ${qTable} ${whereSql}`
+	const usersCountExpr = uCol ? `COUNT(DISTINCT NULLIF(CAST(${quoteIdent(uCol)} AS TEXT), ''))` : 'NULL'
+	const anonVisitorsCountExpr =
+		vCol && uCol
+			? `COUNT(DISTINCT CASE WHEN NULLIF(CAST(${quoteIdent(uCol)} AS TEXT), '') IS NULL THEN NULLIF(CAST(${quoteIdent(vCol)} AS TEXT), '') END)`
+			: vCol
+				? `COUNT(DISTINCT NULLIF(CAST(${quoteIdent(vCol)} AS TEXT), ''))`
+				: 'NULL'
+	const kpiSql = `SELECT COUNT(*) AS total, ${actorExpr ? `COUNT(DISTINCT ${actorExpr})` : '0'} AS actors, ${usersCountExpr} AS unique_users, ${anonVisitorsCountExpr} AS unique_anon_visitors, ${errorExpr} FROM ${qTable} ${whereSql}`
 	const kpiRows = await execReadOnly(adapter, kpiSql, 1, req.queryId)
 	const totalEvents = Number(kpiRows[0]?.total ?? 0)
 	const uniqueActors = Number(kpiRows[0]?.actors ?? 0)
+	const uniqueUsers =
+		uCol && kpiRows[0]?.unique_users !== null && kpiRows[0]?.unique_users !== undefined
+			? Number(kpiRows[0].unique_users)
+			: null
+	const uniqueAnonVisitors =
+		vCol && kpiRows[0]?.unique_anon_visitors !== null && kpiRows[0]?.unique_anon_visitors !== undefined
+			? Number(kpiRows[0].unique_anon_visitors)
+			: null
 	const errorCount = statusCol ? Number(kpiRows[0]?.errors ?? 0) : null
 
 	let prevPeriodEvents: number | null = null
@@ -574,6 +733,8 @@ LIMIT 200`
 		kpis: {
 			totalEvents,
 			uniqueActors,
+			uniqueUsers,
+			uniqueAnonVisitors,
 			avgPerActor: uniqueActors > 0 ? Number((totalEvents / uniqueActors).toFixed(1)) : 0,
 			errorCount,
 			errorRatePct:
@@ -611,6 +772,7 @@ export async function runAnalyticsFunnel(
 	const whereClauses = [
 		...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs, endMs, driver),
 		...buildFilterWhere(ts, req.filters, driver),
+		...buildActorExclusionWhere(ts, schema, req, driver),
 		`${qEv} IS NOT NULL`,
 	]
 
@@ -724,6 +886,7 @@ export async function runAnalyticsRetention(
 	const whereClauses = [
 		...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs, endMs, driver),
 		...buildFilterWhere(ts, req.filters, driver),
+		...buildActorExclusionWhere(ts, schema, req, driver),
 	]
 	const bExpr = bucketMsExpr(req.timeColumn, req.timeFormat, req.granularity, driver)
 	const stitch = Boolean(req.stitchIdentity && uCol && vCol)
@@ -803,13 +966,23 @@ export async function runAnalyticsActors(
 	const whereClauses = [
 		...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs, endMs, driver),
 		...buildFilterWhere(ts, req.filters, driver),
+		...buildActorExclusionWhere(ts, schema, req, driver),
 		`${actorExpr} IS NOT NULL`,
 	]
 	if (req.search?.trim()) {
 		const pat = `%${req.search.trim()}%`
-		whereClauses.push(
-			driver === 'postgres' ? `${actorExpr} ILIKE ${sqlLiteral(pat)}` : `${actorExpr} LIKE ${sqlLiteral(pat)}`,
-		)
+		const likeOp = driver === 'postgres' ? 'ILIKE' : 'LIKE'
+		const userMeta = detectUserTableMeta(schema, ts, uCol)
+		if (uCol && userMeta?.labelColumn) {
+			const qUserTbl = quoteTable(userMeta.table, driver)
+			const qPk = quoteIdent(userMeta.pkColumn)
+			const qLbl = quoteIdent(userMeta.labelColumn)
+			whereClauses.push(
+				`(${actorExpr} ${likeOp} ${sqlLiteral(pat)} OR CAST(${quoteIdent(uCol)} AS TEXT) IN (SELECT CAST(${qPk} AS TEXT) FROM ${qUserTbl} WHERE CAST(${qLbl} AS TEXT) ${likeOp} ${sqlLiteral(pat)}))`,
+			)
+		} else {
+			whereClauses.push(`${actorExpr} ${likeOp} ${sqlLiteral(pat)}`)
+		}
 	}
 
 	const msExpr = timeToMsExpr(req.timeColumn, req.timeFormat, driver)

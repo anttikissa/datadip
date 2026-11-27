@@ -22,6 +22,7 @@ import {
 	type AnalyticsMode,
 	type AnalyticsMetric,
 	type AnalyticsRange,
+	type AnalyticsUserMeta,
 	defaultIntervalForRange,
 	type FunnelResponse,
 	type FunnelStepSpec,
@@ -114,7 +115,12 @@ export function AnalyticsView(props: {
 	const [actorColumn, setActorColumn] = createSignal<string>('')
 	const [statusColumn, setStatusColumn] = createSignal<string>('')
 	const [normalizeUrls, setNormalizeUrls] = createSignal<boolean>(true)
-	const [excludeAdmin, setExcludeAdmin] = createSignal<boolean>(false)
+	const [excludeAdmin, setExcludeAdmin] = createSignal<boolean>(true)
+	const [excludeTestUsers, setExcludeTestUsers] = createSignal<boolean>(true)
+	const [signedInOnly, setSignedInOnly] = createSignal<boolean>(true)
+	const [excludedActors, setExcludedActors] = createSignal<string[]>([])
+	const [showExcludePopover, setShowExcludePopover] = createSignal(false)
+	const [excludeSearch, setExcludeSearch] = createSignal('')
 	const [errorsOnly, setErrorsOnly] = createSignal<boolean>(false)
 	const [customFilters, setCustomFilters] = createSignal<AnalyticsFilter[]>([])
 	const [showFilterAdder, setShowFilterAdder] = createSignal(false)
@@ -193,14 +199,62 @@ export function AnalyticsView(props: {
 	const actorOptions = createMemo(() => {
 		const det = detection()
 		const opts: { value: string; label: string }[] = []
+		if (det?.userIdColumn) {
+			opts.push({ value: det.userIdColumn, label: `Signed-in Users (${det.userIdColumn})` })
+		}
 		if (det?.userIdColumn && det?.visitorIdColumn) {
-			opts.push({ value: STITCHED_ACTOR_SENTINEL, label: `All People (${det.userIdColumn} / ${det.visitorIdColumn})` })
+			opts.push({ value: STITCHED_ACTOR_SENTINEL, label: `All (${det.userIdColumn} + ${det.visitorIdColumn})` })
 		}
 		for (const c of activeColumns()) {
+			if (c.name === det?.userIdColumn) continue
 			opts.push({ value: c.name, label: c.name })
 		}
 		return opts
 	})
+
+	const userMetaById = createMemo(() => {
+		const map = new Map<string, AnalyticsUserMeta>()
+		for (const u of detection()?.userDirectory?.users ?? []) {
+			map.set(u.id, u)
+		}
+		return map
+	})
+
+	function formatActorName(id: string): string {
+		const u = userMetaById().get(id)
+		return u?.label ? u.label : id
+	}
+
+	function loadSavedExcluded(connId: string): string[] {
+		try {
+			const raw = localStorage.getItem(`datadip:analytics:excluded:${connId}`)
+			if (!raw) return []
+			const arr = JSON.parse(raw)
+			return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
+		} catch {
+			return []
+		}
+	}
+
+	function updateExcludedActors(updater: (prev: string[]) => string[]) {
+		setExcludedActors((prev) => {
+			const next = [...new Set(updater(prev))]
+			try {
+				localStorage.setItem(`datadip:analytics:excluded:${props.connId}`, JSON.stringify(next))
+			} catch {}
+			return next
+		})
+	}
+
+	function toggleExcludedActor(id: string) {
+		updateExcludedActors((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+	}
+
+	const hasAdminDetection = createMemo(() =>
+		Boolean(detection()?.adminColumn || detection()?.userDirectory?.adminColumn),
+	)
+	const hasTestDetection = createMemo(() => Boolean(detection()?.userDirectory?.testColumn))
+	const hasDualActors = createMemo(() => Boolean(detection()?.userIdColumn && detection()?.visitorIdColumn))
 
 	const normalizedTopEventNames = createMemo(() => {
 		const det = detection()
@@ -220,10 +274,6 @@ export function AnalyticsView(props: {
 
 	const effectiveFilters = createMemo<AnalyticsFilter[]>(() => {
 		const list = [...customFilters()]
-		const det = detection()
-		if (excludeAdmin() && det?.adminColumn) {
-			list.push({ column: det.adminColumn, op: 'isnull', value: '' })
-		}
 		if (errorsOnly() && statusColumn()) {
 			list.push({ column: statusColumn(), op: 'gte', value: '400' })
 		}
@@ -310,7 +360,10 @@ export function AnalyticsView(props: {
 			setNormalizeUrls(det.looksLikeHttpEvents)
 			setBreakdownCol(det.eventColumn ?? '')
 			setSelectedEvents([])
-			setExcludeAdmin(false)
+			setExcludeAdmin(Boolean(det.adminColumn || det.userDirectory?.adminColumn))
+			setExcludeTestUsers(Boolean(det.userDirectory?.testColumn))
+			setSignedInOnly(Boolean(det.userIdColumn && det.visitorIdColumn))
+			setExcludedActors(loadSavedExcluded(connId))
 			setErrorsOnly(false)
 			setCustomFilters([])
 			setDraftFilterCol(det.eventColumn ?? det.statusColumn ?? det.timeColumn ?? '')
@@ -347,8 +400,9 @@ export function AnalyticsView(props: {
 		}
 	}
 
-	function baseConfig() {
+	function baseConfig(opts?: { allowAnonymous?: boolean }) {
 		const det = detection()
+		const wantSignedIn = !opts?.allowAnonymous && signedInOnly() && Boolean(det?.userIdColumn)
 		return {
 			table: selectedTable(),
 			timeColumn: timeColumn(),
@@ -363,8 +417,16 @@ export function AnalyticsView(props: {
 			anchorEndMs: det?.maxTimeMs ?? null,
 			filters: effectiveFilters(),
 			normalizeUrls: normalizeUrls(),
+			excludeAdmin: excludeAdmin(),
+			excludeTestUsers: excludeTestUsers(),
+			signedInOnly: wantSignedIn,
+			excludedActors: excludedActors(),
 		}
 	}
+
+	const exclusionKey = createMemo(() =>
+		[excludeAdmin(), excludeTestUsers(), signedInOnly(), excludedActors().join(',')].join('|'),
+	)
 
 	function cancelActiveQuery() {
 		if (activeQueryId) {
@@ -393,6 +455,7 @@ export function AnalyticsView(props: {
 				selectedEvents().join('|'),
 				normalizeUrls(),
 				JSON.stringify(effectiveFilters()),
+				exclusionKey(),
 				refreshTick(),
 			] as const,
 		([mode, connId, tbl, tCol]) => {
@@ -443,6 +506,7 @@ export function AnalyticsView(props: {
 				range(),
 				normalizeUrls(),
 				JSON.stringify(effectiveFilters()),
+				exclusionKey(),
 				JSON.stringify(funnelSteps()),
 				funnelWindowSec(),
 				stitchIdentity(),
@@ -459,7 +523,7 @@ export function AnalyticsView(props: {
 			setError(null)
 			api
 				.analyticsFunnel(connId, {
-					...baseConfig(),
+					...baseConfig({ allowAnonymous: stitchIdentity() }),
 					steps,
 					windowSeconds: funnelWindowSec(),
 					stitchIdentity: stitchIdentity(),
@@ -495,6 +559,7 @@ export function AnalyticsView(props: {
 				range(),
 				normalizeUrls(),
 				JSON.stringify(effectiveFilters()),
+				exclusionKey(),
 				retGranularity(),
 				retPeriods(),
 				retCohortEvent(),
@@ -550,6 +615,7 @@ export function AnalyticsView(props: {
 				range(),
 				normalizeUrls(),
 				JSON.stringify(effectiveFilters()),
+				exclusionKey(),
 				actorsSort(),
 				actorsSearch(),
 				refreshTick(),
@@ -1004,7 +1070,15 @@ export function AnalyticsView(props: {
 							ref={(el) => (actorSelectEl = el)}
 							class="select sm mono"
 							value={actorColumn()}
-							onChange={(e) => setActorColumn(e.currentTarget.value)}
+							onChange={(e) => {
+								const next = e.currentTarget.value
+								setActorColumn(next)
+								if (next === STITCHED_ACTOR_SENTINEL || next === detection()?.visitorIdColumn) {
+									setSignedInOnly(false)
+								} else if (next === detection()?.userIdColumn && detection()?.visitorIdColumn) {
+									setSignedInOnly(true)
+								}
+							}}
 						>
 							<option value="">(none)</option>
 							<For each={actorOptions()}>
@@ -1017,6 +1091,176 @@ export function AnalyticsView(props: {
 						</select>
 					</label>
 
+					<Show when={hasDualActors()}>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': signedInOnly() }]}
+							title={`Exclude anonymous rows where ${detection()!.userIdColumn} IS NULL (hides anonymous visitors and bot scanners)`}
+							onClick={() => {
+								const next = !signedInOnly()
+								setSignedInOnly(next)
+								if (next && detection()?.userIdColumn) {
+									setActorColumn(detection()!.userIdColumn!)
+								} else if (!next && detection()?.userIdColumn && detection()?.visitorIdColumn) {
+									setActorColumn(STITCHED_ACTOR_SENTINEL)
+								}
+							}}
+						>
+							Signed-in only
+						</button>
+					</Show>
+
+					<Show when={hasAdminDetection()}>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': excludeAdmin() }]}
+							title={
+								detection()?.userDirectory?.adminColumn
+									? `Exclude admin users (${detection()!.userDirectory!.table}.${detection()!.userDirectory!.adminColumn} = 1)${detection()?.adminColumn ? ` and ${detection()!.adminColumn} IS NOT NULL` : ''}`
+									: `Exclude rows where ${detection()!.adminColumn} IS NOT NULL`
+							}
+							onClick={() => setExcludeAdmin((v) => !v)}
+						>
+							Exclude admins
+							<Show when={(detection()?.userDirectory?.adminCount ?? 0) > 0}>
+								<span class="mono" style="opacity:0.75">
+									({detection()!.userDirectory!.adminCount})
+								</span>
+							</Show>
+						</button>
+					</Show>
+
+					<Show when={hasTestDetection()}>
+						<button
+							type="button"
+							class={['btn sm', { 'active-toggle': excludeTestUsers() }]}
+							title={`Exclude test users where ${detection()!.userDirectory!.table}.${detection()!.userDirectory!.testColumn} = 1`}
+							onClick={() => setExcludeTestUsers((v) => !v)}
+						>
+							Exclude test
+							<Show when={(detection()?.userDirectory?.testCount ?? 0) > 0}>
+								<span class="mono" style="opacity:0.75">
+									({detection()!.userDirectory!.testCount})
+								</span>
+							</Show>
+						</button>
+					</Show>
+
+					{/* Exclude specific users / test accounts popover (persisted per connection) */}
+					<Show when={(detection()?.userDirectory?.users.length ?? 0) > 0 || excludedActors().length > 0}>
+						<div style="position:relative">
+							<button
+								type="button"
+								class={['btn sm', { 'active-toggle': excludedActors().length > 0 }]}
+								title="Exclude specific test, internal, or noisy users across all analytics views (saved per connection)"
+								onClick={() => setShowExcludePopover((v) => !v)}
+							>
+								Exclude people
+								<Show when={excludedActors().length > 0}>
+									<span class="mono">({excludedActors().length})</span>
+								</Show>
+							</button>
+							<Show when={showExcludePopover()}>
+								<div class="analytics-popover" style="left:0;top:30px;width:310px">
+									<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:6px">
+										<strong style="font-size:12px">Exclude people</strong>
+										<div style="display:flex;gap:4px">
+											<Show when={(detection()?.userDirectory?.users ?? []).some((u) => u.looksLikeTest)}>
+												<button
+													type="button"
+													class="btn sm"
+													style="height:22px;font-size:11px;padding:0 6px"
+													onClick={() => {
+														const ids = (detection()?.userDirectory?.users ?? [])
+															.filter((u) => u.looksLikeTest)
+															.map((u) => u.id)
+														updateExcludedActors((prev) => [...prev, ...ids])
+													}}
+												>
+													+ Test-named
+												</button>
+											</Show>
+											<Show when={excludedActors().length > 0}>
+												<button
+													type="button"
+													class="btn sm"
+													style="height:22px;font-size:11px;padding:0 6px"
+													onClick={() => updateExcludedActors(() => [])}
+												>
+													Clear
+												</button>
+											</Show>
+										</div>
+									</div>
+									<input
+										class="input mono"
+										style="width:100%;height:26px;font-size:11.5px;margin-bottom:6px"
+										placeholder="Search username or ID…"
+										value={excludeSearch()}
+										onInput={(e) => setExcludeSearch(e.currentTarget.value)}
+									/>
+									<div class="exclude-people-list">
+										<For
+											each={(() => {
+												const q = excludeSearch().trim().toLowerCase()
+												const dirUsers = detection()?.userDirectory?.users ?? []
+												const knownIds = new Set(dirUsers.map((u) => u.id))
+												const extra: AnalyticsUserMeta[] = excludedActors()
+													.filter((id) => !knownIds.has(id))
+													.map((id) => ({ id, label: null, isAdmin: false, isTest: false, looksLikeTest: false }))
+												const all = [...extra, ...dirUsers]
+												if (!q) return all.slice(0, 60)
+												return all
+													.filter(
+														(u) => u.id.toLowerCase().includes(q) || (u.label && u.label.toLowerCase().includes(q)),
+													)
+													.slice(0, 60)
+											})()}
+										>
+											{(u) => {
+												const checked = () => excludedActors().includes(u.id)
+												const hiddenByFlag = () => (u.isAdmin && excludeAdmin()) || (u.isTest && excludeTestUsers())
+												return (
+													<label class={['exclude-person-row', { muted: hiddenByFlag() }]}>
+														<input type="checkbox" checked={checked()} onChange={() => toggleExcludedActor(u.id)} />
+														<span class="exclude-person-name">
+															<strong>{u.label ?? u.id}</strong>
+															<Show when={u.label}>
+																<span class="mono" style="color:var(--ink-muted);font-size:10.5px;margin-left:5px">
+																	{u.id}
+																</span>
+															</Show>
+														</span>
+														<Show when={u.isAdmin}>
+															<span class="tag mono" style="font-size:9.5px">
+																admin
+															</span>
+														</Show>
+														<Show when={u.isTest}>
+															<span class="tag mono" style="font-size:9.5px">
+																test
+															</span>
+														</Show>
+														<Show when={!u.isTest && u.looksLikeTest}>
+															<span class="tag mono" style="font-size:9.5px;color:var(--warn)">
+																test?
+															</span>
+														</Show>
+													</label>
+												)
+											}}
+										</For>
+									</div>
+									<div style="display:flex;justify-content:flex-end;margin-top:6px">
+										<button type="button" class="btn sm" onClick={() => setShowExcludePopover(false)}>
+											Done
+										</button>
+									</div>
+								</div>
+							</Show>
+						</div>
+					</Show>
+
 					<Show when={eventColumn()}>
 						<button
 							type="button"
@@ -1025,17 +1269,6 @@ export function AnalyticsView(props: {
 							onClick={() => setNormalizeUrls((v) => !v)}
 						>
 							Normalize URLs
-						</button>
-					</Show>
-
-					<Show when={detection()?.adminColumn}>
-						<button
-							type="button"
-							class={['btn sm', { 'active-toggle': excludeAdmin() }]}
-							title={`Exclude rows where ${detection()!.adminColumn} IS NOT NULL`}
-							onClick={() => setExcludeAdmin((v) => !v)}
-						>
-							Exclude admin
 						</button>
 					</Show>
 
@@ -1202,13 +1435,27 @@ export function AnalyticsView(props: {
 						</div>
 
 						<div class="analytics-kpi-card">
-							<div class="analytics-kpi-label">Unique People</div>
+							<div class="analytics-kpi-label">
+								{signedInOnly() || actorColumn() === detection()?.userIdColumn ? 'Unique Users' : 'Unique People'}
+							</div>
 							<div class="analytics-kpi-row">
 								<span class="analytics-kpi-val mono">
 									{trendsData() ? trendsData()!.kpis.uniqueActors.toLocaleString() : '—'}
 								</span>
 								<span class="analytics-kpi-sub mono">
-									{actorColumn() === STITCHED_ACTOR_SENTINEL ? 'users + visitors' : actorColumn() || 'no actor'}
+									{(() => {
+										const k = trendsData()?.kpis
+										if (!k) return actorColumn() || 'no actor'
+										if (
+											!signedInOnly() &&
+											typeof k.uniqueUsers === 'number' &&
+											typeof k.uniqueAnonVisitors === 'number'
+										) {
+											return `${k.uniqueUsers.toLocaleString()} users · ${k.uniqueAnonVisitors.toLocaleString()} anon`
+										}
+										if (signedInOnly()) return 'signed-in users'
+										return actorColumn() || 'no actor'
+									})()}
 								</span>
 							</div>
 						</div>
@@ -1624,7 +1871,9 @@ export function AnalyticsView(props: {
 									</div>
 								}
 							>
-								{(fd) => <FunnelChart steps={fd().steps} onInspectActor={inspectActorInPeople} />}
+								{(fd) => (
+									<FunnelChart steps={fd().steps} onInspectActor={inspectActorInPeople} formatActor={formatActorName} />
+								)}
 							</Show>
 						</div>
 					</div>
@@ -1760,6 +2009,7 @@ export function AnalyticsView(props: {
 									{(actor) => {
 										const isSelected = () => selectedActorId() === actor.actorId
 										const decodedId = () => autoDecodeSingleValue(actor.actorId, 'user_id')
+										const meta = () => userMetaById().get(actor.userId ?? actor.actorId)
 										return (
 											<button
 												type="button"
@@ -1767,7 +2017,24 @@ export function AnalyticsView(props: {
 												onClick={() => setSelectedActorId(actor.actorId)}
 											>
 												<div class="actor-row-top">
-													<span class="actor-id mono">{actor.actorId}</span>
+													<span class="actor-id">
+														<Show when={meta()?.label} fallback={<span class="mono">{actor.actorId}</span>}>
+															<strong>{meta()!.label}</strong>{' '}
+															<span class="mono" style="color:var(--ink-muted);font-size:11px">
+																{actor.actorId}
+															</span>
+														</Show>
+														<Show when={meta()?.isAdmin}>
+															<span class="tag mono" style="margin-left:5px;font-size:9.5px">
+																admin
+															</span>
+														</Show>
+														<Show when={meta()?.isTest || meta()?.looksLikeTest}>
+															<span class="tag mono" style="margin-left:5px;font-size:9.5px">
+																{meta()?.isTest ? 'test' : 'test?'}
+															</span>
+														</Show>
+													</span>
 													<span class="actor-count mono">{actor.eventCount.toLocaleString()}</span>
 												</div>
 												<div class="actor-row-meta mono">
@@ -1792,7 +2059,13 @@ export function AnalyticsView(props: {
 							<div class="analytics-card-head">
 								<div style="display:flex;align-items:baseline;gap:8px;min-width:0">
 									<strong class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-										{selectedActorId() ?? 'Select a person'}
+										{selectedActorId()
+											? (() => {
+													const id = selectedActorId()!
+													const lbl = userMetaById().get(id)?.label
+													return lbl ? `${lbl} (${id})` : id
+												})()
+											: 'Select a person'}
 									</strong>
 									<Show when={selectedActorId() ? autoDecodeSingleValue(selectedActorId(), 'user_id') : null}>
 										{(d) => (
@@ -1803,6 +2076,23 @@ export function AnalyticsView(props: {
 									</Show>
 								</div>
 								<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+									<Show when={selectedActorId()}>
+										<button
+											type="button"
+											class="btn sm"
+											title="Exclude this person from Trends, Funnels, Retention, and People (saved for this connection)"
+											onClick={() => {
+												const id = selectedActorId()
+												if (!id) return
+												toggleExcludedActor(id)
+												setSelectedActorId(null)
+												setJourneyData(null)
+												props.onNotify(`Excluded ${formatActorName(id)} from analytics`, 'info')
+											}}
+										>
+											Exclude
+										</button>
+									</Show>
 									<Show when={userFkTarget() && selectedActorId()}>
 										<button
 											type="button"
