@@ -135,6 +135,7 @@ describe('server analytics engine (SQLite)', () => {
 			excludeAdmin: true,
 			excludeTestUsers: true,
 			signedInOnly: true,
+			queryId: 'q_trends_batch',
 		})
 		expect(signedIn.kpis.totalEvents).toBe(3)
 		expect(signedIn.kpis.uniqueActors).toBe(1)
@@ -243,6 +244,7 @@ describe('server analytics engine (SQLite)', () => {
 			excludeAdmin: true,
 			excludeTestUsers: true,
 			signedInOnly: true,
+			queryId: 'q_trends_batch',
 		})
 		// Only 1 real signed-in user (u1) exists: no series or Other bucket may ever report > 1 unique person
 		expect(res.kpis.uniqueActors).toBe(1)
@@ -268,6 +270,7 @@ describe('server analytics engine (SQLite)', () => {
 			excludeAdmin: true,
 			excludeTestUsers: true,
 			signedInOnly: true,
+			queryId: 'q_trends_batch',
 		})
 		const u1 = actors.actors.find((a) => a.actorId === 'u1')
 		expect(u1?.topEvent).toBe('GET /api/chats/:id')
@@ -311,6 +314,47 @@ describe('server analytics engine (SQLite)', () => {
 			expect(tr.kpis.errorCount).toBe(0)
 		} finally {
 			payAdapter.close()
+			rmSync(subDir, { recursive: true, force: true })
+		}
+	})
+
+	test('detects and charts Apple CoreData Cocoa epoch (cocoa_s) tables accurately', async () => {
+		const subDir = mkdtempSync(join(tmpdir(), 'datadip-analytics-coredata-'))
+		const subPath = join(subDir, 'coredata.sqlite')
+		const db = new Database(subPath)
+		const cocoaOffset = 978_307_200
+		const t1 = Date.UTC(2026, 10, 20, 10, 0, 0) / 1000 - cocoaOffset
+		const t2 = Date.UTC(2026, 10, 21, 14, 30, 0) / 1000 - cocoaOffset
+		db.exec(`
+			CREATE TABLE ZNOTE (
+				Z_PK INTEGER PRIMARY KEY,
+				ZCREATIONDATE TIMESTAMP NOT NULL,
+				ZKIND TEXT
+			);
+		`)
+		db.query('INSERT INTO ZNOTE VALUES (?, ?, ?)').run(1, t1 + 0.125, 'note')
+		db.query('INSERT INTO ZNOTE VALUES (?, ?, ?)').run(2, t2 + 0.75, 'note')
+		db.close()
+		const cdAdapter = new LocalSqliteAdapter(subPath)
+		try {
+			const cdSchema = await cdAdapter.getSchema()
+			const det = await detectAnalyticsTable(cdAdapter, 'sqlite', cdSchema, 'ZNOTE')
+			expect(det.timeColumn).toBe('ZCREATIONDATE')
+			expect(det.timeFormat).toBe('cocoa_s')
+			expect(new Date(det.minTimeMs!).getUTCFullYear()).toBe(2026)
+			const tr = await runAnalyticsTrends(cdAdapter, 'sqlite', cdSchema, {
+				table: 'ZNOTE',
+				timeColumn: 'ZCREATIONDATE',
+				timeFormat: 'cocoa_s',
+				range: '7d',
+				anchorEndMs: det.maxTimeMs,
+				interval: 'day',
+				metric: 'events',
+			})
+			expect(tr.kpis.totalEvents).toBe(2)
+			expect(tr.series[0]!.total).toBe(2)
+		} finally {
+			cdAdapter.close()
 			rmSync(subDir, { recursive: true, force: true })
 		}
 	})

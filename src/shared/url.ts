@@ -33,6 +33,12 @@ export type AppRoute =
 			connId: string
 			table: string | null
 			mode: 'trends' | 'funnel' | 'retention' | 'actors' | 'dashboard'
+			range?: '24h' | '7d' | '14d' | '30d' | '90d' | 'all' | null
+			interval?: 'hour' | 'day' | 'week' | 'month' | null
+			metric?: 'events' | 'unique_actors' | 'events_per_actor' | 'cumulative' | null
+			breakdown?: string | null
+			chart?: 'area' | 'line' | 'stacked_bar' | 'bar' | null
+			actor?: string | null
 	  }
 
 const VALID_OPS = new Set<FilterOp>(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'isnull', 'notnull'])
@@ -141,11 +147,48 @@ export function parseRoute(pathname: string, search: string): AppRoute {
 			modeRaw === 'funnel' || modeRaw === 'retention' || modeRaw === 'actors' || modeRaw === 'dashboard'
 				? modeRaw
 				: 'trends'
+		const rangeRaw = params.get('range')
+		const range =
+			rangeRaw === '24h' ||
+			rangeRaw === '7d' ||
+			rangeRaw === '14d' ||
+			rangeRaw === '30d' ||
+			rangeRaw === '90d' ||
+			rangeRaw === 'all'
+				? rangeRaw
+				: undefined
+		const intervalRaw = params.get('interval')
+		const interval =
+			intervalRaw === 'hour' || intervalRaw === 'day' || intervalRaw === 'week' || intervalRaw === 'month'
+				? intervalRaw
+				: undefined
+		const metricRaw = params.get('metric')
+		const metric =
+			metricRaw === 'events' ||
+			metricRaw === 'unique_actors' ||
+			metricRaw === 'events_per_actor' ||
+			metricRaw === 'cumulative'
+				? metricRaw
+				: undefined
+		const chartRaw = params.get('chart')
+		const chart =
+			chartRaw === 'area' || chartRaw === 'line' || chartRaw === 'stacked_bar' || chartRaw === 'bar'
+				? chartRaw
+				: undefined
+		const breakdownRaw = params.get('breakdown')
+		const breakdown = breakdownRaw !== null ? (breakdownRaw === '__none__' ? '' : breakdownRaw) : undefined
+		const actor = params.get('actor') || undefined
 		return {
 			kind: 'analytics',
 			connId,
 			table,
 			mode,
+			...(range !== undefined ? { range } : {}),
+			...(interval !== undefined ? { interval } : {}),
+			...(metric !== undefined ? { metric } : {}),
+			...(breakdown !== undefined ? { breakdown } : {}),
+			...(chart !== undefined ? { chart } : {}),
+			...(actor !== undefined ? { actor } : {}),
 		}
 	}
 
@@ -161,6 +204,14 @@ export function formatRoute(route: AppRoute): string {
 		const params = new URLSearchParams()
 		if (route.table) params.set('table', route.table)
 		if (route.mode && route.mode !== 'trends') params.set('mode', route.mode)
+		if (route.range) params.set('range', route.range)
+		if (route.interval) params.set('interval', route.interval)
+		if (route.metric && route.metric !== 'events') params.set('metric', route.metric)
+		if (route.breakdown !== undefined && route.breakdown !== null) {
+			params.set('breakdown', route.breakdown === '' ? '__none__' : route.breakdown)
+		}
+		if (route.chart && route.chart !== 'area') params.set('chart', route.chart)
+		if (route.actor) params.set('actor', route.actor)
 		const qs = params.toString()
 		return qs ? `${base}?${qs}` : base
 	}

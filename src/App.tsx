@@ -1767,13 +1767,28 @@ export function App() {
 							schema={schema()}
 							initialTable={r().table}
 							mode={r().mode}
-							onChangeRoute={(patch) =>
-								navigate({
-									kind: 'analytics',
-									connId: r().connId,
-									table: patch.table !== undefined ? patch.table : r().table,
-									mode: patch.mode ?? r().mode,
-								})
+							initialRange={r().range ?? null}
+							initialInterval={r().interval ?? null}
+							initialMetric={r().metric ?? null}
+							initialBreakdown={r().breakdown !== undefined ? r().breakdown : null}
+							initialChartType={r().chart ?? null}
+							initialActorId={r().actor ?? null}
+							onChangeRoute={(patch, replace) =>
+								navigate(
+									{
+										kind: 'analytics',
+										connId: r().connId,
+										table: patch.table !== undefined ? patch.table : r().table,
+										mode: patch.mode ?? r().mode,
+										range: patch.range !== undefined ? patch.range : r().range,
+										interval: patch.interval !== undefined ? patch.interval : r().interval,
+										metric: patch.metric !== undefined ? patch.metric : r().metric,
+										breakdown: patch.breakdown !== undefined ? patch.breakdown : r().breakdown,
+										chart: patch.chart !== undefined ? patch.chart : r().chart,
+										actor: patch.actor !== undefined ? patch.actor : r().actor,
+									},
+									{ replace },
+								)
 							}
 							onOpenTable={(table, filters) =>
 								navigate({

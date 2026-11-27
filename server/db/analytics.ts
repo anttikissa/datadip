@@ -81,13 +81,23 @@ function optionalColumn(ts: TableSchema, col: string | null | undefined): string
 	return ts.columns.some((c) => c.name === col) ? col : null
 }
 
+const COCOA_EPOCH_OFFSET_SEC = 978_307_200
+
 function timeToMsExpr(timeCol: string, format: TimeColumnFormat, driver: DriverKind): string {
 	const q = quoteIdent(timeCol)
+	const intType = driver === 'postgres' ? 'BIGINT' : 'INTEGER'
 	if (format === 'epoch_ms') {
-		return `CAST(${q} AS ${driver === 'postgres' ? 'BIGINT' : 'INTEGER'})`
+		return `CAST(${q} AS ${intType})`
+	}
+	if (format === 'epoch_us') {
+		return `(CAST(${q} AS ${intType}) / 1000)`
 	}
 	if (format === 'epoch_s') {
-		return `(CAST(${q} AS ${driver === 'postgres' ? 'BIGINT' : 'INTEGER'}) * 1000)`
+		return `(CAST(${q} AS ${intType}) * 1000)`
+	}
+	if (format === 'cocoa_s') {
+		const numType = driver === 'postgres' ? 'DOUBLE PRECISION' : 'REAL'
+		return `CAST((CAST(${q} AS ${numType}) + ${COCOA_EPOCH_OFFSET_SEC}) * 1000 AS ${intType})`
 	}
 	if (driver === 'postgres') {
 		return `CAST(EXTRACT(EPOCH FROM ${q}::timestamptz) * 1000 AS BIGINT)`
@@ -122,13 +132,17 @@ function buildTimeRangeWhere(
 	const clauses: string[] = [`${q} IS NOT NULL`]
 	if (startMs !== null) {
 		if (format === 'epoch_ms') clauses.push(`${q} >= ${Math.floor(startMs)}`)
+		else if (format === 'epoch_us') clauses.push(`${q} >= ${Math.floor(startMs) * 1000}`)
 		else if (format === 'epoch_s') clauses.push(`${q} >= ${Math.floor(startMs / 1000)}`)
+		else if (format === 'cocoa_s') clauses.push(`${q} >= ${(startMs / 1000 - COCOA_EPOCH_OFFSET_SEC).toFixed(3)}`)
 		else if (driver === 'postgres') clauses.push(`${q} >= ${sqlLiteral(new Date(startMs).toISOString())}::timestamptz`)
 		else clauses.push(`${q} >= ${sqlLiteral(new Date(startMs).toISOString().slice(0, 19).replace('T', ' '))}`)
 	}
 	if (endMs !== null) {
 		if (format === 'epoch_ms') clauses.push(`${q} <= ${Math.ceil(endMs)}`)
+		else if (format === 'epoch_us') clauses.push(`${q} <= ${Math.ceil(endMs) * 1000 + 999}`)
 		else if (format === 'epoch_s') clauses.push(`${q} <= ${Math.ceil(endMs / 1000)}`)
+		else if (format === 'cocoa_s') clauses.push(`${q} <= ${((endMs + 1) / 1000 - COCOA_EPOCH_OFFSET_SEC).toFixed(3)}`)
 		else if (driver === 'postgres') {
 			// Postgres timestamptz has microsecond precision while JS Date ms truncates sub-ms digits;
 			// using `< (endMs + 1ms)` ensures rows within the final millisecond are never dropped.
@@ -289,6 +303,21 @@ async function execReadOnly(
 	return first.rows
 }
 
+// Batch multiple read-only statements into one adapter call (1 SSH/worker round-trip, 1 cancellable queryId).
+async function execReadOnlyBatch(
+	adapter: DbAdapter,
+	sqls: string[],
+	maxRows: number,
+	queryId?: string,
+): Promise<Record<string, unknown>[][]> {
+	if (sqls.length === 0) return []
+	const results = await adapter.executeStatements(sqls, { writable: false, maxRows, queryId })
+	return results.map((r) => {
+		if (r.error) throw new Error(r.error)
+		return r.rows
+	})
+}
+
 async function resolveTimeWindow(
 	adapter: DbAdapter,
 	driver: DriverKind,
@@ -353,12 +382,14 @@ export async function detectAnalyticsTable(
 		const rows = await execReadOnly(adapter, minMaxSql, 1, queryId)
 		const r = rows[0]
 		if (r) {
-			timeFormat = inferTimeFormat(r.mx ?? r.mn, colMeta?.type ?? '')
+			timeFormat = inferTimeFormat(r.mx ?? r.mn, colMeta?.type ?? '', cols.timeColumn)
 			minTimeMs = parseTimestampToMs(r.mn, timeFormat)
 			maxTimeMs = parseTimestampToMs(r.mx, timeFormat)
 			if (r.n !== undefined && r.n !== null) totalRows = Number(r.n) || totalRows
 		}
 	}
+
+	const userMeta = detectUserTableMeta(schema, ts, cols.userIdColumn)
 
 	let topEvents: AnalyticsTopEvent[] = []
 	let looksLikeHttpEvents = false
@@ -367,6 +398,13 @@ export async function detectAnalyticsTable(
 		const actorExpr = buildActorExpr(ts, cols.defaultActorColumn, cols.userIdColumn, cols.visitorIdColumn)
 		const evFilters = [`${qEv} IS NOT NULL`]
 		if (cols.adminColumn) evFilters.push(`${quoteIdent(cols.adminColumn)} IS NULL`)
+		if (!isLargeTable && cols.userIdColumn && userMeta?.adminColumn) {
+			const qUserTbl = quoteTable(userMeta.table, driver)
+			const qPk = quoteIdent(userMeta.pkColumn)
+			evFilters.push(
+				`(${quoteIdent(cols.userIdColumn)} IS NULL OR CAST(${quoteIdent(cols.userIdColumn)} AS TEXT) NOT IN (SELECT CAST(${qPk} AS TEXT) FROM ${qUserTbl} WHERE ${isTruthyColExpr(userMeta.adminColumn)}))`,
+			)
+		}
 
 		let evSql: string
 		if (isLargeTable) {
@@ -390,7 +428,6 @@ export async function detectAnalyticsTable(
 
 	// Resolve linked users table metadata (labels, admin flag, test flag) via declared/inferred/learned FK
 	let userDirectory: AnalyticsUserDirectory | null = null
-	const userMeta = detectUserTableMeta(schema, ts, cols.userIdColumn)
 	if (userMeta) {
 		try {
 			const qUserTbl = quoteTable(userMeta.table, driver)
@@ -527,7 +564,68 @@ export async function runAnalyticsTrends(
 				? `COUNT(DISTINCT NULLIF(CAST(${quoteIdent(vCol)} AS TEXT), ''))`
 				: 'NULL'
 	const kpiSql = `SELECT COUNT(*) AS total, ${actorExpr ? `COUNT(DISTINCT ${actorExpr})` : '0'} AS actors, ${usersCountExpr} AS unique_users, ${anonVisitorsCountExpr} AS unique_anon_visitors, ${errorExpr} FROM ${qTable} ${whereSql}`
-	const kpiRows = await execReadOnly(adapter, kpiSql, 1, req.queryId)
+
+	const dur = rangeToDurationMs(req.range)
+	const prevSql =
+		dur !== null
+			? `SELECT COUNT(*) AS total FROM ${qTable} WHERE ${[
+					...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs - dur, startMs - 1, driver),
+					...baseFilters,
+				].join(' AND ')}`
+			: null
+
+	// 2. Prepare main bucketed series SQL + topEvents queries and execute independent scans in parallel
+	const topN = Math.max(1, Math.min(12, req.topN ?? 6))
+	const selectedSet = req.selectedEvents && req.selectedEvents.length > 0 ? new Set(req.selectedEvents) : null
+
+	let mainSql = ''
+	let breakExpr = ''
+	if (!breakdownCol) {
+		mainSql = `SELECT ${bExpr} AS bucket, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
+FROM ${qTable}
+${whereSql}
+GROUP BY 1
+ORDER BY 1 ASC`
+	} else {
+		const qBreak = quoteIdent(breakdownCol)
+		breakExpr = `COALESCE(CAST(${qBreak} AS TEXT), '(null)')`
+		mainSql = `SELECT ${bExpr} AS bucket, ${breakExpr} AS grp, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
+FROM ${qTable}
+${whereSql}
+GROUP BY 1, 2
+ORDER BY 1 ASC`
+	}
+
+	const canReuseMainForTop = Boolean(eventCol && breakdownCol === eventCol)
+	const topSql =
+		eventCol && !canReuseMainForTop
+			? `SELECT ${bExpr} AS bucket, COALESCE(CAST(${quoteIdent(eventCol)} AS TEXT), '(null)') AS ev, COUNT(*) AS n${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
+FROM ${qTable}
+${whereSql}
+GROUP BY 1, 2`
+			: null
+	const overallActorsSql = eventCol
+		? `SELECT COALESCE(CAST(${quoteIdent(eventCol)} AS TEXT), '(null)') AS ev, COUNT(*) AS n${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
+FROM ${qTable}
+${whereSql}
+GROUP BY 1
+ORDER BY n DESC
+LIMIT 200`
+		: null
+
+	const batchSqls: string[] = [kpiSql]
+	const prevIdx = prevSql ? batchSqls.push(prevSql) - 1 : -1
+	const mainIdx = batchSqls.push(mainSql) - 1
+	const topIdx = topSql ? batchSqls.push(topSql) - 1 : -1
+	const overallIdx = overallActorsSql ? batchSqls.push(overallActorsSql) - 1 : -1
+
+	const batchResults = await execReadOnlyBatch(adapter, batchSqls, breakdownCol || topSql ? 25_000 : 1000, req.queryId)
+	const kpiRows = batchResults[0] ?? []
+	const prevRows = prevIdx >= 0 ? (batchResults[prevIdx] ?? []) : null
+	const mainRows = batchResults[mainIdx] ?? []
+	const separateTopRows = topIdx >= 0 ? (batchResults[topIdx] ?? []) : null
+	const overallRows = overallIdx >= 0 ? (batchResults[overallIdx] ?? []) : null
+
 	const totalEvents = Number(kpiRows[0]?.total ?? 0)
 	const uniqueActors = Number(kpiRows[0]?.actors ?? 0)
 	const uniqueUsers =
@@ -542,38 +640,17 @@ export async function runAnalyticsTrends(
 
 	let prevPeriodEvents: number | null = null
 	let deltaPct: number | null = null
-	const dur = rangeToDurationMs(req.range)
-	if (dur !== null) {
-		const prevWhere = [
-			...buildTimeRangeWhere(req.timeColumn, req.timeFormat, startMs - dur, startMs - 1, driver),
-			...baseFilters,
-		]
-		const prevRows = await execReadOnly(
-			adapter,
-			`SELECT COUNT(*) AS total FROM ${qTable} WHERE ${prevWhere.join(' AND ')}`,
-			1,
-			req.queryId,
-		)
+	if (prevRows) {
 		prevPeriodEvents = Number(prevRows[0]?.total ?? 0)
 		if (prevPeriodEvents > 0) {
 			deltaPct = Number((((totalEvents - prevPeriodEvents) / prevPeriodEvents) * 100).toFixed(1))
 		}
 	}
 
-	// 2. Bucketed series SQL
-	const topN = Math.max(1, Math.min(12, req.topN ?? 6))
-	const selectedSet = req.selectedEvents && req.selectedEvents.length > 0 ? new Set(req.selectedEvents) : null
-
-	let mainSql = ''
 	const series: TrendsSeries[] = []
 
 	if (!breakdownCol) {
-		mainSql = `SELECT ${bExpr} AS bucket, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
-FROM ${qTable}
-${whereSql}
-GROUP BY 1
-ORDER BY 1 ASC`
-		const rows = await execReadOnly(adapter, mainSql, 1000, req.queryId)
+		const rows = mainRows
 		const values = new Array<number>(buckets.length).fill(0)
 		let total = 0
 		for (const r of rows) {
@@ -619,14 +696,7 @@ ORDER BY 1 ASC`
 					: total
 		series.push({ key: '__all__', label, values, total: seriesTotal })
 	} else {
-		const qBreak = quoteIdent(breakdownCol)
-		const breakExpr = `COALESCE(CAST(${qBreak} AS TEXT), '(null)')`
-		mainSql = `SELECT ${bExpr} AS bucket, ${breakExpr} AS grp, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
-FROM ${qTable}
-${whereSql}
-GROUP BY 1, 2
-ORDER BY 1 ASC`
-		const rows = await execReadOnly(adapter, mainSql, 25_000, req.queryId)
+		const rows = mainRows
 
 		// Aggregate by group (optionally normalizing URL routes) and track raw keys per normalized group
 		const grpEvents = new Map<string, number[]>()
@@ -787,25 +857,10 @@ GROUP BY 1`
 		}
 	}
 
-	// 3. Top events breakdown with sparklines (when eventColumn is present)
+	// 3. Top events breakdown with sparklines (reusing mainRows when breakdownCol === eventCol)
 	const topEvents: AnalyticsTopEvent[] = []
-	if (eventCol) {
-		const qEv = quoteIdent(eventCol)
-		const topSql = `SELECT ${bExpr} AS bucket, COALESCE(CAST(${qEv} AS TEXT), '(null)') AS ev, COUNT(*) AS n${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
-FROM ${qTable}
-${whereSql}
-GROUP BY 1, 2`
-		const evRows = await execReadOnly(adapter, topSql, 25_000, req.queryId)
-
+	if (eventCol && overallRows) {
 		const evMap = new Map<string, { count: number; actors: number; spark: number[] }>()
-		// Also compute accurate overall distinct actors per event
-		const overallActorsSql = `SELECT COALESCE(CAST(${qEv} AS TEXT), '(null)') AS ev, COUNT(*) AS n${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
-FROM ${qTable}
-${whereSql}
-GROUP BY 1
-ORDER BY n DESC
-LIMIT 200`
-		const overallRows = await execReadOnly(adapter, overallActorsSql, 200, req.queryId)
 		const norm = Boolean(req.normalizeUrls)
 		for (const r of overallRows) {
 			const raw = String(r.ev ?? '(null)')
@@ -821,8 +876,9 @@ LIMIT 200`
 		}
 
 		const sparkLen = Math.max(1, Math.min(buckets.length, 24))
-		for (const r of evRows) {
-			const raw = String(r.ev ?? '(null)')
+		const bucketRows = canReuseMainForTop ? mainRows : (separateTopRows ?? [])
+		for (const r of bucketRows) {
+			const raw = String((canReuseMainForTop ? r.grp : r.ev) ?? '(null)')
 			const key = norm ? normalizeEventName(raw) : raw
 			const entry = evMap.get(key)
 			if (!entry) continue
@@ -830,7 +886,7 @@ LIMIT 200`
 			const idx = bucketIdx.get(bMs)
 			if (idx === undefined) continue
 			const sIdx = Math.min(sparkLen - 1, Math.floor((idx / Math.max(1, buckets.length)) * sparkLen))
-			entry.spark[sIdx] = (entry.spark[sIdx] ?? 0) + Number(r.n ?? 0)
+			entry.spark[sIdx] = (entry.spark[sIdx] ?? 0) + Number((canReuseMainForTop ? r.events : r.n) ?? 0)
 		}
 
 		const sortedTop = [...evMap.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 30)
@@ -899,20 +955,43 @@ export async function runAnalyticsFunnel(
 
 	// When stitching visitor_id -> user_id, we also need co-occurrence links (or fetch events matching steps + stitch links)
 	const stitch = Boolean(req.stitchIdentity && uCol && vCol)
+	const likeOp = driver === 'postgres' ? 'ILIKE' : 'LIKE'
 	const stepPredicates: string[] = []
+	let canPushStepPredicates = true
 	for (const step of req.steps) {
 		const pat = step.pattern.trim()
 		if (!pat) continue
-		if (step.match === 'exact' && !req.normalizeUrls) {
-			stepPredicates.push(`CAST(${qEv} AS TEXT) = ${sqlLiteral(pat)}`)
-		} else if (step.match === 'prefix' && !req.normalizeUrls) {
-			stepPredicates.push(`CAST(${qEv} AS TEXT) LIKE ${sqlLiteral(pat + '%')}`)
-		} else if (!req.normalizeUrls) {
-			stepPredicates.push(
-				driver === 'postgres'
-					? `CAST(${qEv} AS TEXT) ILIKE ${sqlLiteral('%' + pat + '%')}`
-					: `CAST(${qEv} AS TEXT) LIKE ${sqlLiteral('%' + pat + '%')}`,
-			)
+		if (!req.normalizeUrls) {
+			if (step.match === 'exact') {
+				stepPredicates.push(`CAST(${qEv} AS TEXT) = ${sqlLiteral(pat)}`)
+			} else if (step.match === 'prefix') {
+				stepPredicates.push(`CAST(${qEv} AS TEXT) LIKE ${sqlLiteral(pat + '%')}`)
+			} else {
+				stepPredicates.push(`CAST(${qEv} AS TEXT) ${likeOp} ${sqlLiteral('%' + pat + '%')}`)
+			}
+		} else {
+			// Push coarse SQL pre-filter even when normalizeUrls is ON: replace `:id` with `%` (or match query strings)
+			// so Funnel avoids scanning unrelated events before JS normalization & exact matching.
+			const hasPlaceholder = pat.includes(':id')
+			if (step.match === 'exact' && !hasPlaceholder) {
+				stepPredicates.push(
+					`(CAST(${qEv} AS TEXT) = ${sqlLiteral(pat)} OR CAST(${qEv} AS TEXT) LIKE ${sqlLiteral(pat + '?%')})`,
+				)
+			} else if (step.match === 'exact' || step.match === 'prefix') {
+				const coarse = pat.replaceAll(':id', '%')
+				if (coarse.replaceAll('%', '').length === 0) {
+					canPushStepPredicates = false
+				} else {
+					stepPredicates.push(`CAST(${qEv} AS TEXT) LIKE ${sqlLiteral(coarse + '%')}`)
+				}
+			} else {
+				const coarse = pat.replaceAll(':id', '%')
+				if (coarse.replaceAll('%', '').length === 0) {
+					canPushStepPredicates = false
+				} else {
+					stepPredicates.push(`CAST(${qEv} AS TEXT) ${likeOp} ${sqlLiteral('%' + coarse + '%')}`)
+				}
+			}
 		}
 	}
 
@@ -925,7 +1004,7 @@ export async function runAnalyticsFunnel(
 	]
 
 	const evWhere = [...whereClauses]
-	if (stepPredicates.length > 0 && !req.normalizeUrls) {
+	if (canPushStepPredicates && stepPredicates.length > 0) {
 		evWhere.push(`(${stepPredicates.join(' OR ')})`)
 	}
 
@@ -1023,12 +1102,15 @@ export async function runAnalyticsRetention(
 		...(needEvent && evCol ? [`CAST(${quoteIdent(evCol)} AS TEXT) AS ev`] : []),
 	]
 
+	const RETENTION_MAX_ROWS = 120_000
 	const sql = `SELECT DISTINCT ${selectCols.join(', ')}
 FROM ${qTable}
 WHERE ${whereClauses.join(' AND ')}
-LIMIT 120000`
+ORDER BY 4 ASC
+LIMIT ${RETENTION_MAX_ROWS}`
 
-	const rows = await execReadOnly(adapter, sql, 120_000, req.queryId)
+	const rows = await execReadOnly(adapter, sql, RETENTION_MAX_ROWS, req.queryId)
+	const truncated = rows.length >= RETENTION_MAX_ROWS
 
 	const parsedRows = rows.map((r) => ({
 		actorKey: r.actor_key ? String(r.actor_key) : '',
@@ -1060,6 +1142,7 @@ LIMIT 120000`
 		periods,
 		cohorts,
 		averagePcts,
+		truncated,
 		sql,
 		durationMs: Math.round(performance.now() - started),
 	}

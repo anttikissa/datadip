@@ -153,7 +153,11 @@ rows are never dropped. Never sum per-group `COUNT(DISTINCT actor)`
 values across collapsed routes or an `Other` bucket; recompute distinct
 actors in SQL with a `CASE` grouping. Never run unbounded `COUNT(*)` or
 full-table `GROUP BY` scans in `detectAnalyticsTable` on large tables
-(`rowCount === null`, estimated, or `> 100k`).
+(`rowCount === null`, estimated, or `> 100k`). Never pass the same
+`queryId` to concurrent `adapter.executeStatements(...)` calls (adapters
+index active calls by `queryId` in a `Map`, so concurrent duplicates
+overwrite pending resolvers and hang RPC calls); batch multiple read-only
+statements into a single `executeStatements([...])` call instead.
 
 In Smart Value Lenses (`src/shared/lenses.ts`), never auto-detect
 `epoch_ns` without a timestamp column name hint (64-bit Twitter/Discord

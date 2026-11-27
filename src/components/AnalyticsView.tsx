@@ -34,10 +34,16 @@ import {
 	type TimeColumnFormat,
 	type TrendsResponse,
 } from '../shared/analytics.ts'
-import { autoDecodeSingleValue, formatRelativeTime, formatUtcTimestamp } from '../shared/lenses.ts'
+import {
+	autoDecodeSingleValue,
+	formatLocalTimestamp,
+	formatRelativeTime,
+	formatUtcTimestamp,
+} from '../shared/lenses.ts'
 import { tid } from '../shared/tid.ts'
 import type { DatabaseSchema, FilterSpec } from '../shared/types.ts'
 import {
+	type AnalyticsTimezone,
 	formatBucketLabel,
 	formatDurationSec,
 	FunnelChart,
@@ -92,12 +98,29 @@ function suggestInitialFunnelSteps(events: string[]): FunnelStepSpec[] {
 	return chosen.map((pattern) => ({ pattern, match: 'exact' as const }))
 }
 
+export interface AnalyticsRoutePatch {
+	table?: string | null
+	mode?: AnalyticsMode
+	range?: AnalyticsRange | null
+	interval?: AnalyticsInterval | null
+	metric?: AnalyticsMetric | null
+	breakdown?: string | null
+	chart?: AnalyticsChartType | null
+	actor?: string | null
+}
+
 export function AnalyticsView(props: {
 	connId: string
 	schema: DatabaseSchema | null
 	initialTable: string | null
 	mode: AnalyticsMode
-	onChangeRoute: (patch: { table?: string | null; mode?: AnalyticsMode }) => void
+	initialRange?: AnalyticsRange | null
+	initialInterval?: AnalyticsInterval | null
+	initialMetric?: AnalyticsMetric | null
+	initialBreakdown?: string | null
+	initialChartType?: AnalyticsChartType | null
+	initialActorId?: string | null
+	onChangeRoute: (patch: AnalyticsRoutePatch, replace?: boolean) => void
 	onOpenTable: (table: string, filters?: FilterSpec[]) => void
 	onOpenInSql: (sql: string) => void
 	onFollowFk: (targetTable: string, targetColumn: string, value: unknown) => void
@@ -128,14 +151,37 @@ export function AnalyticsView(props: {
 	const [draftFilterOp, setDraftFilterOp] = createSignal<AnalyticsFilterOp>('eq')
 	const [draftFilterVal, setDraftFilterVal] = createSignal('')
 
-	// Time window
-	const [range, setRange] = createSignal<AnalyticsRange>('30d')
-	const [interval, setIntervalVal] = createSignal<AnalyticsInterval>('day')
+	// Time window & timezone
+	const [range, setRange] = createSignal<AnalyticsRange>(props.initialRange ?? '30d')
+	const [interval, setIntervalVal] = createSignal<AnalyticsInterval>(props.initialInterval ?? 'day')
+	const [tz, setTz] = createSignal<AnalyticsTimezone>(
+		(() => {
+			try {
+				return localStorage.getItem('datadip:analytics:tz') === 'local' ? 'local' : 'utc'
+			} catch {
+				return 'utc'
+			}
+		})(),
+	)
+
+	function toggleTz() {
+		setTz((prev) => {
+			const next: AnalyticsTimezone = prev === 'utc' ? 'local' : 'utc'
+			try {
+				localStorage.setItem('datadip:analytics:tz', next)
+			} catch {}
+			return next
+		})
+	}
+
+	function formatTs(ms: number): string {
+		return tz() === 'local' ? formatLocalTimestamp(ms) : `${formatUtcTimestamp(ms)} UTC`
+	}
 
 	// Trends state
-	const [metric, setMetric] = createSignal<AnalyticsMetric>('events')
-	const [chartType, setChartType] = createSignal<AnalyticsChartType>('area')
-	const [breakdownCol, setBreakdownCol] = createSignal<string>('')
+	const [metric, setMetric] = createSignal<AnalyticsMetric>(props.initialMetric ?? 'events')
+	const [chartType, setChartType] = createSignal<AnalyticsChartType>(props.initialChartType ?? 'area')
+	const [breakdownCol, setBreakdownCol] = createSignal<string>(props.initialBreakdown ?? '')
 	const [selectedEvents, setSelectedEvents] = createSignal<string[]>([])
 	const [trendsData, setTrendsData] = createSignal<TrendsResponse | null>(null)
 	const [trendsLoading, setTrendsLoading] = createSignal(false)
@@ -180,6 +226,7 @@ export function AnalyticsView(props: {
 	let actorsSortSelectEl: HTMLSelectElement | undefined
 
 	let activeQueryId: string | null = null
+	let appliedInitialUrl = false
 
 	const availableTables = createMemo(() => {
 		const s = props.schema
@@ -358,7 +405,15 @@ export function AnalyticsView(props: {
 			setActorColumn(det.defaultActorColumn ?? '')
 			setStatusColumn(det.statusColumn ?? '')
 			setNormalizeUrls(det.looksLikeHttpEvents)
-			setBreakdownCol(det.eventColumn ?? '')
+			const useUrlInit = !appliedInitialUrl
+			appliedInitialUrl = true
+			setBreakdownCol(
+				useUrlInit && props.initialBreakdown !== null && props.initialBreakdown !== undefined
+					? props.initialBreakdown
+					: (det.eventColumn ?? ''),
+			)
+			if (useUrlInit && props.initialMetric) setMetric(props.initialMetric)
+			if (useUrlInit && props.initialChartType) setChartType(props.initialChartType)
 			setSelectedEvents([])
 			setExcludeAdmin(Boolean(det.adminColumn || det.userDirectory?.adminColumn))
 			// On local dev DBs where every user is marked test=1, keep test users visible by default so charts aren't empty.
@@ -374,8 +429,11 @@ export function AnalyticsView(props: {
 			setCustomFilters([])
 			setDraftFilterCol(det.eventColumn ?? det.statusColumn ?? det.timeColumn ?? '')
 
-			// Pick smart initial range based on observed time span
-			if (det.minTimeMs !== null && det.maxTimeMs !== null) {
+			// Pick smart initial range based on observed time span (unless explicitly provided in URL)
+			if (useUrlInit && props.initialRange) {
+				setRange(props.initialRange)
+				setIntervalVal(props.initialInterval ?? defaultIntervalForRange(props.initialRange))
+			} else if (det.minTimeMs !== null && det.maxTimeMs !== null) {
 				const spanDays = (det.maxTimeMs - det.minTimeMs) / 86_400_000
 				if (spanDays <= 1.5) {
 					setRange('24h')
@@ -397,7 +455,7 @@ export function AnalyticsView(props: {
 			setFunnelSteps(suggestInitialFunnelSteps(names))
 			setRetCohortEvent('')
 			setRetReturnEvent('')
-			setSelectedActorId(null)
+			setSelectedActorId(useUrlInit && props.initialActorId ? props.initialActorId : null)
 			setJourneyData(null)
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err))
@@ -728,15 +786,18 @@ export function AnalyticsView(props: {
 		const startMs = td.buckets[bucketIdx]
 		if (startMs === undefined) return
 		const endMs = nextBucketMs(startMs, td.interval) - 1
-		const fmtVal = (ms: number) =>
-			timeFormat() === 'epoch_ms'
-				? String(ms)
-				: timeFormat() === 'epoch_s'
-					? String(Math.floor(ms / 1000))
-					: new Date(ms).toISOString()
+		const fmtVal = (ms: number, isStart: boolean) => {
+			const fmt = timeFormat()
+			if (fmt === 'epoch_ms') return String(ms)
+			if (fmt === 'epoch_us') return String(ms * 1000)
+			if (fmt === 'epoch_s') return String(Math.floor(ms / 1000))
+			if (fmt === 'cocoa_s') return (ms / 1000 - 978_307_200).toFixed(3)
+			// Space-separated UTC start compares cleanly against both SQLite `YYYY-MM-DD HH:MM:SS` and ISO `T...Z` strings
+			return isStart ? new Date(ms).toISOString().slice(0, 19).replace('T', ' ') : new Date(ms).toISOString()
+		}
 		const filters: FilterSpec[] = [
-			{ column: timeColumn(), op: 'gte', value: fmtVal(startMs) },
-			{ column: timeColumn(), op: 'lte', value: fmtVal(endMs) },
+			{ column: timeColumn(), op: 'gte', value: fmtVal(startMs, true) },
+			{ column: timeColumn(), op: 'lte', value: fmtVal(endMs, false) },
 		]
 		for (const f of effectiveFilters()) {
 			if (f.op === 'not_like') continue
@@ -755,7 +816,7 @@ export function AnalyticsView(props: {
 
 	function inspectActorInPeople(actorId: string) {
 		setSelectedActorId(actorId)
-		props.onChangeRoute({ mode: 'actors' })
+		props.onChangeRoute({ mode: 'actors', actor: actorId })
 	}
 
 	async function handleSaveChart() {
@@ -877,13 +938,13 @@ export function AnalyticsView(props: {
 	const trendsLabels = createMemo(() => {
 		const td = trendsData()
 		if (!td) return []
-		return td.buckets.map((ms) => formatBucketLabel(ms, td.interval, false))
+		return td.buckets.map((ms) => formatBucketLabel(ms, td.interval, false, tz()))
 	})
 
 	const trendsFullLabels = createMemo(() => {
 		const td = trendsData()
 		if (!td) return []
-		return td.buckets.map((ms) => formatBucketLabel(ms, td.interval, true))
+		return td.buckets.map((ms) => formatBucketLabel(ms, td.interval, true, tz()))
 	})
 
 	return (
@@ -945,8 +1006,10 @@ export function AnalyticsView(props: {
 								type="button"
 								class={['tab-btn mono', { active: range() === r.id }]}
 								onClick={() => {
+									const nextIv = defaultIntervalForRange(r.id)
 									setRange(r.id)
-									setIntervalVal(defaultIntervalForRange(r.id))
+									setIntervalVal(nextIv)
+									props.onChangeRoute({ range: r.id, interval: nextIv }, true)
 								}}
 							>
 								{r.label}
@@ -960,7 +1023,11 @@ export function AnalyticsView(props: {
 						class="select sm"
 						aria-label="Bucket interval"
 						value={interval()}
-						onChange={(e) => setIntervalVal(e.currentTarget.value as AnalyticsInterval)}
+						onChange={(e) => {
+							const next = e.currentTarget.value as AnalyticsInterval
+							setIntervalVal(next)
+							props.onChangeRoute({ interval: next }, true)
+						}}
 					>
 						<For each={INTERVALS}>
 							{(iv) => (
@@ -970,6 +1037,17 @@ export function AnalyticsView(props: {
 							)}
 						</For>
 					</select>
+				</Show>
+
+				<Show when={props.mode !== 'dashboard'}>
+					<button
+						type="button"
+						class="btn sm mono"
+						title="Toggle chart and timeline display timezone between UTC and Local time"
+						onClick={toggleTz}
+					>
+						{tz() === 'utc' ? 'UTC' : 'Local'}
+					</button>
 				</Show>
 
 				<div style="flex:1" />
@@ -1095,6 +1173,12 @@ export function AnalyticsView(props: {
 						</option>
 						<option value="epoch_s" selected={timeFormat() === 'epoch_s'}>
 							sec
+						</option>
+						<option value="epoch_us" selected={timeFormat() === 'epoch_us'}>
+							µs
+						</option>
+						<option value="cocoa_s" selected={timeFormat() === 'cocoa_s'}>
+							Cocoa
 						</option>
 						<option value="iso" selected={timeFormat() === 'iso'}>
 							ISO
@@ -1577,7 +1661,10 @@ export function AnalyticsView(props: {
 										<button
 											type="button"
 											class={['tab-btn', { active: metric() === id }]}
-											onClick={() => setMetric(id)}
+											onClick={() => {
+												setMetric(id)
+												props.onChangeRoute({ metric: id }, true)
+											}}
 										>
 											{label}
 										</button>
@@ -1591,8 +1678,10 @@ export function AnalyticsView(props: {
 										class="select sm mono"
 										value={breakdownCol()}
 										onChange={(e) => {
-											setBreakdownCol(e.currentTarget.value)
+											const next = e.currentTarget.value
+											setBreakdownCol(next)
 											setSelectedEvents([])
+											props.onChangeRoute({ breakdown: next }, true)
 										}}
 									>
 										<option value="">None (Total)</option>
@@ -1631,7 +1720,10 @@ export function AnalyticsView(props: {
 										<button
 											type="button"
 											class={['tab-btn', { active: chartType() === id }]}
-											onClick={() => setChartType(id)}
+											onClick={() => {
+												setChartType(id)
+												props.onChangeRoute({ chart: id }, true)
+											}}
 										>
 											{label}
 										</button>
@@ -1657,6 +1749,7 @@ export function AnalyticsView(props: {
 										series={td().series}
 										chartType={chartType()}
 										height={290}
+										exportFilename={`${selectedTable() || 'analytics'}-${metric()}-${range()}.svg`}
 										onClickBucket={drillDownBucket}
 									/>
 								)}
@@ -1915,10 +2008,17 @@ export function AnalyticsView(props: {
 									</Show>
 									<Show when={!funnelLoading() ? funnelData() : null}>
 										{(fd) => (
-											<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
-												{fd().scannedEvents.toLocaleString()} events scanned in {fd().durationMs}ms
-												{fd().stitchedIdentity ? ' · identity stitched' : ''}
-											</span>
+											<>
+												<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
+													{fd().scannedEvents.toLocaleString()} events scanned in {fd().durationMs}ms
+													{fd().stitchedIdentity ? ' · identity stitched' : ''}
+												</span>
+												<Show when={fd().truncated}>
+													<span class="analytics-warn-pill mono">
+														Truncated at 120k events -- narrow range for exact conversion
+													</span>
+												</Show>
+											</>
 										)}
 									</Show>
 								</div>
@@ -2115,7 +2215,10 @@ export function AnalyticsView(props: {
 												<button
 													type="button"
 													class={['actor-row', { active: isSelected() }]}
-													onClick={() => setSelectedActorId(actor.actorId)}
+													onClick={() => {
+														setSelectedActorId(actor.actorId)
+														props.onChangeRoute({ actor: actor.actorId }, true)
+													}}
 												>
 													<div class="actor-row-top">
 														<span class="actor-id">
@@ -2243,7 +2346,7 @@ export function AnalyticsView(props: {
 											<div class="journey-session">
 												<div class="journey-session-head mono">
 													<span>
-														Session {journeySessions().length - sIdx()} · {formatUtcTimestamp(session.startMs)} UTC
+														Session {journeySessions().length - sIdx()} · {formatTs(session.startMs)}
 													</span>
 													<span>
 														{session.events.length} events ·{' '}
@@ -2258,7 +2361,12 @@ export function AnalyticsView(props: {
 																prevEv() ? Math.max(0, Math.round((ev.tsMs - prevEv()!.tsMs) / 1000)) : null
 															return (
 																<div class="journey-event-row">
-																	<span class="journey-ts mono">{formatUtcTimestamp(ev.tsMs).slice(11)}</span>
+																	<span class="journey-ts mono">
+																		{(tz() === 'local'
+																			? formatLocalTimestamp(ev.tsMs)
+																			: formatUtcTimestamp(ev.tsMs)
+																		).slice(11)}
+																	</span>
 																	<span class="journey-delta mono">
 																		{deltaSec() !== null ? `+${formatDurationSec(deltaSec())}` : 'start'}
 																	</span>

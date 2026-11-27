@@ -77,4 +77,29 @@ describe('URL state codec', () => {
 			'http://127.0.0.1:4747/c/billing-prod-primary/t/invoices?where=status%3Aeq%3Apast_due',
 		)
 	})
+
+	test('round-trips shareable analytics URL state (table, mode, range, interval, metric, breakdown, chart, actor)', () => {
+		const route = parseRoute(
+			'/c/c1/analytics',
+			'?table=events&mode=trends&range=7d&interval=hour&metric=unique_actors&breakdown=event&chart=line',
+		)
+		expect(route).toEqual({
+			kind: 'analytics',
+			connId: 'c1',
+			table: 'events',
+			mode: 'trends',
+			range: '7d',
+			interval: 'hour',
+			metric: 'unique_actors',
+			breakdown: 'event',
+			chart: 'line',
+		})
+		const formatted = formatRoute(route)
+		const reparsed = parseRoute(formatted.split('?')[0]!, '?' + formatted.split('?')[1]!)
+		expect(reparsed).toEqual(route)
+
+		const actorRoute = parseRoute('/c/c1/analytics', '?table=events&mode=actors&actor=u1abc')
+		expect(actorRoute).toMatchObject({ kind: 'analytics', mode: 'actors', actor: 'u1abc' })
+		expect(formatRoute(actorRoute)).toContain('actor=u1abc')
+	})
 })

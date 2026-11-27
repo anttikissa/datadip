@@ -70,9 +70,12 @@ describe('analytics schema detection', () => {
 		expect(detected.payloadColumn).toBe('data')
 	})
 
-	test('infers epoch_ms, epoch_s, and iso time formats', () => {
+	test('infers epoch_ms, epoch_s, epoch_us, cocoa_s, and iso time formats', () => {
 		expect(inferTimeFormat(1795726676999, 'INTEGER')).toBe('epoch_ms')
+		expect(inferTimeFormat(1795726676999123, 'INTEGER')).toBe('epoch_us')
 		expect(inferTimeFormat(1795726676, 'INTEGER')).toBe('epoch_s')
+		const cocoaNow = Math.floor(Date.UTC(2026, 10, 26, 12, 0, 0) / 1000) - 978_307_200
+		expect(inferTimeFormat(cocoaNow + 0.5, 'TIMESTAMP', 'ZCREATIONDATE')).toBe('cocoa_s')
 		expect(inferTimeFormat('2026-11-26T12:00:00Z', 'TEXT')).toBe('iso')
 		expect(inferTimeFormat('2026-11-26 12:00:00', 'TIMESTAMP')).toBe('iso')
 	})

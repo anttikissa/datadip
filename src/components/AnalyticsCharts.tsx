@@ -49,22 +49,58 @@ function formatAxisNum(n: number): string {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-export function formatBucketLabel(ms: number, interval: AnalyticsInterval, full = false): string {
+export type AnalyticsTimezone = 'utc' | 'local'
+
+export function formatBucketLabel(
+	ms: number,
+	interval: AnalyticsInterval,
+	full = false,
+	tz: AnalyticsTimezone = 'utc',
+): string {
 	const d = new Date(ms)
 	if (Number.isNaN(d.getTime())) return ''
-	const mon = MONTHS[d.getUTCMonth()]
-	const day = d.getUTCDate()
-	const hh = String(d.getUTCHours()).padStart(2, '0')
+	const year = tz === 'local' ? d.getFullYear() : d.getUTCFullYear()
+	const mon = MONTHS[tz === 'local' ? d.getMonth() : d.getUTCMonth()]
+	const day = tz === 'local' ? d.getDate() : d.getUTCDate()
+	const hh = String(tz === 'local' ? d.getHours() : d.getUTCHours()).padStart(2, '0')
+	const tzTag = tz === 'local' ? '' : ' UTC'
 	if (interval === 'hour') {
-		return full ? `${mon} ${day}, ${hh}:00 UTC` : `${mon} ${day} ${hh}:00`
+		return full ? `${mon} ${day}, ${hh}:00${tzTag}` : `${mon} ${day} ${hh}:00`
 	}
 	if (interval === 'month') {
-		return `${mon} ${d.getUTCFullYear()}`
+		return `${mon} ${year}`
 	}
 	if (interval === 'week') {
-		return full ? `Week of ${mon} ${day}, ${d.getUTCFullYear()}` : `${mon} ${day}`
+		return full ? `Week of ${mon} ${day}, ${year}` : `${mon} ${day}`
 	}
-	return full ? `${mon} ${day}, ${d.getUTCFullYear()}` : `${mon} ${day}`
+	return full ? `${mon} ${day}, ${year}` : `${mon} ${day}`
+}
+
+function downloadSvgElement(svgEl: SVGSVGElement | undefined, filename: string) {
+	if (!svgEl) return
+	const clone = svgEl.cloneNode(true) as SVGSVGElement
+	const cs = getComputedStyle(document.documentElement)
+	const bg = cs.getPropertyValue('--bg-surface').trim() || '#ffffff'
+	const ink = cs.getPropertyValue('--ink-secondary').trim() || '#475569'
+	const grid = cs.getPropertyValue('--border-subtle').trim() || '#e2e8f0'
+	const axis = cs.getPropertyValue('--border-strong').trim() || '#cbd5e1'
+	clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+	const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+	styleEl.textContent = `
+		svg { background: ${bg}; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+		.chart-tick { fill: ${ink}; font-size: 11px; }
+		.chart-grid-line { stroke: ${grid}; stroke-width: 1; }
+		.chart-axis-line { stroke: ${axis}; stroke-width: 1; }
+		.chart-crosshair, .chart-hover-band { display: none; }
+	`
+	clone.insertBefore(styleEl, clone.firstChild)
+	const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' })
+	const url = URL.createObjectURL(blob)
+	const a = document.createElement('a')
+	a.href = url
+	a.download = filename.endsWith('.svg') ? filename : `${filename}.svg`
+	a.click()
+	setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export function formatDurationSec(sec: number | null): string {
@@ -82,9 +118,11 @@ export function TimeSeriesChart(props: {
 	series: TrendsSeries[]
 	chartType: AnalyticsChartType
 	height?: number
+	exportFilename?: string
 	onClickBucket?: (index: number) => void
 }) {
 	let containerEl: HTMLDivElement | undefined
+	let svgEl: SVGSVGElement | undefined
 	const [width, setWidth] = createSignal(720)
 	const [hoverIdx, setHoverIdx] = createSignal<number | null>(null)
 	const [hiddenKeys, setHiddenKeys] = createSignal<Set<string>>(new Set())
@@ -247,7 +285,14 @@ export function TimeSeriesChart(props: {
 						</div>
 					}
 				>
-					<svg width={width()} height={height()} class="chart-svg" role="img" aria-label="Time series chart">
+					<svg
+						ref={(el) => (svgEl = el)}
+						width={width()}
+						height={height()}
+						class="chart-svg"
+						role="img"
+						aria-label="Time series chart"
+					>
 						{/* Horizontal gridlines + Y labels */}
 						<For each={yTicks()}>
 							{(tick) => {
@@ -452,28 +497,40 @@ export function TimeSeriesChart(props: {
 				</Show>
 			</div>
 
-			{/* Interactive Legend */}
-			<Show when={props.series.length > 1}>
+			{/* Interactive Legend + optional SVG export */}
+			<Show when={props.series.length > 1 || (props.exportFilename && n() > 0 && props.series.length > 0)}>
 				<div class="chart-legend">
-					<For each={props.series}>
-						{(s, idx) => {
-							const isHidden = () => hiddenKeys().has(s.key)
-							const color = seriesColor(idx(), s.key)
-							return (
-								<button
-									type="button"
-									class={['chart-legend-item', { muted: isHidden() }]}
-									title="Click to toggle · Option/Alt-click to solo"
-									onClick={(e) => toggleSeries(s.key, e.altKey)}
-									onDblClick={() => toggleSeries(s.key, true)}
-								>
-									<span class="chart-dot-swatch" style={`background:${color}`} />
-									<span class="mono">{s.label}</span>
-									<span class="chart-legend-total mono">{s.total.toLocaleString()}</span>
-								</button>
-							)
-						}}
-					</For>
+					<Show when={props.series.length > 1}>
+						<For each={props.series}>
+							{(s, idx) => {
+								const isHidden = () => hiddenKeys().has(s.key)
+								const color = seriesColor(idx(), s.key)
+								return (
+									<button
+										type="button"
+										class={['chart-legend-item', { muted: isHidden() }]}
+										title="Click to toggle · Option/Alt-click to solo"
+										onClick={(e) => toggleSeries(s.key, e.altKey)}
+										onDblClick={() => toggleSeries(s.key, true)}
+									>
+										<span class="chart-dot-swatch" style={`background:${color}`} />
+										<span class="mono">{s.label}</span>
+										<span class="chart-legend-total mono">{s.total.toLocaleString()}</span>
+									</button>
+								)
+							}}
+						</For>
+					</Show>
+					<Show when={props.exportFilename && n() > 0 && props.series.length > 0}>
+						<button
+							type="button"
+							class="btn sm chart-export-btn"
+							title="Download chart as standalone SVG"
+							onClick={() => downloadSvgElement(svgEl, props.exportFilename!)}
+						>
+							Export SVG
+						</button>
+					</Show>
 				</div>
 			</Show>
 		</div>
@@ -642,10 +699,17 @@ export function RetentionMatrix(props: { data: RetentionResponse }) {
 				<div class="analytics-card" style="margin-bottom:14px">
 					<div class="analytics-card-head">
 						<strong>Average Retention Curve (%)</strong>
-						<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
-							{props.data.cohorts.length} cohorts ·{' '}
-							{props.data.cohorts.reduce((a, c) => a + c.size, 0).toLocaleString()} people
-						</span>
+						<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+							<Show when={props.data.truncated}>
+								<span class="analytics-warn-pill mono">
+									Truncated at 120k rows -- narrow date range for exact cohorts
+								</span>
+							</Show>
+							<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
+								{props.data.cohorts.length} cohorts ·{' '}
+								{props.data.cohorts.reduce((a, c) => a + c.size, 0).toLocaleString()} people
+							</span>
+						</div>
 					</div>
 					<TimeSeriesChart labels={curveLabels()} series={curveSeries()} chartType="area" height={190} />
 				</div>
@@ -751,37 +815,81 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 		return nonNum ?? res.columns[0] ?? ''
 	})
 
+	const categoricalCols = createMemo(() => {
+		const nums = new Set(numericCols())
+		return props.result.columns.filter((c) => !nums.has(c))
+	})
+
 	const [xCol, setXCol] = createSignal('')
+	const [seriesCol, setSeriesCol] = createSignal('')
 	const [yCols, setYCols] = createSignal<string[]>([])
 	const [chartType, setChartType] = createSignal<AnalyticsChartType>('bar')
 	let xSelectEl: HTMLSelectElement | undefined
+	let seriesSelectEl: HTMLSelectElement | undefined
 
 	createEffect(
 		() => props.result,
 		(res) => {
 			const x = defaultX()
 			setXCol(x)
-			const ys = numericCols().filter((c) => c !== x)
-			setYCols(ys.slice(0, 4))
+			// Auto-detect long-format grouped results (e.g. Analytics SQL `SELECT bucket, grp, events, actors`)
+			// when X repeats and a categorical column has 2..30 distinct series values.
+			let detectedSeries = ''
+			const xSeen = new Set<string>()
+			let xHasDuplicates = false
+			for (const r of res.rows.slice(0, 400)) {
+				const k = String(r[x] ?? '')
+				if (xSeen.has(k)) {
+					xHasDuplicates = true
+					break
+				}
+				xSeen.add(k)
+			}
+			if (xHasDuplicates) {
+				for (const c of categoricalCols()) {
+					if (c === x) continue
+					const uniq = new Set<string>()
+					for (const r of res.rows.slice(0, 400)) uniq.add(String(r[c] ?? '(null)'))
+					if (uniq.size >= 2 && uniq.size <= 40) {
+						detectedSeries = c
+						break
+					}
+				}
+			}
+			setSeriesCol(detectedSeries)
+			const ys = numericCols().filter((c) => c !== x && c !== detectedSeries)
+			setYCols(detectedSeries ? ys.slice(0, 1) : ys.slice(0, 4))
 			// Default to line/area if X looks like a date/time column, bar otherwise
 			setChartType(/date|time|day|week|month|hour|bucket|_at/i.test(x) ? 'area' : 'bar')
 			if (xSelectEl) xSelectEl.value = x
+			if (seriesSelectEl) seriesSelectEl.value = detectedSeries
 		},
 	)
 
-	// Sync dynamic <select> value per AGENTS.md SolidJS rule
+	// Sync dynamic <select> values per AGENTS.md SolidJS rule
 	createEffect(
 		() => [xCol(), props.result.columns] as const,
 		([val]) => {
 			if (xSelectEl && val) xSelectEl.value = val
 		},
 	)
+	createEffect(
+		() => [seriesCol(), props.result.columns] as const,
+		([val]) => {
+			if (seriesSelectEl) seriesSelectEl.value = val
+		},
+	)
 
 	const chartData = createMemo(() => {
-		const rows = props.result.rows.slice(0, 200)
 		const x = xCol()
+		const sCol = seriesCol()
 		const ys = yCols()
-		if (!x || ys.length === 0) return { labels: [], fullLabels: [], series: [] as TrendsSeries[] }
+		if (!x || ys.length === 0) return { labels: [], fullLabels: [], series: [] as TrendsSeries[], truncatedRows: false }
+
+		const inputLimit = sCol ? 2000 : 200
+		const rows = props.result.rows.slice(0, inputLimit)
+		const truncatedRows = props.result.rows.length > inputLimit
+
 		// Format numeric epoch_ms X columns (e.g. Analytics `bucket`) as readable UTC dates instead of 13-digit numbers
 		const isEpochMsX =
 			TIME_X_RE.test(x) &&
@@ -803,6 +911,60 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 			const s = String(val ?? '(null)')
 			return full ? s : s.slice(0, 28)
 		}
+
+		if (sCol && sCol !== x) {
+			const metricCol = ys[0]!
+			const xKeys: unknown[] = []
+			const xIdx = new Map<string, number>()
+			for (const r of rows) {
+				const raw = r[x]
+				const k = String(raw ?? '(null)')
+				if (!xIdx.has(k)) {
+					if (xKeys.length >= 200) continue
+					xIdx.set(k, xKeys.length)
+					xKeys.push(raw)
+				}
+			}
+			const labels = xKeys.map((v) => fmtX(v, false))
+			const fullLabels = xKeys.map((v) => fmtX(v, true))
+			const bySeries = new Map<string, number[]>()
+			const totals = new Map<string, number>()
+			for (const r of rows) {
+				const xi = xIdx.get(String(r[x] ?? '(null)'))
+				if (xi === undefined) continue
+				const sk = String(r[sCol] ?? '(null)')
+				const n = Number(r[metricCol])
+				const v = Number.isFinite(n) ? n : 0
+				let arr = bySeries.get(sk)
+				if (!arr) {
+					arr = new Array<number>(xKeys.length).fill(0)
+					bySeries.set(sk, arr)
+				}
+				arr[xi] = arr[xi]! + v
+				totals.set(sk, (totals.get(sk) ?? 0) + v)
+			}
+			const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1])
+			const top = ranked.slice(0, 8)
+			const rest = ranked.slice(8)
+			const series: TrendsSeries[] = top.map(([key, total]) => ({
+				key,
+				label: key,
+				values: bySeries.get(key)!,
+				total,
+			}))
+			if (rest.length > 0) {
+				const otherVals = new Array<number>(xKeys.length).fill(0)
+				let otherTotal = 0
+				for (const [key, total] of rest) {
+					const arr = bySeries.get(key)!
+					otherTotal += total
+					for (let i = 0; i < xKeys.length; i++) otherVals[i] = otherVals[i]! + arr[i]!
+				}
+				series.push({ key: '__other__', label: `Other (${rest.length})`, values: otherVals, total: otherTotal })
+			}
+			return { labels, fullLabels, series, truncatedRows: truncatedRows || xKeys.length >= 200 }
+		}
+
 		const labels = rows.map((r) => fmtX(r[x], false))
 		const fullLabels = rows.map((r) => fmtX(r[x], true))
 		const series: TrendsSeries[] = ys.map((col) => {
@@ -812,10 +974,14 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 			})
 			return { key: col, label: col, values, total: values.reduce((a, b) => a + b, 0) }
 		})
-		return { labels, fullLabels, series }
+		return { labels, fullLabels, series, truncatedRows }
 	})
 
 	function toggleY(col: string) {
+		if (seriesCol()) {
+			setYCols([col])
+			return
+		}
 		setYCols((prev) => {
 			if (prev.includes(col)) return prev.length > 1 ? prev.filter((c) => c !== col) : prev
 			return [...prev, col]
@@ -834,6 +1000,7 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 						onChange={(e) => {
 							const nextX = e.currentTarget.value
 							setXCol(nextX)
+							if (seriesCol() === nextX) setSeriesCol('')
 							setYCols((prev) => {
 								const filtered = prev.filter((c) => c !== nextX)
 								if (filtered.length > 0) return filtered
@@ -853,10 +1020,46 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 					</select>
 				</label>
 
+				<Show when={props.result.columns.length >= 3}>
+					<label class="analytics-field-inline">
+						<span>Series</span>
+						<select
+							ref={(el) => (seriesSelectEl = el)}
+							class="select sm mono"
+							value={seriesCol()}
+							onChange={(e) => {
+								const nextS = e.currentTarget.value
+								setSeriesCol(nextS)
+								if (nextS) {
+									setYCols((prev) => {
+										const valid = prev.filter((c) => c !== xCol() && c !== nextS)
+										return valid.length > 0
+											? [valid[0]!]
+											: numericCols()
+													.filter((c) => c !== xCol())
+													.slice(0, 1)
+									})
+								}
+							}}
+						>
+							<option value="" selected={seriesCol() === ''}>
+								None
+							</option>
+							<For each={props.result.columns.filter((c) => c !== xCol())}>
+								{(c) => (
+									<option value={c} selected={seriesCol() === c}>
+										{c}
+									</option>
+								)}
+							</For>
+						</select>
+					</label>
+				</Show>
+
 				<div class="analytics-field-inline">
-					<span>Y Series</span>
+					<span>{seriesCol() ? 'Value' : 'Y Series'}</span>
 					<div style="display:flex;gap:4px;flex-wrap:wrap">
-						<For each={numericCols().filter((c) => c !== xCol())}>
+						<For each={numericCols().filter((c) => c !== xCol() && c !== seriesCol())}>
 							{(c) => (
 								<button
 									type="button"
@@ -872,9 +1075,9 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 
 				<div style="flex:1" />
 
-				<Show when={props.result.rows.length > 200}>
+				<Show when={chartData().truncatedRows}>
 					<span class="mono" style="font-size:11px;color:var(--ink-muted)">
-						First 200 of {props.result.rows.length.toLocaleString()} rows
+						Showing first {seriesCol() ? '2,000' : '200'} of {props.result.rows.length.toLocaleString()} rows
 					</span>
 				</Show>
 
@@ -902,6 +1105,7 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 						series={chartData().series}
 						chartType={chartType()}
 						height={240}
+						exportFilename="query-chart.svg"
 					/>
 				</div>
 			</Show>

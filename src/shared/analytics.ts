@@ -1,7 +1,7 @@
 // Pure product-analytics types, schema auto-detection, route normalization, funnel matching, and cohort retention math.
 import type { DatabaseSchema, TableSchema } from './types.ts'
 
-export type TimeColumnFormat = 'epoch_ms' | 'epoch_s' | 'iso'
+export type TimeColumnFormat = 'epoch_ms' | 'epoch_s' | 'epoch_us' | 'cocoa_s' | 'iso'
 export type AnalyticsInterval = 'hour' | 'day' | 'week' | 'month'
 export type AnalyticsRange = '24h' | '7d' | '14d' | '30d' | '90d' | 'all'
 export type AnalyticsMetric = 'events' | 'unique_actors' | 'events_per_actor' | 'cumulative'
@@ -183,6 +183,7 @@ export interface RetentionResponse {
 	periods: number
 	cohorts: RetentionCohort[]
 	averagePcts: (number | null)[]
+	truncated?: boolean
 	sql: string
 	durationMs: number
 }
@@ -256,6 +257,7 @@ const MONDAY_EPOCH_OFFSET_MS = 4 * DAY_MS // 1970-01-01 was Thursday -> align we
 const TIME_COL_PATTERNS: [RegExp, number][] = [
 	[/^(created_at|occurred_at|event_time|event_at|timestamp|ts)$/i, 100],
 	[/^(inserted_at|recorded_at|logged_at|happened_at|sent_at|time)$/i, 90],
+	[/^Z[A-Z0-9_]*(CREATIONDATE|DATE|TIME|TIMESTAMP)$/i, 85],
 	[/(_at|_time|_ts|_timestamp)$/i, 70],
 	[/^(date|created|updated_at|visited_at|started_at)$/i, 55],
 ]
@@ -492,20 +494,38 @@ export function detectBestAnalyticsTable(schema: DatabaseSchema): string | null 
 	return best?.name ?? schema.tables.find((t) => !t.isInternal)?.name ?? null
 }
 
-export function inferTimeFormat(sampleValue: unknown, colType = ''): TimeColumnFormat {
+const COCOA_EPOCH_OFFSET_SEC = 978_307_200
+const COCOA_MIN_SEC = 315_532_800 // 2011-01-01 in Apple/Cocoa epoch
+const COCOA_MAX_SEC = 946_684_799 // 2030-12-31 in Apple/Cocoa epoch (strictly below Unix 2000-01-01 = 946684800)
+
+function inferNumericTimeFormat(n: number, colName: string): TimeColumnFormat {
+	const abs = Math.abs(n)
+	if (abs >= 1e14 && abs < 1e17) return 'epoch_us'
+	if (abs >= 1e11) return 'epoch_ms'
+	if (
+		n >= COCOA_MIN_SEC &&
+		n <= COCOA_MAX_SEC &&
+		(/^Z[A-Z0-9_]*(DATE|TIME|TIMESTAMP)$/i.test(colName) || !Number.isInteger(n))
+	) {
+		return 'cocoa_s'
+	}
+	if (n >= COCOA_MIN_SEC && n <= COCOA_MAX_SEC) return 'cocoa_s'
+	return 'epoch_s'
+}
+
+export function inferTimeFormat(sampleValue: unknown, colType = '', colName = ''): TimeColumnFormat {
 	if (sampleValue instanceof Date) return 'iso'
 	if (typeof sampleValue === 'number' && Number.isFinite(sampleValue)) {
-		return Math.abs(sampleValue) >= 1e11 ? 'epoch_ms' : 'epoch_s'
+		return inferNumericTimeFormat(sampleValue, colName)
 	}
 	if (typeof sampleValue === 'bigint') {
-		const n = Number(sampleValue)
-		return Math.abs(n) >= 1e11 ? 'epoch_ms' : 'epoch_s'
+		return inferNumericTimeFormat(Number(sampleValue), colName)
 	}
 	if (typeof sampleValue === 'string') {
 		const trimmed = sampleValue.trim()
 		if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
 			const n = Number(trimmed)
-			if (Number.isFinite(n)) return Math.abs(n) >= 1e11 ? 'epoch_ms' : 'epoch_s'
+			if (Number.isFinite(n)) return inferNumericTimeFormat(n, colName)
 		}
 		return 'iso'
 	}
@@ -521,9 +541,17 @@ export function parseTimestampToMs(val: unknown, format: TimeColumnFormat): numb
 		const n = Number(val)
 		return Number.isFinite(n) ? Math.round(n) : null
 	}
+	if (format === 'epoch_us') {
+		const n = Number(val)
+		return Number.isFinite(n) ? Math.round(n / 1000) : null
+	}
 	if (format === 'epoch_s') {
 		const n = Number(val)
 		return Number.isFinite(n) ? Math.round(n * 1000) : null
+	}
+	if (format === 'cocoa_s') {
+		const n = Number(val)
+		return Number.isFinite(n) ? Math.round((n + COCOA_EPOCH_OFFSET_SEC) * 1000) : null
 	}
 	const str = String(val).trim()
 	if (!str) return null
