@@ -1,4 +1,18 @@
 // Typed HTTP client speaking ASON against DataDip's /api/* endpoints.
+import type {
+	ActorJourneyRequest,
+	ActorJourneyResponse,
+	ActorsRequest,
+	ActorsResponse,
+	AnalyticsDetection,
+	FunnelRequest,
+	FunnelResponse,
+	RetentionRequest,
+	RetentionResponse,
+	SavedAnalyticsChart,
+	TrendsRequest,
+	TrendsResponse,
+} from '../shared/analytics.ts'
 import { parse as parseAson, stringify as stringifyAson } from '../shared/ason.ts'
 import type {
 	BrowseParams,
@@ -142,6 +156,34 @@ export const api = {
 			table,
 			column,
 		}),
+
+	analyticsDetect: (id: string, table?: string | null) =>
+		request<AnalyticsDetection>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/detect`, {
+			table: table ?? null,
+		}),
+	analyticsTrends: (id: string, body: TrendsRequest) =>
+		request<TrendsResponse>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/trends`, body),
+	analyticsFunnel: (id: string, body: FunnelRequest) =>
+		request<FunnelResponse>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/funnel`, body),
+	analyticsRetention: (id: string, body: RetentionRequest) =>
+		request<RetentionResponse>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/retention`, body),
+	analyticsActors: (id: string, body: ActorsRequest) =>
+		request<ActorsResponse>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/actors`, body),
+	analyticsJourney: (id: string, body: ActorJourneyRequest) =>
+		request<ActorJourneyResponse>('POST', `/api/connections/${encodeURIComponent(id)}/analytics/journey`, body),
+	listAnalyticsCharts: (id: string) =>
+		request<{ charts: SavedAnalyticsChart[] }>('GET', `/api/connections/${encodeURIComponent(id)}/analytics/charts`),
+	saveAnalyticsChart: (
+		id: string,
+		body: { id?: string; title: string; mode: SavedAnalyticsChart['mode']; config: Record<string, unknown> },
+	) =>
+		request<{ chart: SavedAnalyticsChart }>(
+			'POST',
+			`/api/connections/${encodeURIComponent(id)}/analytics/charts`,
+			body,
+		),
+	deleteAnalyticsChart: (chartId: string) =>
+		request<{ ok: true }>('DELETE', `/api/analytics/charts/${encodeURIComponent(chartId)}`),
 	getDbInfo: (id: string) => request<{ info: DatabaseInfo }>('GET', `/api/connections/${encodeURIComponent(id)}/info`),
 	runMaintenance: (id: string, action: 'wal_checkpoint' | 'vacuum') =>
 		request<{ ok: true; message: string; durationMs: number }>(

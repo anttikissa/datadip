@@ -1,8 +1,9 @@
 // Anchored Cell Viewer & multi-line Cell Editor popover for inspecting or editing truncated/long table cells.
 import { createEffect, createMemo, createSignal, onSettled, Show } from 'solid-js'
 import { copyToClipboard, formatCellText, tryFormatTimestampHint, tryPrettyJson } from '../lib/format.ts'
-import { IconClose, IconCopy, IconLock, IconUnlock } from '../lib/icons.tsx'
+import { IconClock, IconClose, IconCopy, IconLock, IconUnlock } from '../lib/icons.tsx'
 import { isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
+import { autoDecodeSingleValue } from '../shared/lenses.ts'
 
 export interface CellViewerState {
 	rowIdx: number
@@ -82,7 +83,8 @@ export function CellViewer(props: {
 
 	const rawText = createMemo(() => (props.state ? formatCellText(props.state.value) : ''))
 	const prettyJson = createMemo(() => (props.state ? tryPrettyJson(props.state.value) : null))
-	const tsHint = createMemo(() => (props.state ? tryFormatTimestampHint(props.state.value) : null))
+	const lens = createMemo(() => (props.state ? autoDecodeSingleValue(props.state.value, props.state.colName) : null))
+	const tsHint = createMemo(() => (props.state && !lens() ? tryFormatTimestampHint(props.state.value) : null))
 	const displayedText = createMemo(() => (pretty() && prettyJson() ? prettyJson()! : rawText()))
 
 	const posStyle = createMemo(() => {
@@ -173,6 +175,19 @@ export function CellViewer(props: {
 											value={displayedText()}
 											aria-label={`${st().colName} value`}
 										/>
+									</Show>
+									<Show when={lens()}>
+										{(d) => (
+											<div class="lens-decoded-strip mono" style="margin-top:8px">
+												<span class="lens-decoded-badge">
+													<IconClock />
+													{d().formatLabel}
+												</span>
+												<span>{d().utc} UTC</span>
+												<span style="color:var(--ink-muted)">· Local: {d().local}</span>
+												<span style="color:var(--ink-muted)">({d().relative})</span>
+											</div>
+										)}
 									</Show>
 									<Show when={tsHint()}>{(h) => <div class="inspector-hint mono">{h()}</div>}</Show>
 								</div>

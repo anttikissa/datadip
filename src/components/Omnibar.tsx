@@ -26,6 +26,7 @@ export function Omnibar(props: {
 	onSelectConsole: (connId: string, consoleId: string) => void
 	onNewConsole: () => void
 	onOpenErDiagram?: () => void
+	onOpenAnalytics?: () => void
 	onOpenDbInfo?: () => void
 	onCopyTeammateLink?: () => void
 	onOpenChangelog?: () => void
@@ -177,6 +178,20 @@ export function Omnibar(props: {
 								props.onClose()
 							},
 						},
+						...(props.onOpenAnalytics
+							? [
+									{
+										id: 'act:analytics',
+										kind: 'ACTION',
+										label: 'Open Product Analytics & Graphs',
+										detail: 'Trends, conversion funnels, retention cohorts & user journeys',
+										run: () => {
+											props.onOpenAnalytics?.()
+											props.onClose()
+										},
+									},
+								]
+							: []),
 						...(props.onOpenErDiagram
 							? [
 									{

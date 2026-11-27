@@ -250,3 +250,21 @@ export function IconLink() {
 		</svg>
 	)
 }
+
+export function IconChart() {
+	return (
+		<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+			<path d="M2.5 13.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="square" />
+			<path d="M4.5 13.5V9.5M8 13.5V5.5M11.5 13.5V3" stroke="currentColor" stroke-width="2" stroke-linecap="square" />
+		</svg>
+	)
+}
+
+export function IconClock() {
+	return (
+		<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+			<circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.5" />
+			<path d="M8 4.8V8.2L10.4 9.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+		</svg>
+	)
+}

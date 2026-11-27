@@ -10,11 +10,23 @@ import {
 	formatCellText,
 	formatIsoShort,
 } from '../lib/format.ts'
-import { IconAlert, IconArrowRight, IconClose, IconCopy, IconPlay, IconTable, IconTrash } from '../lib/icons.tsx'
+import {
+	IconAlert,
+	IconArrowRight,
+	IconChart,
+	IconClock,
+	IconClose,
+	IconCopy,
+	IconPlay,
+	IconTable,
+	IconTrash,
+} from '../lib/icons.tsx'
 import { hasTextSelection, isEditableTarget, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
+import { decodeCellWithLens, detectColumnLenses, formatCellByLensMode, LENS_FORMAT_META } from '../shared/lenses.ts'
 import { formatSql, statementAtCursor } from '../shared/sql.ts'
 import { tid } from '../shared/tid.ts'
 import type { Console, DatabaseSchema, DriverKind, ForeignKeyInfo, QueryHistoryEntry } from '../shared/types.ts'
+import { QueryResultChart } from './AnalyticsCharts.tsx'
 import { CellViewer, type CellViewerState } from './CellViewer.tsx'
 import type { ConfirmState } from './ConfirmDialog.tsx'
 import { FkPeekCard, type FkPeekState } from './FkPeekCard.tsx'
@@ -65,6 +77,8 @@ export function ConsoleView(props: {
 	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
 	const [colWidths, setColWidths] = createSignal<Record<string, number>>({})
 	const [freezeFirst, setFreezeFirst] = createSignal(false)
+	const [resultView, setResultView] = createSignal<'table' | 'chart'>('table')
+	const [lensesEnabled, setLensesEnabled] = createSignal(true)
 
 	function startColResize(e: MouseEvent, colName: string) {
 		e.preventDefault()
@@ -267,6 +281,13 @@ export function ConsoleView(props: {
 	}
 
 	const currentResult = createMemo(() => results()[activeTab()] ?? null)
+
+	const autoResultLenses = createMemo(() => {
+		if (!lensesEnabled()) return {}
+		const res = currentResult()
+		if (!res || res.rows.length === 0) return {}
+		return detectColumnLenses(res.columns, {}, res.rows)
+	})
 
 	createEffect(
 		() => currentResult(),
@@ -766,15 +787,45 @@ export function ConsoleView(props: {
 							</Show>
 
 							<Show when={(currentResult()?.rows.length ?? 0) > 0}>
-								<button
-									type="button"
-									class={['btn sm', { 'active-toggle': freezeFirst() }]}
-									aria-pressed={freezeFirst() ? 'true' : 'false'}
-									title="Pin the first result column while scrolling horizontally"
-									onClick={() => setFreezeFirst((v) => !v)}
-								>
-									Freeze 1st
-								</button>
+								<div class="tab-group" aria-label="Result view mode">
+									<button
+										type="button"
+										class={['tab-btn', { active: resultView() === 'table' }]}
+										onClick={() => setResultView('table')}
+									>
+										Table
+									</button>
+									<button
+										type="button"
+										class={['tab-btn', { active: resultView() === 'chart' }]}
+										title="Plot query results as a bar, line, or area chart"
+										onClick={() => setResultView('chart')}
+									>
+										<IconChart />
+										Chart
+									</button>
+								</div>
+								<Show when={resultView() === 'table'}>
+									<button
+										type="button"
+										class={['btn sm', { 'active-toggle': lensesEnabled() }]}
+										aria-pressed={lensesEnabled() ? 'true' : 'false'}
+										title="Auto-decode Unix timestamps and time-bearing IDs (tid, UUIDv7, ULID)"
+										onClick={() => setLensesEnabled((v) => !v)}
+									>
+										<IconClock />
+										Lenses
+									</button>
+									<button
+										type="button"
+										class={['btn sm', { 'active-toggle': freezeFirst() }]}
+										aria-pressed={freezeFirst() ? 'true' : 'false'}
+										title="Pin the first result column while scrolling horizontally"
+										onClick={() => setFreezeFirst((v) => !v)}
+									>
+										Freeze 1st
+									</button>
+								</Show>
 								<button
 									type="button"
 									class="btn sm"
@@ -876,96 +927,133 @@ export function ConsoleView(props: {
 												</div>
 											}
 										>
-											<table class={['data-table', { 'freeze-first': freezeFirst() }]}>
-												<thead>
-													<tr>
-														<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>
-														<For each={res().columns}>
-															{(col) => (
-																<th style={colWidthStyle(col)}>
-																	<span>{col}</span>
-																	<Show when={currentFkMap().get(col)}>
-																		{(fk) => (
-																			<span class="th-badge fk" style="margin-left:6px">
-																				→ {fk().toTable}
-																			</span>
-																		)}
-																	</Show>
-																	<span
-																		class="col-resizer"
-																		title="Drag to resize · Double-click to auto-fit"
-																		onMouseDown={(e) => startColResize(e, col)}
-																		onDblClick={(e) => autoFitColumn(e, col)}
-																	/>
-																</th>
+											<Show when={resultView() === 'table'} fallback={<QueryResultChart result={res()} />}>
+												<table class={['data-table', { 'freeze-first': freezeFirst() }]}>
+													<thead>
+														<tr>
+															<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>
+															<For each={res().columns}>
+																{(col) => {
+																	const lensCfg = () => autoResultLenses()[col]
+																	return (
+																		<th style={colWidthStyle(col)}>
+																			<span>{col}</span>
+																			<Show when={lensCfg()?.format !== 'off' ? lensCfg() : null}>
+																				{(l) => (
+																					<span
+																						class="th-badge lens"
+																						style="margin-left:5px"
+																						title={`Smart Lens: ${LENS_FORMAT_META[l().format as keyof typeof LENS_FORMAT_META].label}`}
+																					>
+																						{LENS_FORMAT_META[l().format as keyof typeof LENS_FORMAT_META].shortTag}
+																					</span>
+																				)}
+																			</Show>
+																			<Show when={currentFkMap().get(col)}>
+																				{(fk) => (
+																					<span class="th-badge fk" style="margin-left:6px">
+																						→ {fk().toTable}
+																					</span>
+																				)}
+																			</Show>
+																			<span
+																				class="col-resizer"
+																				title="Drag to resize · Double-click to auto-fit"
+																				onMouseDown={(e) => startColResize(e, col)}
+																				onDblClick={(e) => autoFitColumn(e, col)}
+																			/>
+																		</th>
+																	)
+																}}
+															</For>
+														</tr>
+													</thead>
+													<tbody>
+														<Show when={res().rows.length === 0}>
+															<tr>
+																<td colspan={res().columns.length + 1} class="empty-state">
+																	Query returned 0 rows ({res().durationMs} ms).
+																</td>
+															</tr>
+														</Show>
+														<For each={res().rows}>
+															{(row, rIdx) => (
+																<tr>
+																	<td class="row-num">{rIdx() + 1}</td>
+																	<For each={res().columns}>
+																		{(col, cIdx) => {
+																			const val = () => row[col]
+																			const fk = () => currentFkMap().get(col)
+																			const active = () => activeCell()?.row === rIdx() && activeCell()?.col === cIdx()
+																			const lensCfg = () => autoResultLenses()[col]
+																			const decoded = () => {
+																				const lc = lensCfg()
+																				if (!lc || lc.format === 'off') return null
+																				return decodeCellWithLens(val(), lc.format)
+																			}
+																			const displayVal = () => {
+																				const raw = formatCellText(val())
+																				const lc = lensCfg()
+																				const d = decoded()
+																				if (!lc || !d || lc.mode === 'raw') return raw
+																				return formatCellByLensMode(raw, d, lc.mode)
+																			}
+																			const lensTitle = () => {
+																				const d = decoded()
+																				if (!d) return undefined
+																				return `${d.formatLabel}: ${d.utc} UTC (${d.relative}) · raw: ${formatCellText(val())}`
+																			}
+																			return (
+																				<td
+																					data-r={rIdx()}
+																					data-c={cIdx()}
+																					style={colWidthStyle(col)}
+																					title={lensTitle()}
+																					class={{ 'cell-active': active() }}
+																					onClick={() => {
+																						setActiveCell({ row: rIdx(), col: cIdx() })
+																						if (!window.getSelection()?.toString()) {
+																							gridScrollEl?.focus({ preventScroll: true })
+																						}
+																					}}
+																					onDblClick={(e) => openResultCellViewer(rIdx(), col, val(), e.currentTarget)}
+																				>
+																					<Show
+																						when={fk() && val() !== null && val() !== undefined}
+																						fallback={
+																							val() === null || val() === undefined ? (
+																								<span class="cell-null">NULL</span>
+																							) : decoded() && lensCfg()?.mode !== 'raw' ? (
+																								<span class="cell-lens-val">{displayVal()}</span>
+																							) : (
+																								formatCellText(val())
+																							)
+																						}
+																					>
+																						<button
+																							type="button"
+																							class="fk-link"
+																							onMouseEnter={(e) => startFkPeek(e, fk()!, val())}
+																							onMouseLeave={cancelFkPeek}
+																							onClick={(e) => {
+																								e.stopPropagation()
+																								props.onFollowFk(fk()!.toTable, fk()!.toColumn, val())
+																							}}
+																						>
+																							<span>{formatCellText(val())}</span>
+																							<IconArrowRight />
+																						</button>
+																					</Show>
+																				</td>
+																			)
+																		}}
+																	</For>
+																</tr>
 															)}
 														</For>
-													</tr>
-												</thead>
-												<tbody>
-													<Show when={res().rows.length === 0}>
-														<tr>
-															<td colspan={res().columns.length + 1} class="empty-state">
-																Query returned 0 rows ({res().durationMs} ms).
-															</td>
-														</tr>
-													</Show>
-													<For each={res().rows}>
-														{(row, rIdx) => (
-															<tr>
-																<td class="row-num">{rIdx() + 1}</td>
-																<For each={res().columns}>
-																	{(col, cIdx) => {
-																		const val = () => row[col]
-																		const fk = () => currentFkMap().get(col)
-																		const active = () => activeCell()?.row === rIdx() && activeCell()?.col === cIdx()
-																		return (
-																			<td
-																				data-r={rIdx()}
-																				data-c={cIdx()}
-																				style={colWidthStyle(col)}
-																				class={{ 'cell-active': active() }}
-																				onClick={() => {
-																					setActiveCell({ row: rIdx(), col: cIdx() })
-																					if (!window.getSelection()?.toString()) {
-																						gridScrollEl?.focus({ preventScroll: true })
-																					}
-																				}}
-																				onDblClick={(e) => openResultCellViewer(rIdx(), col, val(), e.currentTarget)}
-																			>
-																				<Show
-																					when={fk() && val() !== null && val() !== undefined}
-																					fallback={
-																						val() === null || val() === undefined ? (
-																							<span class="cell-null">NULL</span>
-																						) : (
-																							formatCellText(val())
-																						)
-																					}
-																				>
-																					<button
-																						type="button"
-																						class="fk-link"
-																						onMouseEnter={(e) => startFkPeek(e, fk()!, val())}
-																						onMouseLeave={cancelFkPeek}
-																						onClick={(e) => {
-																							e.stopPropagation()
-																							props.onFollowFk(fk()!.toTable, fk()!.toColumn, val())
-																						}}
-																					>
-																						<span>{formatCellText(val())}</span>
-																						<IconArrowRight />
-																					</button>
-																				</Show>
-																			</td>
-																		)
-																	}}
-																</For>
-															</tr>
-														)}
-													</For>
-												</tbody>
-											</table>
+													</tbody>
+												</table>
+											</Show>
 										</Show>
 									</Show>
 								)}

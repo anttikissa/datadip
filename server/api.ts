@@ -1,4 +1,12 @@
 // HTTP /api/* route handler speaking ASON for connections, browsing, SQL execution, mutations, consoles, and discovery.
+import type {
+	ActorJourneyRequest,
+	ActorsRequest,
+	FunnelRequest,
+	RetentionRequest,
+	SavedAnalyticsChart,
+	TrendsRequest,
+} from '../src/shared/analytics.ts'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
 import { APP_VERSION } from '../src/shared/changelog.ts'
 import type {
@@ -391,6 +399,56 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				return asonResponse({ profile })
 			}
 
+			// Product Analytics routes
+			if (rest === 'analytics/detect' && method === 'POST') {
+				const body = await readBody<{ table?: string | null }>(req)
+				const detection = await manager.detectAnalytics(connId, body.table)
+				return asonResponse(detection)
+			}
+			if (rest === 'analytics/trends' && method === 'POST') {
+				const body = await readBody<TrendsRequest>(req)
+				const result = await manager.analyticsTrends(connId, body)
+				return asonResponse(result)
+			}
+			if (rest === 'analytics/funnel' && method === 'POST') {
+				const body = await readBody<FunnelRequest>(req)
+				const result = await manager.analyticsFunnel(connId, body)
+				return asonResponse(result)
+			}
+			if (rest === 'analytics/retention' && method === 'POST') {
+				const body = await readBody<RetentionRequest>(req)
+				const result = await manager.analyticsRetention(connId, body)
+				return asonResponse(result)
+			}
+			if (rest === 'analytics/actors' && method === 'POST') {
+				const body = await readBody<ActorsRequest>(req)
+				const result = await manager.analyticsActors(connId, body)
+				return asonResponse(result)
+			}
+			if (rest === 'analytics/journey' && method === 'POST') {
+				const body = await readBody<ActorJourneyRequest>(req)
+				const result = await manager.analyticsActorJourney(connId, body)
+				return asonResponse(result)
+			}
+			if (rest === 'analytics/charts' && method === 'GET') {
+				return asonResponse({ charts: manager.store.listAnalyticsCharts(connId) })
+			}
+			if (rest === 'analytics/charts' && method === 'POST') {
+				const body = await readBody<{
+					id?: string
+					title?: string
+					mode?: SavedAnalyticsChart['mode']
+					config?: Record<string, unknown>
+				}>(req)
+				const chart = manager.store.saveAnalyticsChart(connId, {
+					id: body.id,
+					title: body.title || 'Untitled chart',
+					mode: body.mode === 'funnel' || body.mode === 'retention' || body.mode === 'actors' ? body.mode : 'trends',
+					config: body.config ?? {},
+				})
+				return asonResponse({ chart }, 201)
+			}
+
 			if (rest === 'info' && method === 'GET') {
 				const info = await manager.getDbInfo(connId)
 				return asonResponse({ info })
@@ -455,6 +513,15 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 				manager.store.clearQueryHistory(connId)
 				return asonResponse({ ok: true })
 			}
+		}
+
+		// Saved analytics chart delete by id
+		const chartMatch = /^\/api\/analytics\/charts\/([^/]+)$/.exec(path)
+		if (chartMatch && method === 'DELETE') {
+			const chartId = decodeURIComponent(chartMatch[1]!)
+			const ok = manager.store.deleteAnalyticsChart(chartId)
+			if (!ok) throw new HttpError(404, 'Saved chart not found')
+			return asonResponse({ ok: true })
 		}
 
 		// Console update/delete by id

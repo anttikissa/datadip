@@ -28,6 +28,12 @@ export type AppRoute =
 			kind: 'er'
 			connId: string
 	  }
+	| {
+			kind: 'analytics'
+			connId: string
+			table: string | null
+			mode: 'trends' | 'funnel' | 'retention' | 'actors' | 'dashboard'
+	  }
 
 const VALID_OPS = new Set<FilterOp>(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'isnull', 'notnull'])
 
@@ -127,6 +133,22 @@ export function parseRoute(pathname: string, search: string): AppRoute {
 		}
 	}
 
+	if (parts[2] === 'analytics') {
+		const params = new URLSearchParams(search)
+		const table = params.get('table') || null
+		const modeRaw = params.get('mode')
+		const mode =
+			modeRaw === 'funnel' || modeRaw === 'retention' || modeRaw === 'actors' || modeRaw === 'dashboard'
+				? modeRaw
+				: 'trends'
+		return {
+			kind: 'analytics',
+			connId,
+			table,
+			mode,
+		}
+	}
+
 	return { kind: 'connection', connId }
 }
 
@@ -134,6 +156,14 @@ export function formatRoute(route: AppRoute): string {
 	if (route.kind === 'home') return '/'
 	if (route.kind === 'connection') return `/c/${encodeURIComponent(route.connId)}`
 	if (route.kind === 'er') return `/c/${encodeURIComponent(route.connId)}/er`
+	if (route.kind === 'analytics') {
+		const base = `/c/${encodeURIComponent(route.connId)}/analytics`
+		const params = new URLSearchParams()
+		if (route.table) params.set('table', route.table)
+		if (route.mode && route.mode !== 'trends') params.set('mode', route.mode)
+		const qs = params.toString()
+		return qs ? `${base}?${qs}` : base
+	}
 	if (route.kind === 'sql') {
 		const base = `/c/${encodeURIComponent(route.connId)}/sql`
 		return route.consoleId ? `${base}/${encodeURIComponent(route.consoleId)}` : base

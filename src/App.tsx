@@ -1,5 +1,6 @@
 // Root DataDip application: URL history router, Production chrome, Read-Only/Read-Write switch, sidebar, FK trail, and modals.
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from 'solid-js'
+import { AnalyticsView } from './components/AnalyticsView.tsx'
 import { ChangelogModal } from './components/ChangelogModal.tsx'
 import { ConfirmDialog, type ConfirmState } from './components/ConfirmDialog.tsx'
 import { ConnectionModal } from './components/ConnectionModal.tsx'
@@ -20,6 +21,7 @@ import {
 	IconAlert,
 	IconBack,
 	IconBrand,
+	IconChart,
 	IconClose,
 	IconCopy,
 	IconForward,
@@ -820,6 +822,8 @@ export function App() {
 				document.title = `${prodPrefix}${consoleLabel} · ${connLabel} — DataDip`
 			} else if (r.kind === 'er') {
 				document.title = `${prodPrefix}ER Diagram · ${connLabel} — DataDip`
+			} else if (r.kind === 'analytics') {
+				document.title = `${prodPrefix}Analytics${r.table ? ` (${r.table})` : ''} · ${connLabel} — DataDip`
 			} else {
 				document.title = `${prodPrefix}${connLabel} — DataDip`
 			}
@@ -856,6 +860,11 @@ export function App() {
 	const activeErRoute = createMemo(() => {
 		const r = route()
 		return r.kind === 'er' && !schemaError() ? r : null
+	})
+
+	const activeAnalyticsRoute = createMemo(() => {
+		const r = route()
+		return r.kind === 'analytics' && !schemaError() ? r : null
 	})
 
 	return (
@@ -1333,6 +1342,21 @@ export function App() {
 								}}
 							</For>
 
+							{/* Product Analytics quick button */}
+							<button
+								type="button"
+								class={['sidebar-item', { active: route().kind === 'analytics' }]}
+								onClick={() => {
+									const id = activeConnId()
+									const cur = route()
+									const tbl = cur.kind === 'table' ? cur.table : null
+									if (id) navigate({ kind: 'analytics', connId: id, table: tbl, mode: 'trends' })
+								}}
+							>
+								<IconChart />
+								<span class="sidebar-item-label">Analytics</span>
+							</button>
+
 							{/* Schema / ER Diagram quick button */}
 							<button
 								type="button"
@@ -1560,6 +1584,9 @@ export function App() {
 							onOpenInSql={(sqlText) => {
 								void openOrCreateConsole(r().connId, sqlText)
 							}}
+							onOpenAnalytics={(tbl) => {
+								navigate({ kind: 'analytics', connId: r().connId, table: tbl, mode: 'trends' })
+							}}
 							onRequestConfirm={(st) => setConfirmState(st)}
 							onRequestArmRw={() => void setRw(true)}
 							onNotify={notify}
@@ -1605,6 +1632,66 @@ export function App() {
 									selectedRow: null,
 								})
 							}
+						/>
+					)}
+				</Show>
+
+				<Show when={activeAnalyticsRoute()}>
+					{(r) => (
+						<AnalyticsView
+							connId={r().connId}
+							schema={schema()}
+							initialTable={r().table}
+							mode={r().mode}
+							onChangeRoute={(patch) =>
+								navigate({
+									kind: 'analytics',
+									connId: r().connId,
+									table: patch.table !== undefined ? patch.table : r().table,
+									mode: patch.mode ?? r().mode,
+								})
+							}
+							onOpenTable={(table, filters) =>
+								navigate({
+									kind: 'table',
+									connId: r().connId,
+									table,
+									tab: 'data',
+									fields: [],
+									filters: filters ?? [],
+									order: [],
+									limit: 100,
+									start: null,
+									direction: 'next',
+									offset: null,
+									search: '',
+									selectedRow: null,
+								})
+							}
+							onOpenInSql={(sqlText) => {
+								void openOrCreateConsole(r().connId, sqlText)
+							}}
+							onFollowFk={(targetTable, targetColumn, value) =>
+								navigate(
+									{
+										kind: 'table',
+										connId: r().connId,
+										table: targetTable,
+										tab: 'data',
+										fields: [],
+										filters: [{ column: targetColumn, op: 'eq', value: String(value ?? '') }],
+										order: [],
+										limit: 100,
+										start: null,
+										direction: 'next',
+										offset: null,
+										search: '',
+										selectedRow: null,
+									},
+									{ trailLabel: `${targetTable}.${targetColumn}=${value}` },
+								)
+							}
+							onNotify={notify}
 						/>
 					)}
 				</Show>
@@ -1920,6 +2007,12 @@ export function App() {
 				onNewConsole={() => {
 					const id = activeConnId()
 					if (id) void openOrCreateConsole(id, '-- New console\n')
+				}}
+				onOpenAnalytics={() => {
+					const id = activeConnId()
+					const cur = route()
+					const tbl = cur.kind === 'table' ? cur.table : null
+					if (id) navigate({ kind: 'analytics', connId: id, table: tbl, mode: 'trends' })
 				}}
 				onOpenErDiagram={() => {
 					const id = activeConnId()

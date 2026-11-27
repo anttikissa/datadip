@@ -12,6 +12,8 @@ import {
 } from '../lib/format.ts'
 import {
 	IconArrowRight,
+	IconChart,
+	IconClock,
 	IconClose,
 	IconColumns,
 	IconCopy,
@@ -23,6 +25,15 @@ import {
 	IconTrash,
 } from '../lib/icons.tsx'
 import { hasTextSelection, isEditableTarget, isNativeApp, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
+import {
+	type ColumnLensConfig,
+	decodeCellWithLens,
+	detectColumnLenses,
+	formatCellByLensMode,
+	LENS_FORMAT_META,
+	type LensDisplayMode,
+	type LensFormat,
+} from '../shared/lenses.ts'
 import type {
 	BrowseResult,
 	DatabaseSchema,
@@ -68,6 +79,7 @@ export function TableView(props: {
 	isLocalSqlite?: boolean
 	onNavigate: (next: TableRoute, options?: { replace?: boolean; trailLabel?: string }) => void
 	onOpenInSql: (sql: string) => void
+	onOpenAnalytics?: (table: string) => void
 	onRequestConfirm: (state: ConfirmState) => void
 	onRequestArmRw?: () => void
 	onNotify: (msg: string, kind?: 'info' | 'ok' | 'error') => void
@@ -95,6 +107,9 @@ export function TableView(props: {
 	const [cellViewer, setCellViewer] = createSignal<CellViewerState | null>(null)
 	const [wrapRows, setWrapRows] = createSignal(false)
 	const [freezeFirst, setFreezeFirst] = createSignal(false)
+	const [lensesEnabled, setLensesEnabled] = createSignal(true)
+	const [lensOverrides, setLensOverrides] = createSignal<Record<string, ColumnLensConfig>>({})
+	const [lensMenu, setLensMenu] = createSignal<{ colName: string; x: number; y: number } | null>(null)
 	const [liveWatch, setLiveWatch] = createSignal(true)
 	const [colWidths, setColWidths] = createSignal<Record<string, number>>({})
 	const [hoverPeek, setHoverPeek] = createSignal<{
@@ -102,6 +117,8 @@ export function TableView(props: {
 		y: number
 		colName: string
 		text: string
+		lensHeader?: string
+		lensSub?: string
 		truncated: boolean
 	} | null>(null)
 	let hoverTimer: ReturnType<typeof setTimeout> | null = null
@@ -719,24 +736,62 @@ export function TableView(props: {
 		return w ? `width:${w}px;min-width:${w}px;max-width:${w}px` : undefined
 	}
 
+	const autoLenses = createMemo(() => {
+		const res = data()
+		if (!res || res.rows.length === 0) return {}
+		return detectColumnLenses(res.columns, res.columnTypes, res.rows)
+	})
+
+	createEffect(
+		() => `${props.route.connId}:${props.route.table}`,
+		() => {
+			setLensOverrides({})
+			setLensMenu(null)
+		},
+	)
+
+	function effectiveLens(colName: string): ColumnLensConfig | null {
+		if (!lensesEnabled()) return null
+		const ov = lensOverrides()[colName]
+		if (ov) return ov.format === 'off' ? null : ov
+		return autoLenses()[colName] ?? null
+	}
+
+	function updateColumnLens(colName: string, next: ColumnLensConfig | null) {
+		setLensOverrides((prev) => {
+			const copy = { ...prev }
+			if (next === null) delete copy[colName]
+			else copy[colName] = next
+			return copy
+		})
+	}
+
 	function startHoverPeek(e: MouseEvent, colName: string, value: unknown) {
-		if (wrapRows() || cellViewer() || editingCell()) return
+		if (cellViewer() || editingCell()) return
 		if (value === null || value === undefined) return
 		const td = e.currentTarget as HTMLElement
-		if (td.scrollWidth <= td.clientWidth + 1) return
+		const lc = effectiveLens(colName)
+		const decoded = lc && lc.format !== 'off' ? decodeCellWithLens(value, lc.format) : null
+		const isOverflowing = !wrapRows() && td.scrollWidth > td.clientWidth + 1
+		if (!decoded && !isOverflowing) return
 		if (hoverTimer) clearTimeout(hoverTimer)
 		const x = e.clientX
 		const y = e.clientY
 		const full = formatCellText(value)
-		hoverTimer = setTimeout(() => {
-			setHoverPeek({
-				x,
-				y,
-				colName,
-				text: full.length > 600 ? full.slice(0, 600) + '…' : full,
-				truncated: full.length > 600,
-			})
-		}, 320)
+		hoverTimer = setTimeout(
+			() => {
+				setHoverPeek({
+					x,
+					y,
+					colName,
+					lensHeader: decoded ? `${decoded.formatLabel} · ${decoded.utc} UTC` : undefined,
+					lensSub: decoded ? `Local: ${decoded.local} · ${decoded.relative}` : undefined,
+					text: full.length > 600 ? full.slice(0, 600) + '…' : full,
+					truncated: full.length > 600,
+				})
+			},
+			decoded ? 200 : 320,
+		)
 	}
 
 	function cancelHoverPeek() {
@@ -993,6 +1048,18 @@ export function TableView(props: {
 					Open in Console
 				</button>
 
+				<Show when={props.onOpenAnalytics}>
+					<button
+						type="button"
+						class="btn sm"
+						title={`Open Product Analytics & Graphs for ${props.route.table}`}
+						onClick={() => props.onOpenAnalytics?.(props.route.table)}
+					>
+						<IconChart />
+						Analyze
+					</button>
+				</Show>
+
 				<div style="flex:1" />
 
 				<Show when={props.route.tab === 'data'}>
@@ -1018,6 +1085,18 @@ export function TableView(props: {
 							}}
 						/>
 					</div>
+
+					{/* Smart Value Lenses toggle */}
+					<button
+						type="button"
+						class={['btn sm', { 'active-toggle': lensesEnabled() }]}
+						aria-pressed={lensesEnabled() ? 'true' : 'false'}
+						title="Auto-decode Unix timestamps (ms/sec/µs/ns) and time-bearing IDs (Crockford tid, UUIDv7, ULID, KSUID, ObjectId)"
+						onClick={() => setLensesEnabled((v) => !v)}
+					>
+						<IconClock />
+						Lenses
+					</button>
 
 					{/* Row wrap toggle */}
 					<button
@@ -1321,6 +1400,7 @@ export function TableView(props: {
 													const sortSpec = () => props.route.order.find((o) => o.column === colName)
 													const fk = () => fkByCol().get(colName)
 													const isPk = () => pkCols().includes(colName)
+													const lens = () => effectiveLens(colName)
 													return (
 														<th style={colWidthStyle(colName)}>
 															<div class="th-inner">
@@ -1359,6 +1439,49 @@ export function TableView(props: {
 																	</Show>
 																</button>
 																<span class="th-actions">
+																	<Show when={lens()?.format !== 'off' ? lens() : null}>
+																		{(l) => {
+																			const meta = () => LENS_FORMAT_META[l().format as LensFormat]
+																			return (
+																				<button
+																					type="button"
+																					class={['th-lens-pill', { active: l().mode !== 'raw' }]}
+																					title={`Smart Lens: ${meta().label} (${l().mode}) — click to switch display or format`}
+																					onClick={(e) => {
+																						e.stopPropagation()
+																						const rect = e.currentTarget.getBoundingClientRect()
+																						setLensMenu((cur) =>
+																							cur?.colName === colName
+																								? null
+																								: { colName, x: rect.left, y: rect.bottom + 4 },
+																						)
+																					}}
+																				>
+																					<IconClock />
+																					<span>{meta().shortTag}</span>
+																				</button>
+																			)
+																		}}
+																	</Show>
+																	<Show when={!lens()}>
+																		<button
+																			type="button"
+																			class="th-profile-btn"
+																			title={`Configure Smart Lens (timestamp / ID decoder) for ${colName}`}
+																			aria-label={`Configure lens for ${colName}`}
+																			onClick={(e) => {
+																				e.stopPropagation()
+																				const rect = e.currentTarget.getBoundingClientRect()
+																				setLensMenu((cur) =>
+																					cur?.colName === colName
+																						? null
+																						: { colName, x: rect.left, y: rect.bottom + 4 },
+																				)
+																			}}
+																		>
+																			<IconClock />
+																		</button>
+																	</Show>
 																	<button
 																		type="button"
 																		class="th-profile-btn"
@@ -1427,6 +1550,12 @@ export function TableView(props: {
 																const active = () => activeCell()?.row === rIdx() && activeCell()?.col === cIdx()
 																const dirty = () => isCellDirty(row, rIdx(), colName)
 																const isEd = () => editingCell()?.row === rIdx() && editingCell()?.colName === colName
+																const lens = () => effectiveLens(colName)
+																const decoded = () => {
+																	const lc = lens()
+																	if (!lc || lc.format === 'off') return null
+																	return decodeCellWithLens(val(), lc.format)
+																}
 
 																return (
 																	<td
@@ -1455,6 +1584,15 @@ export function TableView(props: {
 																					fallback={
 																						val() === null || val() === undefined ? (
 																							<span class="cell-null">NULL</span>
+																						) : decoded() && lens()?.mode === 'inline' ? (
+																							<span class="cell-lens-inline-wrap">
+																								<span>{formatCellText(val())}</span>
+																								<span class="cell-lens-inline">{decoded()!.shortDate}</span>
+																							</span>
+																						) : decoded() && lens()?.mode !== 'raw' ? (
+																							<span class="cell-lens-val">
+																								{formatCellByLensMode(formatCellText(val()), decoded()!, lens()!.mode)}
+																							</span>
 																						) : (
 																							formatCellText(val())
 																						)
@@ -1463,6 +1601,11 @@ export function TableView(props: {
 																					<button
 																						type="button"
 																						class="fk-link"
+																						title={
+																							decoded()
+																								? `${decoded()!.formatLabel}: ${decoded()!.utc} UTC (${decoded()!.relative})`
+																								: undefined
+																						}
 																						onMouseEnter={(e) => startFkPeek(e, fk()!, val())}
 																						onMouseLeave={cancelFkPeek}
 																						onClick={(e) => {
@@ -1470,7 +1613,17 @@ export function TableView(props: {
 																							followFk(fk()!.toTable, fk()!.toColumn, val())
 																						}}
 																					>
-																						<span>{formatCellText(val())}</span>
+																						<span>
+																							{decoded() &&
+																							lens()?.mode &&
+																							lens()!.mode !== 'raw' &&
+																							lens()!.mode !== 'inline'
+																								? formatCellByLensMode(formatCellText(val()), decoded()!, lens()!.mode)
+																								: formatCellText(val())}
+																						</span>
+																						<Show when={decoded() && lens()?.mode === 'inline'}>
+																							<span class="cell-lens-inline">{decoded()!.shortDate}</span>
+																						</Show>
 																						<IconArrowRight />
 																					</button>
 																				</Show>
@@ -1945,9 +2098,125 @@ export function TableView(props: {
 					const top = () => Math.min(hp().y + 14, window.innerHeight - 200)
 					return (
 						<div class="cell-hover-peek" style={`left:${Math.max(12, left())}px;top:${Math.max(12, top())}px`}>
-							<div class="cell-hover-peek-body">{hp().text}</div>
+							<Show when={hp().lensHeader}>
+								<div class="cell-hover-lens mono">
+									<div style="font-weight:600;color:var(--accent)">{hp().lensHeader}</div>
+									<Show when={hp().lensSub}>
+										<div style="color:var(--ink-secondary);font-size:11px">{hp().lensSub}</div>
+									</Show>
+								</div>
+							</Show>
+							<div class="cell-hover-peek-body">{hp().lensHeader ? `Raw: ${hp().text}` : hp().text}</div>
 							<div class="cell-hover-peek-foot">Double-click or press Enter to view &amp; copy</div>
 						</div>
+					)
+				}}
+			</Show>
+
+			{/* Per-column Smart Lens Popover */}
+			<Show when={lensMenu()}>
+				{(lm) => {
+					const colName = () => lm().colName
+					const current = () => effectiveLens(colName())
+					const autoDetected = () => autoLenses()[colName()]
+					const left = () => Math.max(12, Math.min(lm().x, window.innerWidth - 268))
+					const top = () => Math.max(12, Math.min(lm().y, window.innerHeight - 360))
+					const formats = Object.entries(LENS_FORMAT_META) as [LensFormat, (typeof LENS_FORMAT_META)[LensFormat]][]
+					const modes: { id: LensDisplayMode; label: string }[] = [
+						{ id: 'utc', label: 'UTC' },
+						{ id: 'local', label: 'Local' },
+						{ id: 'relative', label: 'Relative' },
+						{ id: 'inline', label: 'ID + Date' },
+						{ id: 'raw', label: 'Raw (hover)' },
+					]
+					return (
+						<>
+							<div class="lens-backdrop" onMouseDown={() => setLensMenu(null)} />
+							<div class="lens-popover" style={`left:${left()}px;top:${top()}px`}>
+								<div class="lens-popover-head">
+									<span class="mono" style="font-weight:600;font-size:12px">
+										Lens · {colName()}
+									</span>
+									<button
+										type="button"
+										class="icon-btn ghost"
+										style="width:20px;height:20px"
+										aria-label="Close lens menu"
+										onClick={() => setLensMenu(null)}
+									>
+										<IconClose />
+									</button>
+								</div>
+
+								<Show when={current()}>
+									{(cur) => (
+										<div class="lens-section">
+											<div class="lens-section-label">Display</div>
+											<div class="lens-mode-grid">
+												<For each={modes}>
+													{(m) => (
+														<button
+															type="button"
+															class={['btn sm', { primary: cur().mode === m.id }]}
+															onClick={() =>
+																updateColumnLens(colName(), { format: cur().format, mode: m.id, auto: false })
+															}
+														>
+															{m.label}
+														</button>
+													)}
+												</For>
+											</div>
+										</div>
+									)}
+								</Show>
+
+								<div class="lens-section">
+									<div class="lens-section-label">Decoder</div>
+									<div class="lens-format-list">
+										<button
+											type="button"
+											class={['popover-item', { active: !lensOverrides()[colName()] }]}
+											onClick={() => {
+												updateColumnLens(colName(), null)
+												setLensMenu(null)
+											}}
+										>
+											<span>
+												Auto{autoDetected() ? ` (${LENS_FORMAT_META[autoDetected()!.format as LensFormat].label})` : ''}
+											</span>
+										</button>
+										<button
+											type="button"
+											class={['popover-item', { active: lensOverrides()[colName()]?.format === 'off' }]}
+											onClick={() => {
+												updateColumnLens(colName(), { format: 'off', mode: 'raw', auto: false })
+												setLensMenu(null)
+											}}
+										>
+											<span>Off (Raw only)</span>
+										</button>
+										<For each={formats}>
+											{([fmt, meta]) => (
+												<button
+													type="button"
+													class={['popover-item', { active: current()?.format === fmt && !current()?.auto }]}
+													onClick={() => {
+														const prevMode = current()?.mode
+														const defaultMode: LensDisplayMode =
+															prevMode && prevMode !== 'raw' ? prevMode : meta.isId ? 'inline' : 'utc'
+														updateColumnLens(colName(), { format: fmt, mode: defaultMode, auto: false })
+													}}
+												>
+													<span>{meta.label}</span>
+													<span class="th-badge lens">{meta.shortTag}</span>
+												</button>
+											)}
+										</For>
+									</div>
+								</div>
+							</div>
+						</>
 					)
 				}}
 			</Show>

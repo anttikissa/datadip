@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseAson, stringify as stringifyAson } from '../src/shared/ason.ts'
+import type { SavedAnalyticsChart } from '../src/shared/analytics.ts'
 import type { ColumnIdSignature } from '../src/shared/id-fingerprint.ts'
 import { liveFiles } from '../src/shared/live-file.ts'
 import { tid } from '../src/shared/tid.ts'
@@ -271,6 +272,17 @@ export class DataStore {
 				PRIMARY KEY (connection_id, from_table, from_column)
 			);
 			CREATE INDEX IF NOT EXISTS idx_learned_fks_conn_status ON learned_fks(connection_id, status);
+
+			CREATE TABLE IF NOT EXISTS analytics_charts (
+				id TEXT PRIMARY KEY,
+				connection_id TEXT NOT NULL,
+				title TEXT NOT NULL,
+				mode TEXT NOT NULL,
+				config_ason TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_analytics_charts_conn ON analytics_charts(connection_id, updated_at DESC);
 		`)
 	}
 
@@ -907,6 +919,73 @@ export class DataStore {
 
 	deleteRecentTable(connectionId: string, tableName: string) {
 		this.db.run('DELETE FROM recent_tables WHERE connection_id = ? AND table_name = ?', [connectionId, tableName])
+	}
+
+	// --- Saved Analytics Charts ---
+
+	listAnalyticsCharts(connectionId: string): SavedAnalyticsChart[] {
+		const rows = this.db
+			.query<
+				{
+					id: string
+					connection_id: string
+					title: string
+					mode: string
+					config_ason: string
+					created_at: string
+					updated_at: string
+				},
+				[string]
+			>(
+				`SELECT id, connection_id, title, mode, config_ason, created_at, updated_at
+				 FROM analytics_charts
+				 WHERE connection_id = ?
+				 ORDER BY updated_at DESC`,
+			)
+			.all(connectionId)
+		return rows.map((r) => {
+			let config: Record<string, unknown> = {}
+			try {
+				config = (parseAson(r.config_ason) as Record<string, unknown>) ?? {}
+			} catch {}
+			return {
+				id: r.id,
+				connectionId: r.connection_id,
+				title: r.title,
+				mode: (r.mode === 'funnel' || r.mode === 'retention' || r.mode === 'actors'
+					? r.mode
+					: 'trends') as SavedAnalyticsChart['mode'],
+				config,
+				createdAt: r.created_at,
+				updatedAt: r.updated_at,
+			}
+		})
+	}
+
+	saveAnalyticsChart(
+		connectionId: string,
+		input: { id?: string; title: string; mode: SavedAnalyticsChart['mode']; config: Record<string, unknown> },
+	): SavedAnalyticsChart {
+		const now = new Date().toISOString()
+		const id = input.id?.trim() || tid('a')
+		const title = input.title.trim() || 'Untitled chart'
+		const configAson = stringifyAson(input.config ?? {}, 'short')
+		const existing = this.db
+			.query<{ created_at: string }, [string]>('SELECT created_at FROM analytics_charts WHERE id = ?')
+			.get(id)
+		const createdAt = existing?.created_at ?? now
+		this.db.run(
+			`INSERT INTO analytics_charts (id, connection_id, title, mode, config_ason, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET title = excluded.title, mode = excluded.mode, config_ason = excluded.config_ason, updated_at = excluded.updated_at`,
+			[id, connectionId, title, input.mode, configAson, createdAt, now],
+		)
+		return { id, connectionId, title, mode: input.mode, config: input.config ?? {}, createdAt, updatedAt: now }
+	}
+
+	deleteAnalyticsChart(id: string): boolean {
+		const res = this.db.run('DELETE FROM analytics_charts WHERE id = ?', [id])
+		return res.changes > 0
 	}
 
 	// --- Preferences ---

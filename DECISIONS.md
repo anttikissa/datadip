@@ -339,3 +339,45 @@ obvious.
   back to the sidebar, and `PostgresAdapter` caches its latest schema
   for internal lookups (`browseTable`, `peekRow`, `mutate`, etc.) so
   browsing remote Postgres avoids redundant metadata round-trips.
+
+## Product Analytics & Smart Value Lenses
+
+- **Product Analytics workspace** (`src/shared/analytics.ts`,
+  `server/db/analytics.ts`, `src/components/AnalyticsView.tsx`,
+  `src/components/AnalyticsCharts.tsx`, route `/c/:id/analytics`):
+  provides Amplitude / Mixpanel / PostHog / Datadog-style Trends,
+  Conversion Funnels, Cohort Retention heatmaps, People/Actor session
+  journeys, and Saved Charts (persisted in `state.db` `analytics_charts`
+  table as ASON) directly over any SQLite or PostgreSQL event table with
+  zero external charting dependencies (pure interactive SVG).
+  - Auto-detects the best event table, time column and format
+    (`epoch_ms`, `epoch_s`, `iso`), event column, user/visitor actor
+    columns, status column, and admin exclusion column.
+  - Normalizes dynamic URL/ID segments in HTTP-style event names (e.g.
+    `GET /api/chats/<id>`) as an optional toggle so routes aggregate
+    cleanly without losing raw event inspection.
+  - Supports **Visitor -> User identity stitching** across anonymous
+    `visitor_id` and authenticated `user_id` rows when computing signup
+    and activation funnels, retention cohorts, and user timelines.
+  - All analytics queries execute strictly read-only (`writable: false`)
+    with bounded scans, anchor timestamps to the table's latest event,
+    and offer one-click **Open in SQL** and drill-down into filtered
+    Table Browser rows.
+  - SQL Console results also include an instant **Table / Chart** view
+    toggle (`QueryResultChart`) for plotting any ad-hoc `GROUP BY` or
+    time-series query result as Line, Area, Bar, or Stacked Bar.
+- **Smart Value Lenses** (`src/shared/lenses.ts`, integrated into
+  `TableView`, `ConsoleView`, `RowInspector`, and `CellViewer`):
+  automatically detects and decodes Unix timestamps (`epoch_ms`,
+  `epoch_s`, `epoch_us`, `epoch_ns`, Apple Cocoa) and time-bearing IDs
+  (Crockford `tid`, UUIDv7, UUIDv1, ULID, KSUID, MongoDB ObjectId,
+  Twitter/Discord Snowflakes — including prefixed variants like
+  `u...`, `usr_...`) in real time with zero extra DB queries.
+  - Numeric timestamps default to human-readable UTC inline in cells;
+    time-bearing IDs default to raw ID with hover-peek and RowInspector /
+    CellViewer decoded timestamp strips, and every detected column has a
+    header lens pill (`ms`, `sec`, `tid`, `v7`, `ulid`, etc.) to switch
+    display mode (`Raw`, `UTC`, `Local`, `Relative`, `ID + time`) or
+    override/disable the format per column.
+  - Never mutates underlying database values or breaks inline editing
+    (editing still edits the raw stored integer/string).

@@ -1,6 +1,19 @@
 // Connection lifecycle manager, Read-Only / Read-Write safety gatekeeper, orphaned-connection tracker, and SSH pool coordinator.
 import { closeSync, existsSync, openSync, readSync, realpathSync, watch } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
+import type {
+	ActorJourneyRequest,
+	ActorJourneyResponse,
+	ActorsRequest,
+	ActorsResponse,
+	AnalyticsDetection,
+	FunnelRequest,
+	FunnelResponse,
+	RetentionRequest,
+	RetentionResponse,
+	TrendsRequest,
+	TrendsResponse,
+} from '../../src/shared/analytics.ts'
 import { analyzeSqlDanger, splitSqlStatements } from '../../src/shared/sql.ts'
 import { getExtraReverseFksForTable, mergeSchemaForeignKeys } from '../../src/shared/virtual-fks.ts'
 import type {
@@ -22,6 +35,14 @@ import type {
 import type { ExportFormat } from '../export.ts'
 import { formatExportRows, sanitizeExportFilename } from '../export.ts'
 import type { DataStore } from '../store.ts'
+import {
+	detectAnalyticsTable,
+	runAnalyticsActorJourney,
+	runAnalyticsActors,
+	runAnalyticsFunnel,
+	runAnalyticsRetention,
+	runAnalyticsTrends,
+} from './analytics.ts'
 import { createD1Adapter } from './d1.ts'
 import { discoverLocalSqliteDbs, suggestDbName } from './discover.ts'
 import { type LearnedChangeEvent, PassiveFkLearner } from './fk-learner.ts'
@@ -784,6 +805,43 @@ export class ConnectionManager {
 			suggestedName: suggestDbName(item.path, params.location === 'ssh' ? params.sshHost : undefined),
 			alreadySaved: isSaved(item.path),
 		}))
+	}
+
+	private async getAnalyticsContext(id: string) {
+		const { conn, adapter } = this.getAdapterById(id)
+		const cached = this.adapters.get(id)?.lastRawSchema
+		const schema = cached ?? (await this.getSchema(id))
+		return { conn, adapter, schema }
+	}
+
+	async detectAnalytics(id: string, table?: string | null): Promise<AnalyticsDetection> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return detectAnalyticsTable(adapter, conn.driver, schema, table)
+	}
+
+	async analyticsTrends(id: string, req: TrendsRequest): Promise<TrendsResponse> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return runAnalyticsTrends(adapter, conn.driver, schema, req)
+	}
+
+	async analyticsFunnel(id: string, req: FunnelRequest): Promise<FunnelResponse> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return runAnalyticsFunnel(adapter, conn.driver, schema, req)
+	}
+
+	async analyticsRetention(id: string, req: RetentionRequest): Promise<RetentionResponse> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return runAnalyticsRetention(adapter, conn.driver, schema, req)
+	}
+
+	async analyticsActors(id: string, req: ActorsRequest): Promise<ActorsResponse> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return runAnalyticsActors(adapter, conn.driver, schema, req)
+	}
+
+	async analyticsActorJourney(id: string, req: ActorJourneyRequest): Promise<ActorJourneyResponse> {
+		const { conn, adapter, schema } = await this.getAnalyticsContext(id)
+		return runAnalyticsActorJourney(adapter, conn.driver, schema, req)
 	}
 
 	dropConnection(id: string): boolean {

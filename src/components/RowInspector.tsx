@@ -10,7 +10,8 @@ import {
 	tryFormatTimestampHint,
 	tryPrettyJson,
 } from '../lib/format.ts'
-import { IconArrowRight, IconClose, IconCopy, IconLink, IconTrash } from '../lib/icons.tsx'
+import { IconArrowRight, IconClock, IconClose, IconCopy, IconLink, IconTrash } from '../lib/icons.tsx'
+import { autoDecodeSingleValue } from '../shared/lenses.ts'
 import type { ForeignKeyInfo, ReverseFkCount, TableSchema } from '../shared/types.ts'
 
 export function RowInspector(props: {
@@ -145,7 +146,8 @@ export function RowInspector(props: {
 									const val = () => row()[col.name]
 									const fk = () => fkFor(col.name)
 									const pretty = () => tryPrettyJson(val())
-									const tsHint = () => tryFormatTimestampHint(val())
+									const lens = () => autoDecodeSingleValue(val(), col.name)
+									const tsHint = () => (lens() ? null : tryFormatTimestampHint(val()))
 									return (
 										<div class="inspector-field">
 											<div class="inspector-field-head">
@@ -235,6 +237,32 @@ export function RowInspector(props: {
 												</div>
 											</Show>
 
+											<Show when={lens()}>
+												{(d) => (
+													<div class="lens-decoded-strip mono">
+														<span class="lens-decoded-badge">
+															<IconClock />
+															{d().formatLabel}
+														</span>
+														<span>{d().utc} UTC</span>
+														<span style="color:var(--ink-muted)">({d().relative})</span>
+														<button
+															type="button"
+															class="icon-btn ghost"
+															style="width:18px;height:18px;margin-left:auto"
+															title={`Copy ${d().utc} UTC`}
+															aria-label="Copy decoded timestamp"
+															onClick={async () => {
+																if (await copyToClipboard(`${d().utc} UTC`)) {
+																	props.onNotify(`Copied ${d().utc} UTC`)
+																}
+															}}
+														>
+															<IconCopy />
+														</button>
+													</div>
+												)}
+											</Show>
 											<Show when={tsHint()}>{(hint) => <div class="inspector-hint mono">{hint()}</div>}</Show>
 										</div>
 									)
