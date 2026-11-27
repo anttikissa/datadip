@@ -22,7 +22,15 @@ import {
 	IconTrash,
 } from '../lib/icons.tsx'
 import { hasTextSelection, isEditableTarget, isPrimaryMod, modKeyLabel } from '../lib/shortcuts.ts'
-import { decodeCellWithLens, detectColumnLenses, formatCellByLensMode, LENS_FORMAT_META } from '../shared/lenses.ts'
+import {
+	type ColumnLensConfig,
+	decodeCellWithLens,
+	detectColumnLenses,
+	formatCellByLensMode,
+	LENS_FORMAT_META,
+	type LensDisplayMode,
+	type LensFormat,
+} from '../shared/lenses.ts'
 import { formatSql, statementAtCursor } from '../shared/sql.ts'
 import { tid } from '../shared/tid.ts'
 import type { Console, DatabaseSchema, DriverKind, ForeignKeyInfo, QueryHistoryEntry } from '../shared/types.ts'
@@ -79,6 +87,8 @@ export function ConsoleView(props: {
 	const [freezeFirst, setFreezeFirst] = createSignal(false)
 	const [resultView, setResultView] = createSignal<'table' | 'chart'>('table')
 	const [lensesEnabled, setLensesEnabled] = createSignal(true)
+	const [lensOverrides, setLensOverrides] = createSignal<Record<string, ColumnLensConfig>>({})
+	const [lensMenu, setLensMenu] = createSignal<{ colName: string; x: number; y: number } | null>(null)
 
 	function startColResize(e: MouseEvent, colName: string) {
 		e.preventDefault()
@@ -283,11 +293,26 @@ export function ConsoleView(props: {
 	const currentResult = createMemo(() => results()[activeTab()] ?? null)
 
 	const autoResultLenses = createMemo(() => {
-		if (!lensesEnabled()) return {}
 		const res = currentResult()
 		if (!res || res.rows.length === 0) return {}
 		return detectColumnLenses(res.columns, {}, res.rows)
 	})
+
+	function effectiveResultLens(colName: string): ColumnLensConfig | null {
+		if (!lensesEnabled()) return null
+		const ov = lensOverrides()[colName]
+		if (ov) return ov.format === 'off' ? null : ov
+		return autoResultLenses()[colName] ?? null
+	}
+
+	function updateResultLens(colName: string, next: ColumnLensConfig | null) {
+		setLensOverrides((prev) => {
+			const copy = { ...prev }
+			if (next === null) delete copy[colName]
+			else copy[colName] = next
+			return copy
+		})
+	}
 
 	createEffect(
 		() => currentResult(),
@@ -934,19 +959,31 @@ export function ConsoleView(props: {
 															<th style="width:44px;text-align:right;color:var(--ink-muted)">#</th>
 															<For each={res().columns}>
 																{(col) => {
-																	const lensCfg = () => autoResultLenses()[col]
+																	const lensCfg = () => effectiveResultLens(col)
 																	return (
-																		<th style={colWidthStyle(col)}>
+																		<th
+																			style={colWidthStyle(col)}
+																			onContextMenu={(e) => {
+																				e.preventDefault()
+																				setLensMenu({ colName: col, x: e.clientX, y: e.clientY })
+																			}}
+																		>
 																			<span>{col}</span>
-																			<Show when={lensCfg()?.format !== 'off' ? lensCfg() : null}>
+																			<Show when={lensCfg()}>
 																				{(l) => (
-																					<span
+																					<button
+																						type="button"
 																						class="th-badge lens"
-																						style="margin-left:5px"
-																						title={`Smart Lens: ${LENS_FORMAT_META[l().format as keyof typeof LENS_FORMAT_META].label}`}
+																						style="margin-left:5px;cursor:pointer"
+																						title={`Smart Lens: ${LENS_FORMAT_META[l().format as LensFormat].label} (click to configure or disable)`}
+																						onClick={(e) => {
+																							e.stopPropagation()
+																							const rect = e.currentTarget.getBoundingClientRect()
+																							setLensMenu({ colName: col, x: rect.left, y: rect.bottom + 4 })
+																						}}
 																					>
-																						{LENS_FORMAT_META[l().format as keyof typeof LENS_FORMAT_META].shortTag}
-																					</span>
+																						{LENS_FORMAT_META[l().format as LensFormat].shortTag}
+																					</button>
 																				)}
 																			</Show>
 																			<Show when={currentFkMap().get(col)}>
@@ -985,7 +1022,7 @@ export function ConsoleView(props: {
 																			const val = () => row[col]
 																			const fk = () => currentFkMap().get(col)
 																			const active = () => activeCell()?.row === rIdx() && activeCell()?.col === cIdx()
-																			const lensCfg = () => autoResultLenses()[col]
+																			const lensCfg = () => effectiveResultLens(col)
 																			const decoded = () => {
 																				const lc = lensCfg()
 																				if (!lc || lc.format === 'off') return null
@@ -1173,6 +1210,115 @@ export function ConsoleView(props: {
 			</div>
 
 			<FkPeekCard state={peek()} />
+
+			{/* Per-column Smart Value Lens menu */}
+			<Show when={lensMenu()}>
+				{(menu) => {
+					const colName = () => menu().colName
+					const current = () => effectiveResultLens(colName())
+					const autoDetected = () => autoResultLenses()[colName()] ?? null
+					const left = () => Math.min(Math.max(12, menu().x), window.innerWidth - 260)
+					const top = () => Math.min(Math.max(12, menu().y), window.innerHeight - 360)
+					const formats = Object.entries(LENS_FORMAT_META) as [
+						LensFormat,
+						{ label: string; shortTag: string; isId: boolean },
+					][]
+					const modes: { id: LensDisplayMode; label: string }[] = [
+						{ id: 'utc', label: 'UTC' },
+						{ id: 'local', label: 'Local' },
+						{ id: 'relative', label: 'Relative' },
+						{ id: 'inline', label: 'Raw + Date' },
+						{ id: 'raw', label: 'Raw (hover)' },
+					]
+					return (
+						<>
+							<div class="lens-backdrop" onMouseDown={() => setLensMenu(null)} />
+							<div class="lens-popover" style={`left:${left()}px;top:${top()}px`}>
+								<div class="lens-popover-head">
+									<span class="mono" style="font-weight:600;font-size:12px">
+										Lens · {colName()}
+									</span>
+									<button
+										type="button"
+										class="icon-btn ghost"
+										style="width:20px;height:20px"
+										aria-label="Close lens menu"
+										onClick={() => setLensMenu(null)}
+									>
+										<IconClose />
+									</button>
+								</div>
+								<Show when={current()}>
+									{(cur) => (
+										<div class="lens-section">
+											<div class="lens-section-label">Display</div>
+											<div class="lens-mode-grid">
+												<For each={modes}>
+													{(m) => (
+														<button
+															type="button"
+															class={['btn sm', { primary: cur().mode === m.id }]}
+															onClick={() =>
+																updateResultLens(colName(), { format: cur().format, mode: m.id, auto: false })
+															}
+														>
+															{m.label}
+														</button>
+													)}
+												</For>
+											</div>
+										</div>
+									)}
+								</Show>
+								<div class="lens-section">
+									<div class="lens-section-label">Decoder</div>
+									<div class="lens-format-list">
+										<button
+											type="button"
+											class={['popover-item', { active: !lensOverrides()[colName()] }]}
+											onClick={() => {
+												updateResultLens(colName(), null)
+												setLensMenu(null)
+											}}
+										>
+											<span>
+												Auto{autoDetected() ? ` (${LENS_FORMAT_META[autoDetected()!.format as LensFormat].label})` : ''}
+											</span>
+										</button>
+										<button
+											type="button"
+											class={['popover-item', { active: lensOverrides()[colName()]?.format === 'off' }]}
+											onClick={() => {
+												updateResultLens(colName(), { format: 'off', mode: 'raw', auto: false })
+												setLensMenu(null)
+											}}
+										>
+											<span>Off (Raw only)</span>
+										</button>
+										<For each={formats}>
+											{([fmt, meta]) => (
+												<button
+													type="button"
+													class={['popover-item', { active: current()?.format === fmt && !current()?.auto }]}
+													onClick={() => {
+														const prevMode = current()?.mode
+														const defaultMode: LensDisplayMode =
+															prevMode && prevMode !== 'raw' ? prevMode : meta.isId ? 'inline' : 'utc'
+														updateResultLens(colName(), { format: fmt, mode: defaultMode, auto: false })
+													}}
+												>
+													<span>{meta.label}</span>
+													<span class="th-badge lens">{meta.shortTag}</span>
+												</button>
+											)}
+										</For>
+									</div>
+								</div>
+							</div>
+						</>
+					)
+				}}
+			</Show>
 
 			<CellViewer
 				state={cellViewer()}

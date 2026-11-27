@@ -129,8 +129,13 @@ function buildTimeRangeWhere(
 	if (endMs !== null) {
 		if (format === 'epoch_ms') clauses.push(`${q} <= ${Math.ceil(endMs)}`)
 		else if (format === 'epoch_s') clauses.push(`${q} <= ${Math.ceil(endMs / 1000)}`)
-		else if (driver === 'postgres') clauses.push(`${q} <= ${sqlLiteral(new Date(endMs).toISOString())}::timestamptz`)
-		else clauses.push(`${q} <= ${sqlLiteral(new Date(endMs).toISOString())}`)
+		else if (driver === 'postgres') {
+			// Postgres timestamptz has microsecond precision while JS Date ms truncates sub-ms digits;
+			// using `< (endMs + 1ms)` ensures rows within the final millisecond are never dropped.
+			clauses.push(`${q} < ${sqlLiteral(new Date(Math.floor(endMs) + 1).toISOString())}::timestamptz`)
+		} else {
+			clauses.push(`${q} < ${sqlLiteral(new Date(Math.floor(endMs) + 1).toISOString())}`)
+		}
 	}
 	return clauses
 }
@@ -181,6 +186,15 @@ function buildFilterWhere(ts: TableSchema, filters: AnalyticsFilter[] | undefine
 
 function isTruthyColExpr(col: string): string {
 	return `LOWER(COALESCE(CAST(${quoteIdent(col)} AS TEXT), '0')) IN ('1', 'true', 't')`
+}
+
+// Guard CAST(... AS INTEGER) so text status values (e.g. 'failed', 'succeeded') never abort a Postgres transaction.
+function safeStatusIntExpr(col: string, driver: DriverKind): string {
+	const q = quoteIdent(col)
+	if (driver === 'postgres') {
+		return `CASE WHEN CAST(${q} AS TEXT) ~ '^[0-9]{1,9}$' THEN CAST(CAST(${q} AS TEXT) AS INTEGER) ELSE NULL END`
+	}
+	return `CASE WHEN CAST(${q} AS TEXT) GLOB '[0-9]*' AND CAST(${q} AS TEXT) NOT GLOB '*[^0-9]*' AND LENGTH(CAST(${q} AS TEXT)) <= 9 THEN CAST(${q} AS INTEGER) ELSE NULL END`
 }
 
 function buildActorExclusionWhere(
@@ -311,6 +325,7 @@ export async function detectAnalyticsTable(
 	driver: DriverKind,
 	schema: DatabaseSchema,
 	requestedTable?: string | null,
+	queryId?: string,
 ): Promise<AnalyticsDetection> {
 	const started = performance.now()
 	const tableName = requestedTable && schema.schemas[requestedTable] ? requestedTable : detectBestAnalyticsTable(schema)
@@ -321,6 +336,8 @@ export async function detectAnalyticsTable(
 	const cols = detectTableColumns(ts)
 	const qTable = quoteTable(ts.name, driver)
 	const summary = schema.tables.find((t) => t.name === ts.name)
+	const isLargeTable =
+		summary?.rowCount === null || Boolean(summary?.rowCountEstimated) || (summary?.rowCount ?? 0) > 100_000
 	let totalRows = summary?.rowCount ?? 0
 	let timeFormat: TimeColumnFormat = 'iso'
 	let minTimeMs: number | null = null
@@ -329,11 +346,11 @@ export async function detectAnalyticsTable(
 	if (cols.timeColumn) {
 		const qTime = quoteIdent(cols.timeColumn)
 		const colMeta = ts.columns.find((c) => c.name === cols.timeColumn)
-		const rows = await execReadOnly(
-			adapter,
-			`SELECT MIN(${qTime}) AS mn, MAX(${qTime}) AS mx, COUNT(*) AS n FROM ${qTable} WHERE ${qTime} IS NOT NULL`,
-			1,
-		)
+		// On large tables, skip COUNT(*) so indexed MIN/MAX resolves via index seek without a full-table scan.
+		const minMaxSql = isLargeTable
+			? `SELECT MIN(${qTime}) AS mn, MAX(${qTime}) AS mx FROM ${qTable}`
+			: `SELECT MIN(${qTime}) AS mn, MAX(${qTime}) AS mx, COUNT(*) AS n FROM ${qTable} WHERE ${qTime} IS NOT NULL`
+		const rows = await execReadOnly(adapter, minMaxSql, 1, queryId)
 		const r = rows[0]
 		if (r) {
 			timeFormat = inferTimeFormat(r.mx ?? r.mn, colMeta?.type ?? '')
@@ -348,12 +365,21 @@ export async function detectAnalyticsTable(
 	if (cols.eventColumn) {
 		const qEv = quoteIdent(cols.eventColumn)
 		const actorExpr = buildActorExpr(ts, cols.defaultActorColumn, cols.userIdColumn, cols.visitorIdColumn)
-		const actorSelect = actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'
-		const evRows = await execReadOnly(
-			adapter,
-			`SELECT CAST(${qEv} AS TEXT) AS ev, COUNT(*) AS n${actorSelect} FROM ${qTable} WHERE ${qEv} IS NOT NULL GROUP BY ${qEv} ORDER BY n DESC LIMIT 40`,
-			40,
-		)
+		const evFilters = [`${qEv} IS NOT NULL`]
+		if (cols.adminColumn) evFilters.push(`${quoteIdent(cols.adminColumn)} IS NULL`)
+
+		let evSql: string
+		if (isLargeTable) {
+			// Bound scan on large tables: sample recent 7d window (or 25k rows) and skip expensive COUNT(DISTINCT).
+			if (cols.timeColumn && maxTimeMs !== null) {
+				evFilters.push(...buildTimeRangeWhere(cols.timeColumn, timeFormat, maxTimeMs - 7 * DAY_MS, maxTimeMs, driver))
+			}
+			evSql = `SELECT ev, COUNT(*) AS n, 0 AS actors FROM (SELECT CAST(${qEv} AS TEXT) AS ev FROM ${qTable} WHERE ${evFilters.join(' AND ')} LIMIT 25000) sub GROUP BY ev ORDER BY n DESC LIMIT 40`
+		} else {
+			const actorSelect = actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'
+			evSql = `SELECT CAST(${qEv} AS TEXT) AS ev, COUNT(*) AS n${actorSelect} FROM ${qTable} WHERE ${evFilters.join(' AND ')} GROUP BY ${qEv} ORDER BY n DESC LIMIT 40`
+		}
+		const evRows = await execReadOnly(adapter, evSql, 40, queryId)
 		topEvents = evRows.map((r) => ({
 			event: String(r.ev ?? ''),
 			count: Number(r.n ?? 0),
@@ -491,7 +517,7 @@ export async function runAnalyticsTrends(
 
 	// 1. KPIs + Previous-period comparison (always report distinct signed-in users vs anonymous visitors honestly)
 	const errorExpr = statusCol
-		? `SUM(CASE WHEN CAST(${quoteIdent(statusCol)} AS INTEGER) >= 400 THEN 1 ELSE 0 END) AS errors`
+		? `SUM(CASE WHEN (${safeStatusIntExpr(statusCol, driver)}) >= 400 THEN 1 ELSE 0 END) AS errors`
 		: 'NULL AS errors'
 	const usersCountExpr = uCol ? `COUNT(DISTINCT NULLIF(CAST(${quoteIdent(uCol)} AS TEXT), ''))` : 'NULL'
 	const anonVisitorsCountExpr =
@@ -583,20 +609,30 @@ ORDER BY 1 ASC`
 					: req.metric === 'cumulative'
 						? `Cumulative ${ts.name}`
 						: `All ${ts.name}`
-		series.push({ key: '__all__', label, values, total })
+		const seriesTotal =
+			req.metric === 'unique_actors'
+				? uniqueActors
+				: req.metric === 'events_per_actor'
+					? uniqueActors > 0
+						? Number((totalEvents / uniqueActors).toFixed(2))
+						: 0
+					: total
+		series.push({ key: '__all__', label, values, total: seriesTotal })
 	} else {
 		const qBreak = quoteIdent(breakdownCol)
-		mainSql = `SELECT ${bExpr} AS bucket, COALESCE(CAST(${qBreak} AS TEXT), '(null)') AS grp, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
+		const breakExpr = `COALESCE(CAST(${qBreak} AS TEXT), '(null)')`
+		mainSql = `SELECT ${bExpr} AS bucket, ${breakExpr} AS grp, COUNT(*) AS events${actorExpr ? `, COUNT(DISTINCT ${actorExpr}) AS actors` : ', 0 AS actors'}
 FROM ${qTable}
 ${whereSql}
 GROUP BY 1, 2
 ORDER BY 1 ASC`
 		const rows = await execReadOnly(adapter, mainSql, 25_000, req.queryId)
 
-		// Aggregate by group (optionally normalizing URL routes)
+		// Aggregate by group (optionally normalizing URL routes) and track raw keys per normalized group
 		const grpEvents = new Map<string, number[]>()
 		const grpActors = new Map<string, number[]>()
 		const grpTotals = new Map<string, number>()
+		const rawKeysByGroup = new Map<string, Set<string>>()
 
 		for (const r of rows) {
 			const bMs = floorBucketMs(Number(r.bucket), req.interval)
@@ -605,6 +641,13 @@ ORDER BY 1 ASC`
 			const rawKey = String(r.grp ?? '(null)')
 			const key = normUrls ? normalizeEventName(rawKey) : rawKey
 			if (selectedSet && !selectedSet.has(key) && !selectedSet.has(rawKey)) continue
+
+			let rawSet = rawKeysByGroup.get(key)
+			if (!rawSet) {
+				rawSet = new Set<string>()
+				rawKeysByGroup.set(key, rawSet)
+			}
+			rawSet.add(rawKey)
 
 			const ev = Number(r.events ?? 0)
 			const ac = Number(r.actors ?? 0)
@@ -629,9 +672,75 @@ ORDER BY 1 ASC`
 		const keep = selectedSet ? ranked : ranked.slice(0, topN)
 		const rest = selectedSet ? [] : ranked.slice(topN)
 
+		// Never sum COUNT(DISTINCT actor) across normalized routes or into `Other (N)`:
+		// recompute exact distinct actors in SQL via a CASE mapping whenever needed.
+		let exactBucketActors: Map<string, number[]> | null = null
+		let exactBucketEvents: Map<string, number[]> | null = null
+		let exactOverallActors: Map<string, number> | null = null
+		const totalKeepRawKeys = keep.reduce((acc, [k]) => acc + (rawKeysByGroup.get(k)?.size ?? 0), 0)
+		const needsExactDistinct = Boolean(
+			actorExpr &&
+			(req.metric === 'unique_actors' || req.metric === 'events_per_actor') &&
+			keep.length > 0 &&
+			totalKeepRawKeys <= 250 &&
+			(req.metric === 'unique_actors' || rest.length > 0 || keep.some(([k]) => (rawKeysByGroup.get(k)?.size ?? 0) > 1)),
+		)
+
+		if (needsExactDistinct && actorExpr) {
+			const whenClauses: string[] = []
+			for (const [key] of keep) {
+				const raws = [...(rawKeysByGroup.get(key) ?? [])]
+				if (raws.length === 0) continue
+				const inList = raws.map(sqlLiteral).join(', ')
+				whenClauses.push(`WHEN ${breakExpr} IN (${inList}) THEN ${sqlLiteral(key)}`)
+			}
+			if (whenClauses.length > 0) {
+				const caseExpr = `CASE ${whenClauses.join(' ')} ELSE '__other__' END`
+				const exactBucketSql = `SELECT ${bExpr} AS bucket, ${caseExpr} AS norm_grp, COUNT(*) AS events, COUNT(DISTINCT ${actorExpr}) AS actors
+FROM ${qTable}
+${whereSql}
+GROUP BY 1, 2
+ORDER BY 1 ASC`
+				const exactRows = await execReadOnly(adapter, exactBucketSql, 25_000, req.queryId)
+				exactBucketActors = new Map()
+				exactBucketEvents = new Map()
+				for (const r of exactRows) {
+					const bMs = floorBucketMs(Number(r.bucket), req.interval)
+					const idx = bucketIdx.get(bMs)
+					if (idx === undefined) continue
+					const g = String(r.norm_grp ?? '__other__')
+					let acArr = exactBucketActors.get(g)
+					if (!acArr) {
+						acArr = new Array<number>(buckets.length).fill(0)
+						exactBucketActors.set(g, acArr)
+					}
+					acArr[idx] = Number(r.actors ?? 0)
+					let evArr = exactBucketEvents.get(g)
+					if (!evArr) {
+						evArr = new Array<number>(buckets.length).fill(0)
+						exactBucketEvents.set(g, evArr)
+					}
+					evArr[idx] = Number(r.events ?? 0)
+				}
+				mainSql = exactBucketSql
+
+				if (req.metric === 'unique_actors') {
+					const exactTotalSql = `SELECT ${caseExpr} AS norm_grp, COUNT(DISTINCT ${actorExpr}) AS actors
+FROM ${qTable}
+${whereSql}
+GROUP BY 1`
+					const exactTotalRows = await execReadOnly(adapter, exactTotalSql, 50, req.queryId)
+					exactOverallActors = new Map()
+					for (const r of exactTotalRows) {
+						exactOverallActors.set(String(r.norm_grp ?? '__other__'), Number(r.actors ?? 0))
+					}
+				}
+			}
+		}
+
 		for (const [key, total] of keep) {
-			const evArr = grpEvents.get(key)!
-			const acArr = grpActors.get(key)!
+			const evArr = exactBucketEvents?.get(key) ?? grpEvents.get(key)!
+			const acArr = exactBucketActors?.get(key) ?? grpActors.get(key)!
 			const values = evArr.map((ev, i) => {
 				if (req.metric === 'unique_actors') return acArr[i]!
 				if (req.metric === 'events_per_actor') return acArr[i]! > 0 ? Number((ev / acArr[i]!).toFixed(2)) : 0
@@ -644,25 +753,37 @@ ORDER BY 1 ASC`
 					values[i] = run
 				}
 			}
-			series.push({ key, label: key, values, total })
+			const seriesTotal = req.metric === 'unique_actors' ? (exactOverallActors?.get(key) ?? total) : total
+			series.push({ key, label: key, values, total: seriesTotal })
 		}
 
 		if (rest.length > 0 && req.metric !== 'events_per_actor') {
-			const otherVals = new Array<number>(buckets.length).fill(0)
+			let otherVals: number[]
 			let otherTotal = 0
-			for (const [key, total] of rest) {
-				const arr = req.metric === 'unique_actors' ? grpActors.get(key)! : grpEvents.get(key)!
-				otherTotal += total
-				for (let i = 0; i < buckets.length; i++) otherVals[i] = otherVals[i]! + arr[i]!
-			}
-			if (req.metric === 'cumulative') {
-				let run = 0
-				for (let i = 0; i < otherVals.length; i++) {
-					run += otherVals[i]!
-					otherVals[i] = run
+			if (req.metric === 'unique_actors' && exactBucketActors) {
+				otherVals = exactBucketActors.get('__other__') ?? new Array<number>(buckets.length).fill(0)
+				otherTotal = exactOverallActors?.get('__other__') ?? 0
+			} else if (req.metric === 'unique_actors') {
+				// Fallback when >250 raw keys: omit approximate Other series rather than double-counting distinct people.
+				otherVals = []
+			} else {
+				otherVals = new Array<number>(buckets.length).fill(0)
+				for (const [key, total] of rest) {
+					const arr = grpEvents.get(key)!
+					otherTotal += total
+					for (let i = 0; i < buckets.length; i++) otherVals[i] = otherVals[i]! + arr[i]!
+				}
+				if (req.metric === 'cumulative') {
+					let run = 0
+					for (let i = 0; i < otherVals.length; i++) {
+						run += otherVals[i]!
+						otherVals[i] = run
+					}
 				}
 			}
-			series.push({ key: '__other__', label: `Other (${rest.length})`, values: otherVals, total: otherTotal })
+			if (otherVals.length > 0) {
+				series.push({ key: '__other__', label: `Other (${rest.length})`, values: otherVals, total: otherTotal })
+			}
 		}
 	}
 
@@ -988,7 +1109,7 @@ export async function runAnalyticsActors(
 	const msExpr = timeToMsExpr(req.timeColumn, req.timeFormat, driver)
 	const dayBucket = bucketMsExpr(req.timeColumn, req.timeFormat, 'day', driver)
 	const errSelect = statusCol
-		? `SUM(CASE WHEN CAST(${quoteIdent(statusCol)} AS INTEGER) >= 400 THEN 1 ELSE 0 END) AS errors`
+		? `SUM(CASE WHEN (${safeStatusIntExpr(statusCol, driver)}) >= 400 THEN 1 ELSE 0 END) AS errors`
 		: '0 AS errors'
 	const orderSql =
 		req.sortBy === 'last_seen'
@@ -1005,8 +1126,7 @@ export async function runAnalyticsActors(
 	COUNT(DISTINCT ${dayBucket}) AS active_days,
 	${errSelect},
 	MIN(${msExpr}) AS first_seen,
-	MAX(${msExpr}) AS last_seen,
-	${evCol ? `MAX(CAST(${quoteIdent(evCol)} AS TEXT))` : 'NULL'} AS sample_event
+	MAX(${msExpr}) AS last_seen
 FROM ${qTable}
 WHERE ${whereClauses.join(' AND ')}
 GROUP BY 1
@@ -1014,21 +1134,60 @@ ORDER BY ${orderSql}
 LIMIT ${limit}`
 
 	const rows = await execReadOnly(adapter, sql, limit, req.queryId)
-	const actors: ActorSummary[] = rows.map((r) => ({
-		actorId: String(r.actor_id ?? ''),
-		userId: r.user_id ? String(r.user_id) : null,
-		visitorId: r.visitor_id ? String(r.visitor_id) : null,
-		eventCount: Number(r.event_count ?? 0),
-		activeDays: Number(r.active_days ?? 0),
-		errorCount: Number(r.errors ?? 0),
-		firstSeenMs: Number(r.first_seen ?? 0),
-		lastSeenMs: Number(r.last_seen ?? 0),
-		topEvent: r.sample_event
-			? req.normalizeUrls
-				? normalizeEventName(String(r.sample_event))
-				: String(r.sample_event)
-			: null,
-	}))
+
+	// Compute actual most-frequent event per returned actor (not alphabetical MAX(event)).
+	const topEventByActor = new Map<string, string>()
+	if (evCol && rows.length > 0) {
+		const actorIds = rows.map((r) => String(r.actor_id ?? '')).filter(Boolean)
+		if (actorIds.length > 0) {
+			const inList = actorIds.map(sqlLiteral).join(', ')
+			const qEv = quoteIdent(evCol)
+			const freqSql = `SELECT ${actorExpr} AS actor_id, CAST(${qEv} AS TEXT) AS ev, COUNT(*) AS n
+FROM ${qTable}
+WHERE ${whereClauses.join(' AND ')} AND ${actorExpr} IN (${inList}) AND ${qEv} IS NOT NULL
+GROUP BY 1, 2`
+			const freqRows = await execReadOnly(adapter, freqSql, 10_000, req.queryId)
+			const countsByActor = new Map<string, Map<string, number>>()
+			for (const fr of freqRows) {
+				const aid = String(fr.actor_id ?? '')
+				const rawEv = String(fr.ev ?? '')
+				if (!aid || !rawEv) continue
+				const key = req.normalizeUrls ? normalizeEventName(rawEv) : rawEv
+				let m = countsByActor.get(aid)
+				if (!m) {
+					m = new Map<string, number>()
+					countsByActor.set(aid, m)
+				}
+				m.set(key, (m.get(key) ?? 0) + Number(fr.n ?? 0))
+			}
+			for (const [aid, m] of countsByActor) {
+				let bestEv = ''
+				let bestN = -1
+				for (const [ev, n] of m) {
+					if (n > bestN) {
+						bestN = n
+						bestEv = ev
+					}
+				}
+				if (bestEv) topEventByActor.set(aid, bestEv)
+			}
+		}
+	}
+
+	const actors: ActorSummary[] = rows.map((r) => {
+		const actorId = String(r.actor_id ?? '')
+		return {
+			actorId,
+			userId: r.user_id ? String(r.user_id) : null,
+			visitorId: r.visitor_id ? String(r.visitor_id) : null,
+			eventCount: Number(r.event_count ?? 0),
+			activeDays: Number(r.active_days ?? 0),
+			errorCount: Number(r.errors ?? 0),
+			firstSeenMs: Number(r.first_seen ?? 0),
+			lastSeenMs: Number(r.last_seen ?? 0),
+			topEvent: topEventByActor.get(actorId) ?? null,
+		}
+	})
 
 	return {
 		actors,
@@ -1079,7 +1238,7 @@ export async function runAnalyticsActorJourney(
 	const sql = `SELECT ${pkCol ? `CAST(${quoteIdent(pkCol)} AS TEXT)` : 'NULL'} AS id,
 	${timeToMsExpr(req.timeColumn, req.timeFormat, driver)} AS ts_ms,
 	${evCol ? `CAST(${quoteIdent(evCol)} AS TEXT)` : sqlLiteral(ts.name)} AS ev,
-	${statusCol ? `CAST(${quoteIdent(statusCol)} AS INTEGER)` : 'NULL'} AS status,
+	${statusCol ? safeStatusIntExpr(statusCol, driver) : 'NULL'} AS status,
 	${payloadCol ? `CAST(${quoteIdent(payloadCol)} AS TEXT)` : 'NULL'} AS data,
 	${uCol ? `NULLIF(CAST(${quoteIdent(uCol)} AS TEXT), '')` : 'NULL'} AS uid,
 	${vCol ? `NULLIF(CAST(${quoteIdent(vCol)} AS TEXT), '')` : 'NULL'} AS vid

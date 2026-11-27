@@ -81,4 +81,33 @@ describe('detectColumnLenses', () => {
 		expect(autoDecodeSingleValue(42, 'count')).toBeNull()
 		expect(autoDecodeSingleValue(1795719055385, 'created_at')?.format).toBe('epoch_ms')
 	})
+
+	test('detects Twitter/Discord Snowflakes on ID columns instead of misreading them as Unix ns', () => {
+		const rows = [
+			{ id: '1861452839104839680', ean13: '1732701234567' },
+			{ id: '1861452843299143681', ean13: '1732709876543' },
+		]
+		const lenses = detectColumnLenses(['id', 'ean13'], { id: 'BIGINT', ean13: 'TEXT' }, rows)
+		expect(lenses.id).toEqual({ format: 'snowflake_twitter', mode: 'raw', auto: true })
+		// Non-time 13-digit TEXT codes must never be overwritten as Unix ms
+		expect(lenses.ean13).toBeUndefined()
+		expect(autoDecodeSingleValue('1861452839104839680', 'id')?.format).toBe('snowflake_twitter')
+	})
+
+	test('auto-detects Apple / CoreData Cocoa epoch columns (ZCREATIONDATE)', () => {
+		const cocoaSec = Math.floor(Date.UTC(2026, 10, 26, 12, 0, 0) / 1000) - 978307200
+		const rows = [
+			{ Z_PK: 1, ZCREATIONDATE: cocoaSec - 3600, ZMODIFICATIONDATE: cocoaSec + 0.25 },
+			{ Z_PK: 2, ZCREATIONDATE: cocoaSec - 1800, ZMODIFICATIONDATE: cocoaSec + 0.75 },
+		]
+		const lenses = detectColumnLenses(
+			['Z_PK', 'ZCREATIONDATE', 'ZMODIFICATIONDATE'],
+			{ Z_PK: 'INTEGER', ZCREATIONDATE: 'TIMESTAMP', ZMODIFICATIONDATE: 'REAL' },
+			rows,
+		)
+		expect(lenses.Z_PK).toBeUndefined()
+		expect(lenses.ZCREATIONDATE).toEqual({ format: 'cocoa_s', mode: 'utc', auto: true })
+		expect(lenses.ZMODIFICATIONDATE).toEqual({ format: 'cocoa_s', mode: 'utc', auto: true })
+		expect(autoDecodeSingleValue(cocoaSec, 'ZCREATIONDATE')?.format).toBe('cocoa_s')
+	})
 })

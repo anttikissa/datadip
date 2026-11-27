@@ -345,7 +345,7 @@ export function detectTableColumns(table: TableSchema): StaticTableColumns {
 		}
 
 		const sScore = scorePatterns(col.name, STATUS_COL_PATTERNS)
-		if (sScore > 0 && (isIntType(col.type) || isTextType(col.type)) && (!bestStatus || sScore > bestStatus.score)) {
+		if (sScore > 0 && (isIntType(col.type) || !col.type) && (!bestStatus || sScore > bestStatus.score)) {
 			bestStatus = { name: col.name, score: sScore }
 		}
 

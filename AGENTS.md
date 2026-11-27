@@ -142,6 +142,24 @@ batched bounded query (`LIMIT 1001`) for exact counts, fall back to
 and mark estimated counts explicitly (`rowCountEstimated` -> `14,100+`,
 `1,920,000+`).
 
+In dialect-shared analytics SQL (`server/db/analytics.ts`), never run
+unguarded `CAST(col AS INTEGER)` on columns that may contain text values
+(such as `status = 'failed'`, which SQLite coerces to `0` but PostgreSQL
+aborts the transaction on); always use a regex/GLOB-guarded numeric cast
+and skip auto-detecting `TEXT` status columns as HTTP codes. For
+millisecond-anchored ISO/`timestamptz` range upper bounds, filter with
+`< (endMs + 1ms)` rather than `<= endMs` so sub-millisecond PostgreSQL
+rows are never dropped. Never sum per-group `COUNT(DISTINCT actor)`
+values across collapsed routes or an `Other` bucket; recompute distinct
+actors in SQL with a `CASE` grouping. Never run unbounded `COUNT(*)` or
+full-table `GROUP BY` scans in `detectAnalyticsTable` on large tables
+(`rowCount === null`, estimated, or `> 100k`).
+
+In Smart Value Lenses (`src/shared/lenses.ts`), never auto-detect
+`epoch_ns` without a timestamp column name hint (64-bit Twitter/Discord
+Snowflake IDs collide with `1e18..2.2e18`), and never overwrite
+non-time `TEXT` columns as `epoch_ms` (e.g. 13-digit barcodes).
+
 ## Tests
 
 `./test` runs `bun check` beside `bun test --parallel`; run it for

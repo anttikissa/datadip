@@ -742,10 +742,25 @@ export function TableView(props: {
 		return detectColumnLenses(res.columns, res.columnTypes, res.rows)
 	})
 
+	function lensStorageKey(connId: string, table: string): string {
+		return `datadip:lenses:${connId}:${table}`
+	}
+
+	function loadSavedLenses(connId: string, table: string): Record<string, ColumnLensConfig> {
+		try {
+			const raw = localStorage.getItem(lensStorageKey(connId, table))
+			if (!raw) return {}
+			const parsed = JSON.parse(raw)
+			return parsed && typeof parsed === 'object' ? (parsed as Record<string, ColumnLensConfig>) : {}
+		} catch {
+			return {}
+		}
+	}
+
 	createEffect(
-		() => `${props.route.connId}:${props.route.table}`,
-		() => {
-			setLensOverrides({})
+		() => [props.route.connId, props.route.table] as const,
+		([connId, table]) => {
+			setLensOverrides(loadSavedLenses(connId, table))
 			setLensMenu(null)
 		},
 	)
@@ -762,6 +777,11 @@ export function TableView(props: {
 			const copy = { ...prev }
 			if (next === null) delete copy[colName]
 			else copy[colName] = next
+			try {
+				const key = lensStorageKey(props.route.connId, props.route.table)
+				if (Object.keys(copy).length === 0) localStorage.removeItem(key)
+				else localStorage.setItem(key, JSON.stringify(copy))
+			} catch {}
 			return copy
 		})
 	}

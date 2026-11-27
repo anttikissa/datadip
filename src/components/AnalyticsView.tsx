@@ -361,7 +361,13 @@ export function AnalyticsView(props: {
 			setBreakdownCol(det.eventColumn ?? '')
 			setSelectedEvents([])
 			setExcludeAdmin(Boolean(det.adminColumn || det.userDirectory?.adminColumn))
-			setExcludeTestUsers(Boolean(det.userDirectory?.testColumn))
+			// On local dev DBs where every user is marked test=1, keep test users visible by default so charts aren't empty.
+			const hasRealNonTestUsers = Boolean(
+				det.userDirectory?.testColumn &&
+				det.userDirectory.testCount > 0 &&
+				det.userDirectory.testCount < det.userDirectory.totalUsers,
+			)
+			setExcludeTestUsers(hasRealNonTestUsers)
 			setSignedInOnly(Boolean(det.userIdColumn && det.visitorIdColumn))
 			setExcludedActors(loadSavedExcluded(connId))
 			setErrorsOnly(false)
@@ -512,9 +518,12 @@ export function AnalyticsView(props: {
 				stitchIdentity(),
 				refreshTick(),
 			] as const,
-		([mode, connId, tbl, tCol, , evCol]) => {
+		([mode, connId, tbl, tCol, , evCol, actCol]) => {
 			const steps = funnelSteps().filter((s) => s.pattern.trim().length > 0)
-			if (mode !== 'funnel' || !connId || !tbl || !tCol || !evCol || steps.length === 0) return
+			if (mode !== 'funnel' || !connId || !tbl || !tCol || !evCol || !actCol || steps.length === 0) {
+				if (mode === 'funnel' && (!evCol || !actCol)) setFunnelData(null)
+				return
+			}
 			cancelActiveQuery()
 			const qid = tid('q')
 			activeQueryId = qid
@@ -567,8 +576,12 @@ export function AnalyticsView(props: {
 				stitchIdentity(),
 				refreshTick(),
 			] as const,
-		([mode, connId, tbl, tCol]) => {
+		([mode, connId, tbl, tCol, , , actCol]) => {
 			if (mode !== 'retention' || !connId || !tbl || !tCol) return
+			if (!actCol) {
+				setRetData(null)
+				return
+			}
 			cancelActiveQuery()
 			const qid = tid('q')
 			activeQueryId = qid
@@ -577,7 +590,7 @@ export function AnalyticsView(props: {
 			setError(null)
 			api
 				.analyticsRetention(connId, {
-					...baseConfig(),
+					...baseConfig({ allowAnonymous: stitchIdentity() }),
 					granularity: retGranularity(),
 					periods: retPeriods(),
 					cohortEvent: retCohortEvent() || null,
@@ -620,8 +633,16 @@ export function AnalyticsView(props: {
 				actorsSearch(),
 				refreshTick(),
 			] as const,
-		([mode, connId, tbl, tCol]) => {
+		([mode, connId, tbl, tCol, , actCol]) => {
 			if (mode !== 'actors' || !connId || !tbl || !tCol) return
+			if (!actCol) {
+				setActorsData(null)
+				setJourneyData(null)
+				return
+			}
+			cancelActiveQuery()
+			const qid = tid('q')
+			activeQueryId = qid
 			let stale = false
 			setActorsLoading(true)
 			setError(null)
@@ -631,6 +652,7 @@ export function AnalyticsView(props: {
 					sortBy: actorsSort(),
 					search: actorsSearch(),
 					limit: 100,
+					queryId: qid,
 				})
 				.then((res) => {
 					if (stale) return
@@ -644,6 +666,7 @@ export function AnalyticsView(props: {
 				})
 				.finally(() => {
 					if (!stale) setActorsLoading(false)
+					if (activeQueryId === qid) activeQueryId = null
 				})
 			return () => {
 				stale = true
@@ -666,6 +689,7 @@ export function AnalyticsView(props: {
 			] as const,
 		([mode, connId, tbl, tCol, actorId]) => {
 			if (mode !== 'actors' || !connId || !tbl || !tCol || !actorId) return
+			const qid = tid('q')
 			let stale = false
 			setJourneyLoading(true)
 			api
@@ -673,6 +697,7 @@ export function AnalyticsView(props: {
 					...baseConfig(),
 					actorId,
 					limit: 250,
+					queryId: qid,
 				})
 				.then((res) => {
 					if (!stale) setJourneyData(res)
@@ -713,6 +738,10 @@ export function AnalyticsView(props: {
 			{ column: timeColumn(), op: 'gte', value: fmtVal(startMs) },
 			{ column: timeColumn(), op: 'lte', value: fmtVal(endMs) },
 		]
+		for (const f of effectiveFilters()) {
+			if (f.op === 'not_like') continue
+			filters.push({ column: f.column, op: f.op, value: f.value })
+		}
 		if (selectedEvents().length === 1 && eventColumn()) {
 			const ev = selectedEvents()[0]!
 			filters.push({
@@ -740,6 +769,7 @@ export function AnalyticsView(props: {
 			timeFormat: timeFormat(),
 			eventColumn: eventColumn(),
 			actorColumn: actorColumn(),
+			statusColumn: statusColumn(),
 			range: range(),
 			interval: interval(),
 			metric: metric(),
@@ -748,6 +778,9 @@ export function AnalyticsView(props: {
 			selectedEvents: selectedEvents(),
 			normalizeUrls: normalizeUrls(),
 			excludeAdmin: excludeAdmin(),
+			excludeTestUsers: excludeTestUsers(),
+			signedInOnly: signedInOnly(),
+			excludedActors: excludedActors(),
 			errorsOnly: errorsOnly(),
 			customFilters: customFilters(),
 			funnelSteps: funnelSteps(),
@@ -769,11 +802,18 @@ export function AnalyticsView(props: {
 		}
 	}
 
-	function loadSavedChart(chart: SavedAnalyticsChart) {
+	async function loadSavedChart(chart: SavedAnalyticsChart) {
 		const c = chart.config
-		if (typeof c.table === 'string' && c.table !== selectedTable()) {
-			void runDetect(props.connId, c.table)
+		const targetTable = typeof c.table === 'string' && c.table ? c.table : selectedTable()
+		props.onChangeRoute({ table: targetTable, mode: chart.mode })
+		if (targetTable && targetTable !== selectedTable()) {
+			await runDetect(props.connId, targetTable)
 		}
+		if (typeof c.timeColumn === 'string') setTimeColumn(c.timeColumn)
+		if (typeof c.timeFormat === 'string') setTimeFormat(c.timeFormat as TimeColumnFormat)
+		if (typeof c.eventColumn === 'string') setEventColumn(c.eventColumn)
+		if (typeof c.actorColumn === 'string') setActorColumn(c.actorColumn)
+		if (typeof c.statusColumn === 'string') setStatusColumn(c.statusColumn)
 		if (typeof c.range === 'string') setRange(c.range as AnalyticsRange)
 		if (typeof c.interval === 'string') setIntervalVal(c.interval as AnalyticsInterval)
 		if (typeof c.metric === 'string') setMetric(c.metric as AnalyticsMetric)
@@ -782,6 +822,9 @@ export function AnalyticsView(props: {
 		if (Array.isArray(c.selectedEvents)) setSelectedEvents(c.selectedEvents.map(String))
 		if (typeof c.normalizeUrls === 'boolean') setNormalizeUrls(c.normalizeUrls)
 		if (typeof c.excludeAdmin === 'boolean') setExcludeAdmin(c.excludeAdmin)
+		if (typeof c.excludeTestUsers === 'boolean') setExcludeTestUsers(c.excludeTestUsers)
+		if (typeof c.signedInOnly === 'boolean') setSignedInOnly(c.signedInOnly)
+		if (Array.isArray(c.excludedActors)) updateExcludedActors(() => c.excludedActors as string[])
 		if (typeof c.errorsOnly === 'boolean') setErrorsOnly(c.errorsOnly)
 		if (Array.isArray(c.customFilters)) setCustomFilters(c.customFilters as AnalyticsFilter[])
 		if (Array.isArray(c.funnelSteps)) setFunnelSteps(c.funnelSteps as FunnelStepSpec[])
@@ -791,7 +834,6 @@ export function AnalyticsView(props: {
 		if (typeof c.retPeriods === 'number') setRetPeriods(c.retPeriods)
 		if (typeof c.retCohortEvent === 'string') setRetCohortEvent(c.retCohortEvent)
 		if (typeof c.retReturnEvent === 'string') setRetReturnEvent(c.retReturnEvent)
-		props.onChangeRoute({ table: typeof c.table === 'string' ? c.table : selectedTable(), mode: chart.mode })
 	}
 
 	async function deleteSavedChart(id: string) {
@@ -985,6 +1027,24 @@ export function AnalyticsView(props: {
 					>
 						<IconSql />
 						SQL
+					</button>
+				</Show>
+
+				<Show when={trendsLoading() || funnelLoading() || retLoading() || actorsLoading()}>
+					<button
+						type="button"
+						class="btn sm danger"
+						title="Cancel running analytics query"
+						onClick={() => {
+							cancelActiveQuery()
+							setTrendsLoading(false)
+							setFunnelLoading(false)
+							setRetLoading(false)
+							setActorsLoading(false)
+							props.onNotify('Cancelled analytics query', 'info')
+						}}
+					>
+						Stop
 					</button>
 				</Show>
 
@@ -1721,466 +1781,512 @@ export function AnalyticsView(props: {
 
 				{/* --- FUNNEL MODE --- */}
 				<Show when={props.mode === 'funnel' && timeColumn()}>
-					<datalist id="datadip-analytics-events">
-						<For each={normalizedTopEventNames()}>{(name) => <option value={name} />}</For>
-					</datalist>
-
-					<div class="analytics-card" style="margin-bottom:14px">
-						<div class="analytics-card-head">
-							<div style="display:flex;align-items:baseline;gap:8px">
-								<strong>Conversion Funnel Steps</strong>
-								<span style="font-size:11.5px;color:var(--ink-muted)">
-									Ordered progression per person within the conversion window
-								</span>
+					<Show
+						when={eventColumn() && actorColumn()}
+						fallback={
+							<div class="analytics-card" style="padding:24px;text-align:center">
+								<p style="margin:0 0 8px;font-weight:600">Funnel requires both an Event column and a Person column</p>
+								<p style="margin:0;color:var(--ink-secondary);font-size:12.5px">
+									Select <span class="mono">Event</span> and <span class="mono">Person</span> columns above, or switch
+									to a table with user/event history.
+								</p>
 							</div>
-							<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-								<label class="analytics-field-inline">
-									<span>Window</span>
-									<select
-										class="select sm mono"
-										value={funnelWindowSec() === null ? 'any' : String(funnelWindowSec())}
-										onChange={(e) => {
-											const v = e.currentTarget.value
-											setFunnelWindowSec(v === 'any' ? null : Number(v))
-										}}
-									>
-										<option value="3600" selected={funnelWindowSec() === 3600}>
-											1 hour
-										</option>
-										<option value="86400" selected={funnelWindowSec() === 86400}>
-											24 hours
-										</option>
-										<option value="604800" selected={funnelWindowSec() === 604800}>
-											7 days
-										</option>
-										<option value="2592000" selected={funnelWindowSec() === 2592000}>
-											30 days
-										</option>
-										<option value="any" selected={funnelWindowSec() === null}>
-											Entire range
-										</option>
-									</select>
-								</label>
+						}
+					>
+						<datalist id="datadip-analytics-events">
+							<For each={normalizedTopEventNames()}>{(name) => <option value={name} />}</For>
+						</datalist>
 
-								<Show when={detection()?.userIdColumn && detection()?.visitorIdColumn}>
-									<button
-										type="button"
-										class={['btn sm', { 'active-toggle': stitchIdentity() }]}
-										title="Link anonymous visitor_id events to authenticated user_id when they co-occur (essential for signup funnels)"
-										onClick={() => setStitchIdentity((v) => !v)}
-									>
-										Stitch visitor → user
-									</button>
-								</Show>
+						<div class="analytics-card" style="margin-bottom:14px">
+							<div class="analytics-card-head">
+								<div style="display:flex;align-items:baseline;gap:8px">
+									<strong>Conversion Funnel Steps</strong>
+									<span style="font-size:11.5px;color:var(--ink-muted)">
+										Ordered progression per person within the conversion window
+									</span>
+								</div>
+								<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+									<label class="analytics-field-inline">
+										<span>Window</span>
+										<select
+											class="select sm mono"
+											value={funnelWindowSec() === null ? 'any' : String(funnelWindowSec())}
+											onChange={(e) => {
+												const v = e.currentTarget.value
+												setFunnelWindowSec(v === 'any' ? null : Number(v))
+											}}
+										>
+											<option value="3600" selected={funnelWindowSec() === 3600}>
+												1 hour
+											</option>
+											<option value="86400" selected={funnelWindowSec() === 86400}>
+												24 hours
+											</option>
+											<option value="604800" selected={funnelWindowSec() === 604800}>
+												7 days
+											</option>
+											<option value="2592000" selected={funnelWindowSec() === 2592000}>
+												30 days
+											</option>
+											<option value="any" selected={funnelWindowSec() === null}>
+												Entire range
+											</option>
+										</select>
+									</label>
+
+									<Show when={detection()?.userIdColumn && detection()?.visitorIdColumn}>
+										<button
+											type="button"
+											class={['btn sm', { 'active-toggle': stitchIdentity() }]}
+											title="Link anonymous visitor_id events to authenticated user_id when they co-occur (essential for signup funnels)"
+											onClick={() => setStitchIdentity((v) => !v)}
+										>
+											Stitch visitor → user
+										</button>
+									</Show>
+								</div>
+							</div>
+
+							<div class="funnel-builder">
+								<For each={funnelSteps()}>
+									{(step, idx) => (
+										<div class="funnel-builder-row">
+											<span class="funnel-step-num mono">{idx() + 1}</span>
+											<select
+												class="select sm"
+												style="width:94px"
+												value={step.match}
+												onChange={(e) => {
+													const match = e.currentTarget.value as FunnelStepSpec['match']
+													setFunnelSteps((prev) => prev.map((s, i) => (i === idx() ? { ...s, match } : s)))
+												}}
+											>
+												<option value="exact" selected={step.match === 'exact'}>
+													Exact
+												</option>
+												<option value="prefix" selected={step.match === 'prefix'}>
+													Starts with
+												</option>
+												<option value="contains" selected={step.match === 'contains'}>
+													Contains
+												</option>
+											</select>
+											<input
+												class="input mono"
+												style="flex:1;height:28px"
+												list="datadip-analytics-events"
+												placeholder="Event name or pattern (e.g. POST /api/view)…"
+												value={step.pattern}
+												onInput={(e) => {
+													const pattern = e.currentTarget.value
+													setFunnelSteps((prev) => prev.map((s, i) => (i === idx() ? { ...s, pattern } : s)))
+												}}
+											/>
+											<Show when={funnelSteps().length > 2}>
+												<button
+													type="button"
+													class="icon-btn ghost"
+													style="width:26px;height:26px"
+													aria-label="Remove step"
+													onClick={() => setFunnelSteps((prev) => prev.filter((_, i) => i !== idx()))}
+												>
+													<IconClose />
+												</button>
+											</Show>
+										</div>
+									)}
+								</For>
+
+								<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+									<Show when={funnelSteps().length < 8}>
+										<button
+											type="button"
+											class="btn sm"
+											onClick={() => setFunnelSteps((prev) => [...prev, { pattern: '', match: 'exact' }])}
+										>
+											<IconPlus />
+											Add Step
+										</button>
+									</Show>
+									<Show when={funnelLoading()}>
+										<span class="mono" style="font-size:11.5px;color:var(--accent)">
+											Computing funnel…
+										</span>
+									</Show>
+									<Show when={!funnelLoading() ? funnelData() : null}>
+										{(fd) => (
+											<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
+												{fd().scannedEvents.toLocaleString()} events scanned in {fd().durationMs}ms
+												{fd().stitchedIdentity ? ' · identity stitched' : ''}
+											</span>
+										)}
+									</Show>
+								</div>
 							</div>
 						</div>
 
-						<div class="funnel-builder">
-							<For each={funnelSteps()}>
-								{(step, idx) => (
-									<div class="funnel-builder-row">
-										<span class="funnel-step-num mono">{idx() + 1}</span>
-										<select
-											class="select sm"
-											style="width:94px"
-											value={step.match}
-											onChange={(e) => {
-												const match = e.currentTarget.value as FunnelStepSpec['match']
-												setFunnelSteps((prev) => prev.map((s, i) => (i === idx() ? { ...s, match } : s)))
-											}}
-										>
-											<option value="exact" selected={step.match === 'exact'}>
-												Exact
-											</option>
-											<option value="prefix" selected={step.match === 'prefix'}>
-												Starts with
-											</option>
-											<option value="contains" selected={step.match === 'contains'}>
-												Contains
-											</option>
-										</select>
-										<input
-											class="input mono"
-											style="flex:1;height:28px"
-											list="datadip-analytics-events"
-											placeholder="Event name or pattern (e.g. POST /api/view)…"
-											value={step.pattern}
-											onInput={(e) => {
-												const pattern = e.currentTarget.value
-												setFunnelSteps((prev) => prev.map((s, i) => (i === idx() ? { ...s, pattern } : s)))
-											}}
-										/>
-										<Show when={funnelSteps().length > 2}>
-											<button
-												type="button"
-												class="icon-btn ghost"
-												style="width:26px;height:26px"
-												aria-label="Remove step"
-												onClick={() => setFunnelSteps((prev) => prev.filter((_, i) => i !== idx()))}
-											>
-												<IconClose />
-											</button>
-										</Show>
-									</div>
-								)}
-							</For>
-
-							<div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-								<Show when={funnelSteps().length < 8}>
-									<button
-										type="button"
-										class="btn sm"
-										onClick={() => setFunnelSteps((prev) => [...prev, { pattern: '', match: 'exact' }])}
-									>
-										<IconPlus />
-										Add Step
-									</button>
-								</Show>
-								<Show when={funnelLoading()}>
-									<span class="mono" style="font-size:11.5px;color:var(--accent)">
-										Computing funnel…
+						<div class="analytics-card">
+							<div class="analytics-card-head">
+								<strong>Conversion Results</strong>
+								<Show when={funnelData() && funnelData()!.steps.length >= 2}>
+									<span class="mono" style="font-size:12px;color:var(--accent);font-weight:600">
+										Overall: {funnelData()!.steps[funnelData()!.steps.length - 1]!.overallPct}%
 									</span>
 								</Show>
-								<Show when={!funnelLoading() ? funnelData() : null}>
+							</div>
+							<div style="padding:14px">
+								<Show
+									when={funnelData()}
+									fallback={
+										<div class="chart-empty" style="height:200px">
+											Select events above to compute funnel conversion.
+										</div>
+									}
+								>
 									{(fd) => (
-										<span class="mono" style="font-size:11.5px;color:var(--ink-muted)">
-											{fd().scannedEvents.toLocaleString()} events scanned in {fd().durationMs}ms
-											{fd().stitchedIdentity ? ' · identity stitched' : ''}
-										</span>
+										<FunnelChart
+											steps={fd().steps}
+											onInspectActor={inspectActorInPeople}
+											formatActor={formatActorName}
+										/>
 									)}
 								</Show>
 							</div>
 						</div>
-					</div>
-
-					<div class="analytics-card">
-						<div class="analytics-card-head">
-							<strong>Conversion Results</strong>
-							<Show when={funnelData() && funnelData()!.steps.length >= 2}>
-								<span class="mono" style="font-size:12px;color:var(--accent);font-weight:600">
-									Overall: {funnelData()!.steps[funnelData()!.steps.length - 1]!.overallPct}%
-								</span>
-							</Show>
-						</div>
-						<div style="padding:14px">
-							<Show
-								when={funnelData()}
-								fallback={
-									<div class="chart-empty" style="height:200px">
-										Select events above to compute funnel conversion.
-									</div>
-								}
-							>
-								{(fd) => (
-									<FunnelChart steps={fd().steps} onInspectActor={inspectActorInPeople} formatActor={formatActorName} />
-								)}
-							</Show>
-						</div>
-					</div>
+					</Show>
 				</Show>
 
 				{/* --- RETENTION MODE --- */}
 				<Show when={props.mode === 'retention' && timeColumn()}>
-					<div class="analytics-card" style="margin-bottom:14px">
-						<div class="analytics-card-head">
-							<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-								<div class="tab-group">
-									<button
-										type="button"
-										class={['tab-btn', { active: retGranularity() === 'day' }]}
-										onClick={() => {
-											setRetGranularity('day')
-											setRetPeriods(14)
-										}}
-									>
-										Daily (D0–D14)
-									</button>
-									<button
-										type="button"
-										class={['tab-btn', { active: retGranularity() === 'week' }]}
-										onClick={() => {
-											setRetGranularity('week')
-											setRetPeriods(8)
-										}}
-									>
-										Weekly (W0–W8)
-									</button>
-								</div>
-
-								<Show when={eventColumn()}>
-									<label class="analytics-field-inline">
-										<span>Cohort event</span>
-										<input
-											class="input mono"
-											style="width:185px;height:26px;font-size:12px"
-											list="datadip-analytics-events"
-											placeholder="Any first event"
-											value={retCohortEvent()}
-											onInput={(e) => setRetCohortEvent(e.currentTarget.value)}
-										/>
-									</label>
-									<label class="analytics-field-inline">
-										<span>Return event</span>
-										<input
-											class="input mono"
-											style="width:185px;height:26px;font-size:12px"
-											list="datadip-analytics-events"
-											placeholder="Any active event"
-											value={retReturnEvent()}
-											onInput={(e) => setRetReturnEvent(e.currentTarget.value)}
-										/>
-									</label>
-								</Show>
-
-								<Show when={detection()?.userIdColumn && detection()?.visitorIdColumn}>
-									<button
-										type="button"
-										class={['btn sm', { 'active-toggle': stitchIdentity() }]}
-										onClick={() => setStitchIdentity((v) => !v)}
-									>
-										Stitch visitor → user
-									</button>
-								</Show>
-							</div>
-
-							<Show when={retLoading()}>
-								<span class="mono" style="font-size:11.5px;color:var(--accent)">
-									Computing cohorts…
-								</span>
-							</Show>
-						</div>
-					</div>
-
-					<datalist id="datadip-analytics-events">
-						<For each={normalizedTopEventNames()}>{(name) => <option value={name} />}</For>
-					</datalist>
-
 					<Show
-						when={retData()}
+						when={actorColumn()}
 						fallback={
-							<div class="chart-empty" style="height:240px">
-								Loading retention cohorts…
+							<div class="analytics-card" style="padding:24px;text-align:center">
+								<p style="margin:0 0 8px;font-weight:600">Retention requires a Person / Actor column</p>
+								<p style="margin:0;color:var(--ink-secondary);font-size:12.5px">
+									Select a <span class="mono">Person</span> column (e.g. <span class="mono">user_id</span>) above, or
+									switch to a table that tracks people or accounts.
+								</p>
 							</div>
 						}
 					>
-						{(rd) => <RetentionMatrix data={rd()} />}
+						<div class="analytics-card" style="margin-bottom:14px">
+							<div class="analytics-card-head">
+								<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+									<div class="tab-group">
+										<button
+											type="button"
+											class={['tab-btn', { active: retGranularity() === 'day' }]}
+											onClick={() => {
+												setRetGranularity('day')
+												setRetPeriods(14)
+											}}
+										>
+											Daily (D0–D14)
+										</button>
+										<button
+											type="button"
+											class={['tab-btn', { active: retGranularity() === 'week' }]}
+											onClick={() => {
+												setRetGranularity('week')
+												setRetPeriods(8)
+											}}
+										>
+											Weekly (W0–W8)
+										</button>
+									</div>
+
+									<Show when={eventColumn()}>
+										<label class="analytics-field-inline">
+											<span>Cohort event</span>
+											<input
+												class="input mono"
+												style="width:185px;height:26px;font-size:12px"
+												list="datadip-analytics-events"
+												placeholder="Any first event"
+												value={retCohortEvent()}
+												onInput={(e) => setRetCohortEvent(e.currentTarget.value)}
+											/>
+										</label>
+										<label class="analytics-field-inline">
+											<span>Return event</span>
+											<input
+												class="input mono"
+												style="width:185px;height:26px;font-size:12px"
+												list="datadip-analytics-events"
+												placeholder="Any active event"
+												value={retReturnEvent()}
+												onInput={(e) => setRetReturnEvent(e.currentTarget.value)}
+											/>
+										</label>
+									</Show>
+
+									<Show when={detection()?.userIdColumn && detection()?.visitorIdColumn}>
+										<button
+											type="button"
+											class={['btn sm', { 'active-toggle': stitchIdentity() }]}
+											onClick={() => setStitchIdentity((v) => !v)}
+										>
+											Stitch visitor → user
+										</button>
+									</Show>
+								</div>
+
+								<Show when={retLoading()}>
+									<span class="mono" style="font-size:11.5px;color:var(--accent)">
+										Computing cohorts…
+									</span>
+								</Show>
+							</div>
+						</div>
+
+						<datalist id="datadip-analytics-events">
+							<For each={normalizedTopEventNames()}>{(name) => <option value={name} />}</For>
+						</datalist>
+
+						<Show
+							when={retData()}
+							fallback={
+								<div class="chart-empty" style="height:240px">
+									Loading retention cohorts…
+								</div>
+							}
+						>
+							{(rd) => <RetentionMatrix data={rd()} />}
+						</Show>
 					</Show>
 				</Show>
 
 				{/* --- PEOPLE / ACTORS & JOURNEYS MODE --- */}
 				<Show when={props.mode === 'actors' && timeColumn()}>
-					<div class="actors-split">
-						{/* Left: ranked actors list */}
-						<div class="analytics-card actors-list-pane">
-							<div class="analytics-card-head" style="gap:6px">
-								<input
-									class="input mono"
-									style="flex:1;height:26px;font-size:12px"
-									placeholder="Filter by user or visitor ID…"
-									value={actorsSearch()}
-									onInput={(e) => setActorsSearch(e.currentTarget.value)}
-								/>
-								<select
-									ref={(el) => (actorsSortSelectEl = el)}
-									class="select sm"
-									value={actorsSort()}
-									onChange={(e) => setActorsSort(e.currentTarget.value as 'events' | 'last_seen' | 'errors')}
-								>
-									<option value="events" selected={actorsSort() === 'events'}>
-										Most Events
-									</option>
-									<option value="last_seen" selected={actorsSort() === 'last_seen'}>
-										Last Seen
-									</option>
-									<Show when={statusColumn()}>
-										<option value="errors" selected={actorsSort() === 'errors'}>
-											Most Errors
-										</option>
-									</Show>
-								</select>
+					<Show
+						when={actorColumn()}
+						fallback={
+							<div class="analytics-card" style="padding:24px;text-align:center">
+								<p style="margin:0 0 8px;font-weight:600">People view requires a Person / Actor column</p>
+								<p style="margin:0;color:var(--ink-secondary);font-size:12.5px">
+									Select a <span class="mono">Person</span> column above to inspect individual timelines and sessions.
+								</p>
 							</div>
-							<div class="actors-list-scroll">
-								<Show when={actorsLoading() && !actorsData()}>
-									<div class="chart-empty" style="height:180px">
-										Loading people…
+						}
+					>
+						<div class="actors-split">
+							{/* Left: ranked actors list */}
+							<div class="analytics-card actors-list-pane">
+								<div class="analytics-card-head" style="gap:6px">
+									<input
+										class="input mono"
+										style="flex:1;height:26px;font-size:12px"
+										placeholder="Filter by user or visitor ID…"
+										value={actorsSearch()}
+										onInput={(e) => setActorsSearch(e.currentTarget.value)}
+									/>
+									<select
+										ref={(el) => (actorsSortSelectEl = el)}
+										class="select sm"
+										value={actorsSort()}
+										onChange={(e) => setActorsSort(e.currentTarget.value as 'events' | 'last_seen' | 'errors')}
+									>
+										<option value="events" selected={actorsSort() === 'events'}>
+											Most Events
+										</option>
+										<option value="last_seen" selected={actorsSort() === 'last_seen'}>
+											Last Seen
+										</option>
+										<Show when={statusColumn()}>
+											<option value="errors" selected={actorsSort() === 'errors'}>
+												Most Errors
+											</option>
+										</Show>
+									</select>
+								</div>
+								<div class="actors-list-scroll">
+									<Show when={actorsLoading() && !actorsData()}>
+										<div class="chart-empty" style="height:180px">
+											Loading people…
+										</div>
+									</Show>
+									<For each={actorsData()?.actors ?? []}>
+										{(actor) => {
+											const isSelected = () => selectedActorId() === actor.actorId
+											const decodedId = () => autoDecodeSingleValue(actor.actorId, 'user_id')
+											const meta = () => userMetaById().get(actor.userId ?? actor.actorId)
+											return (
+												<button
+													type="button"
+													class={['actor-row', { active: isSelected() }]}
+													onClick={() => setSelectedActorId(actor.actorId)}
+												>
+													<div class="actor-row-top">
+														<span class="actor-id">
+															<Show when={meta()?.label} fallback={<span class="mono">{actor.actorId}</span>}>
+																<strong>{meta()!.label}</strong>{' '}
+																<span class="mono" style="color:var(--ink-muted);font-size:11px">
+																	{actor.actorId}
+																</span>
+															</Show>
+															<Show when={meta()?.isAdmin}>
+																<span class="tag mono" style="margin-left:5px;font-size:9.5px">
+																	admin
+																</span>
+															</Show>
+															<Show when={meta()?.isTest || meta()?.looksLikeTest}>
+																<span class="tag mono" style="margin-left:5px;font-size:9.5px">
+																	{meta()?.isTest ? 'test' : 'test?'}
+																</span>
+															</Show>
+														</span>
+														<span class="actor-count mono">{actor.eventCount.toLocaleString()}</span>
+													</div>
+													<div class="actor-row-meta mono">
+														<span>{actor.activeDays}d active</span>
+														<span>· {formatRelativeTime(actor.lastSeenMs)}</span>
+														<Show when={actor.errorCount > 0}>
+															<span style="color:var(--prod)">· {actor.errorCount} err</span>
+														</Show>
+														<Show when={decodedId()}>
+															{(d) => (
+																<span title={`${d().formatLabel}: ${d().utc} UTC`}>· created {d().shortDate}</span>
+															)}
+														</Show>
+													</div>
+												</button>
+											)
+										}}
+									</For>
+								</div>
+							</div>
+
+							{/* Right: Session timeline */}
+							<div class="analytics-card actors-journey-pane">
+								<div class="analytics-card-head">
+									<div style="display:flex;align-items:baseline;gap:8px;min-width:0">
+										<strong class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+											{selectedActorId()
+												? (() => {
+														const id = selectedActorId()!
+														const lbl = userMetaById().get(id)?.label
+														return lbl ? `${lbl} (${id})` : id
+													})()
+												: 'Select a person'}
+										</strong>
+										<Show when={selectedActorId() ? autoDecodeSingleValue(selectedActorId(), 'user_id') : null}>
+											{(d) => (
+												<span class="tag mono" title={`Decoded ${d().formatLabel} creation timestamp`}>
+													{d().shortTag} · {d().utc} UTC ({d().relative})
+												</span>
+											)}
+										</Show>
 									</div>
-								</Show>
-								<For each={actorsData()?.actors ?? []}>
-									{(actor) => {
-										const isSelected = () => selectedActorId() === actor.actorId
-										const decodedId = () => autoDecodeSingleValue(actor.actorId, 'user_id')
-										const meta = () => userMetaById().get(actor.userId ?? actor.actorId)
-										return (
+									<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+										<Show when={selectedActorId()}>
 											<button
 												type="button"
-												class={['actor-row', { active: isSelected() }]}
-												onClick={() => setSelectedActorId(actor.actorId)}
+												class="btn sm"
+												title="Exclude this person from Trends, Funnels, Retention, and People (saved for this connection)"
+												onClick={() => {
+													const id = selectedActorId()
+													if (!id) return
+													toggleExcludedActor(id)
+													setSelectedActorId(null)
+													setJourneyData(null)
+													props.onNotify(`Excluded ${formatActorName(id)} from analytics`, 'info')
+												}}
 											>
-												<div class="actor-row-top">
-													<span class="actor-id">
-														<Show when={meta()?.label} fallback={<span class="mono">{actor.actorId}</span>}>
-															<strong>{meta()!.label}</strong>{' '}
-															<span class="mono" style="color:var(--ink-muted);font-size:11px">
-																{actor.actorId}
-															</span>
-														</Show>
-														<Show when={meta()?.isAdmin}>
-															<span class="tag mono" style="margin-left:5px;font-size:9.5px">
-																admin
-															</span>
-														</Show>
-														<Show when={meta()?.isTest || meta()?.looksLikeTest}>
-															<span class="tag mono" style="margin-left:5px;font-size:9.5px">
-																{meta()?.isTest ? 'test' : 'test?'}
-															</span>
-														</Show>
-													</span>
-													<span class="actor-count mono">{actor.eventCount.toLocaleString()}</span>
-												</div>
-												<div class="actor-row-meta mono">
-													<span>{actor.activeDays}d active</span>
-													<span>· {formatRelativeTime(actor.lastSeenMs)}</span>
-													<Show when={actor.errorCount > 0}>
-														<span style="color:var(--prod)">· {actor.errorCount} err</span>
-													</Show>
-													<Show when={decodedId()}>
-														{(d) => <span title={`${d().formatLabel}: ${d().utc} UTC`}>· created {d().shortDate}</span>}
-													</Show>
-												</div>
+												Exclude
 											</button>
-										)
-									}}
-								</For>
-							</div>
-						</div>
-
-						{/* Right: Session timeline */}
-						<div class="analytics-card actors-journey-pane">
-							<div class="analytics-card-head">
-								<div style="display:flex;align-items:baseline;gap:8px;min-width:0">
-									<strong class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-										{selectedActorId()
-											? (() => {
-													const id = selectedActorId()!
-													const lbl = userMetaById().get(id)?.label
-													return lbl ? `${lbl} (${id})` : id
-												})()
-											: 'Select a person'}
-									</strong>
-									<Show when={selectedActorId() ? autoDecodeSingleValue(selectedActorId(), 'user_id') : null}>
-										{(d) => (
-											<span class="tag mono" title={`Decoded ${d().formatLabel} creation timestamp`}>
-												{d().shortTag} · {d().utc} UTC ({d().relative})
-											</span>
-										)}
-									</Show>
-								</div>
-								<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-									<Show when={selectedActorId()}>
-										<button
-											type="button"
-											class="btn sm"
-											title="Exclude this person from Trends, Funnels, Retention, and People (saved for this connection)"
-											onClick={() => {
-												const id = selectedActorId()
-												if (!id) return
-												toggleExcludedActor(id)
-												setSelectedActorId(null)
-												setJourneyData(null)
-												props.onNotify(`Excluded ${formatActorName(id)} from analytics`, 'info')
-											}}
-										>
-											Exclude
-										</button>
-									</Show>
-									<Show when={userFkTarget() && selectedActorId()}>
-										<button
-											type="button"
-											class="btn sm"
-											onClick={() =>
-												props.onFollowFk(userFkTarget()!.toTable, userFkTarget()!.toColumn, selectedActorId())
-											}
-										>
-											Open in {userFkTarget()!.toTable}
-											<IconArrowRight />
-										</button>
-									</Show>
-									<Show when={selectedActorId()}>
-										<button
-											type="button"
-											class="btn sm"
-											onClick={() => {
-												const col =
-													actorColumn() === STITCHED_ACTOR_SENTINEL
-														? (detection()?.userIdColumn ?? detection()?.visitorIdColumn ?? '')
-														: actorColumn()
-												if (col)
-													props.onOpenTable(selectedTable(), [{ column: col, op: 'eq', value: selectedActorId()! }])
-											}}
-										>
-											View Rows
-										</button>
-									</Show>
-								</div>
-							</div>
-
-							<div class="journey-scroll">
-								<Show when={journeyLoading()}>
-									<div class="chart-empty" style="height:200px">
-										Loading session timeline…
+										</Show>
+										<Show when={userFkTarget() && selectedActorId()}>
+											<button
+												type="button"
+												class="btn sm"
+												onClick={() =>
+													props.onFollowFk(userFkTarget()!.toTable, userFkTarget()!.toColumn, selectedActorId())
+												}
+											>
+												Open in {userFkTarget()!.toTable}
+												<IconArrowRight />
+											</button>
+										</Show>
+										<Show when={selectedActorId()}>
+											<button
+												type="button"
+												class="btn sm"
+												onClick={() => {
+													const col =
+														actorColumn() === STITCHED_ACTOR_SENTINEL
+															? (detection()?.userIdColumn ?? detection()?.visitorIdColumn ?? '')
+															: actorColumn()
+													if (col)
+														props.onOpenTable(selectedTable(), [{ column: col, op: 'eq', value: selectedActorId()! }])
+												}}
+											>
+												View Rows
+											</button>
+										</Show>
 									</div>
-								</Show>
-								<Show when={!journeyLoading() && journeySessions().length === 0}>
-									<div class="chart-empty" style="height:200px">
-										No events found for this person in the current window.
-									</div>
-								</Show>
-								<For each={journeySessions()}>
-									{(session, sIdx) => (
-										<div class="journey-session">
-											<div class="journey-session-head mono">
-												<span>
-													Session {journeySessions().length - sIdx()} · {formatUtcTimestamp(session.startMs)} UTC
-												</span>
-												<span>
-													{session.events.length} events ·{' '}
-													{formatDurationSec(Math.round((session.endMs - session.startMs) / 1000))}
-												</span>
-											</div>
-											<div class="journey-events">
-												<For each={session.events}>
-													{(ev, eIdx) => {
-														const prevEv = () => session.events[eIdx() + 1]
-														const deltaSec = () =>
-															prevEv() ? Math.max(0, Math.round((ev.tsMs - prevEv()!.tsMs) / 1000)) : null
-														return (
-															<div class="journey-event-row">
-																<span class="journey-ts mono">{formatUtcTimestamp(ev.tsMs).slice(11)}</span>
-																<span class="journey-delta mono">
-																	{deltaSec() !== null ? `+${formatDurationSec(deltaSec())}` : 'start'}
-																</span>
-																<span class="journey-ev-name mono" title={ev.rawEvent}>
-																	{ev.event}
-																</span>
-																<Show when={ev.status !== null}>
-																	<span class={['journey-status mono', statusBadgeClass(ev.status)]}>{ev.status}</span>
-																</Show>
-																<Show when={ev.data}>
-																	<span class="journey-data mono" title={ev.data!}>
-																		{ev.data}
-																	</span>
-																</Show>
-															</div>
-														)
-													}}
-												</For>
-											</div>
+								</div>
+
+								<div class="journey-scroll">
+									<Show when={journeyLoading()}>
+										<div class="chart-empty" style="height:200px">
+											Loading session timeline…
 										</div>
-									)}
-								</For>
+									</Show>
+									<Show when={!journeyLoading() && journeySessions().length === 0}>
+										<div class="chart-empty" style="height:200px">
+											No events found for this person in the current window.
+										</div>
+									</Show>
+									<For each={journeySessions()}>
+										{(session, sIdx) => (
+											<div class="journey-session">
+												<div class="journey-session-head mono">
+													<span>
+														Session {journeySessions().length - sIdx()} · {formatUtcTimestamp(session.startMs)} UTC
+													</span>
+													<span>
+														{session.events.length} events ·{' '}
+														{formatDurationSec(Math.round((session.endMs - session.startMs) / 1000))}
+													</span>
+												</div>
+												<div class="journey-events">
+													<For each={session.events}>
+														{(ev, eIdx) => {
+															const prevEv = () => session.events[eIdx() + 1]
+															const deltaSec = () =>
+																prevEv() ? Math.max(0, Math.round((ev.tsMs - prevEv()!.tsMs) / 1000)) : null
+															return (
+																<div class="journey-event-row">
+																	<span class="journey-ts mono">{formatUtcTimestamp(ev.tsMs).slice(11)}</span>
+																	<span class="journey-delta mono">
+																		{deltaSec() !== null ? `+${formatDurationSec(deltaSec())}` : 'start'}
+																	</span>
+																	<span class="journey-ev-name mono" title={ev.rawEvent}>
+																		{ev.event}
+																	</span>
+																	<Show when={ev.status !== null}>
+																		<span class={['journey-status mono', statusBadgeClass(ev.status)]}>
+																			{ev.status}
+																		</span>
+																	</Show>
+																	<Show when={ev.data}>
+																		<span class="journey-data mono" title={ev.data!}>
+																			{ev.data}
+																		</span>
+																	</Show>
+																</div>
+															)
+														}}
+													</For>
+												</div>
+											</div>
+										)}
+									</For>
+								</div>
 							</div>
 						</div>
-					</div>
+					</Show>
 				</Show>
 
 				{/* --- SAVED CHARTS / DASHBOARD MODE --- */}

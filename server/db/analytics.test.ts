@@ -221,4 +221,97 @@ describe('server analytics engine (SQLite)', () => {
 		expect(journey.events.length).toBe(3)
 		expect(journey.events[0]!.event).toBe('GET /api/chats/:id')
 	})
+
+	test('computes exact unique_actors without double-counting normalized routes or Other, and returns true topEvent', async () => {
+		const schema = await adapter.getSchema()
+		// Add a second distinct event for u1 on the same day so topEvent != alphabetical MAX
+		const res = await runAnalyticsTrends(adapter, 'sqlite', schema, {
+			table: 'events',
+			timeColumn: 'created_at',
+			timeFormat: 'epoch_ms',
+			eventColumn: 'event',
+			actorColumn: 'user_id',
+			userIdColumn: 'user_id',
+			visitorIdColumn: 'visitor_id',
+			statusColumn: 'status',
+			range: 'all',
+			interval: 'day',
+			metric: 'unique_actors',
+			breakdownColumn: 'event',
+			topN: 1,
+			normalizeUrls: true,
+			excludeAdmin: true,
+			excludeTestUsers: true,
+			signedInOnly: true,
+		})
+		// Only 1 real signed-in user (u1) exists: no series or Other bucket may ever report > 1 unique person
+		expect(res.kpis.uniqueActors).toBe(1)
+		for (const s of res.series) {
+			expect(s.total).toBeLessThanOrEqual(1)
+			for (const v of s.values) {
+				expect(v).toBeLessThanOrEqual(1)
+			}
+		}
+
+		// People topEvent should reflect actual frequency (GET /api/chats/:id occurred twice for u1 vs POST /api/signup once)
+		const actors = await runAnalyticsActors(adapter, 'sqlite', schema, {
+			table: 'events',
+			timeColumn: 'created_at',
+			timeFormat: 'epoch_ms',
+			eventColumn: 'event',
+			actorColumn: 'user_id',
+			userIdColumn: 'user_id',
+			visitorIdColumn: 'visitor_id',
+			statusColumn: 'status',
+			range: 'all',
+			normalizeUrls: true,
+			excludeAdmin: true,
+			excludeTestUsers: true,
+			signedInOnly: true,
+		})
+		const u1 = actors.actors.find((a) => a.actorId === 'u1')
+		expect(u1?.topEvent).toBe('GET /api/chats/:id')
+	})
+
+	test('handles text status columns safely without crashing integer casts', async () => {
+		const subDir = mkdtempSync(join(tmpdir(), 'datadip-analytics-text-status-'))
+		const subPath = join(subDir, 'pay.db')
+		const db = new Database(subPath)
+		db.exec(`
+			CREATE TABLE payments (
+				id TEXT PRIMARY KEY,
+				user_id TEXT,
+				status TEXT NOT NULL,
+				created_at TEXT NOT NULL
+			);
+			INSERT INTO payments VALUES ('p1', 'u1', 'failed', '2026-11-04T17:43:46.305Z');
+			INSERT INTO payments VALUES ('p2', 'u1', 'succeeded', '2026-11-04T18:07:20.401456Z');
+		`)
+		db.close()
+		const payAdapter = new LocalSqliteAdapter(subPath)
+		try {
+			const paySchema = await payAdapter.getSchema()
+			const det = await detectAnalyticsTable(payAdapter, 'sqlite', paySchema, 'payments')
+			// Text status column should not be mistaken for HTTP integer status codes
+			expect(det.statusColumn).toBeNull()
+			// Even if explicitly passed, safeStatusIntExpr prevents cast errors and < endMs+1ms keeps microsecond rows
+			const tr = await runAnalyticsTrends(payAdapter, 'sqlite', paySchema, {
+				table: 'payments',
+				timeColumn: 'created_at',
+				timeFormat: 'iso',
+				actorColumn: 'user_id',
+				userIdColumn: 'user_id',
+				statusColumn: 'status',
+				range: 'all',
+				anchorEndMs: det.maxTimeMs,
+				interval: 'day',
+				metric: 'events',
+			})
+			expect(tr.kpis.totalEvents).toBe(2)
+			expect(tr.kpis.errorCount).toBe(0)
+		} finally {
+			payAdapter.close()
+			rmSync(subDir, { recursive: true, force: true })
+		}
+	})
 })

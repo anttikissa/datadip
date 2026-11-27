@@ -118,9 +118,14 @@ const TWITTER_SNOWFLAKE_EPOCH_MS = 1288834974657n
 const DISCORD_SNOWFLAKE_EPOCH_MS = 1420070400000n
 const COCOA_EPOCH_OFFSET_SEC = 978307200
 
+const COCOA_MIN_SEC = 315_532_800 // 2011-01-01 in Apple/Cocoa epoch (2001-01-01 + 10y)
+const COCOA_MAX_SEC = 946_684_799 // 2030-12-31 in Apple/Cocoa epoch (strictly below Unix epoch_s 2000-01-01 = 946684800)
+
 const TIME_COL_NAME_HINT =
-	/(^|_)(at|time|ts|timestamp|date|created|updated|deleted|seen|expires|expiry|since|until|start|end|started|ended|epoch|ms|sec|seconds|millis|modified|visited|logged|sent|received|published|born|birth|last|first)(_|$)/i
+	/(^|_)(at|time|ts|timestamp|date|created|updated|deleted|seen|expires|expiry|since|until|start|end|started|ended|epoch|ms|sec|seconds|millis|modified|visited|logged|sent|received|published|born|birth|last|first)(_|$)|^Z[A-Z0-9_]*(DATE|TIME|TIMESTAMP)$/i
+const COREDATA_DATE_COL_HINT = /^Z[A-Z0-9_]*(DATE|TIME|TIMESTAMP)$/
 const ID_COL_NAME_HINT = /(^|_)(id|pk|key|uuid|ulid|guid|oid|tid|ref|token|cursor)$/i
+const NUMERIC_COL_TYPE_HINT = /\b(int|integer|bigint|int4|int8|smallint|numeric|decimal|real|float|double)\b/i
 
 function toNumeric(val: unknown): number | null {
 	if (typeof val === 'number') return Number.isFinite(val) ? val : null
@@ -322,25 +327,41 @@ export function autoDecodeSingleValue(value: unknown, columnName = '', nowMs = D
 		}
 	}
 
-	// Numeric Unix timestamps
+	// Numeric Unix timestamps, Cocoa epochs, and 64-bit Snowflakes
 	const n = toNumeric(value)
 	if (n !== null) {
 		const isTimeCol = TIME_COL_NAME_HINT.test(columnName)
-		if (n >= 1e18 && n <= 4.1e18) {
+		const isIdCol = ID_COL_NAME_HINT.test(columnName)
+		// Only treat 19-digit ints as Unix ns when the column name indicates a timestamp;
+		// otherwise 64-bit Twitter/Discord Snowflakes (1.4e18..2.2e18) get misread as 2028 timestamps.
+		if (isTimeCol && n >= 1e18 && n <= 4.1e18) {
 			const ms = decodeWithFormat(value, 'epoch_ns')
 			if (ms !== null) return buildDecodedLens('epoch_ns', ms, nowMs)
 		}
-		if (n >= 1e15 && n <= 4.1e15) {
+		if (isIdCol && !isTimeCol && n >= 1e17 && n <= 9.2e18) {
+			for (const fmt of ['snowflake_twitter', 'snowflake_discord'] as const) {
+				const ms = decodeWithFormat(value, fmt)
+				if (ms !== null && ms >= MIN_TIGHT_EPOCH_MS && ms <= MAX_TIGHT_EPOCH_MS) {
+					return buildDecodedLens(fmt, ms, nowMs)
+				}
+			}
+		}
+		if (n >= 1e15 && n <= 4.1e15 && (isTimeCol || typeof value === 'number' || typeof value === 'bigint')) {
 			const ms = decodeWithFormat(value, 'epoch_us')
 			if (ms !== null) return buildDecodedLens('epoch_us', ms, nowMs)
 		}
 		if (n >= MIN_PLAUSIBLE_MS && n <= MAX_PLAUSIBLE_MS) {
-			if (isTimeCol || (n >= MIN_TIGHT_EPOCH_MS && n <= MAX_TIGHT_EPOCH_MS)) {
+			const isRawNum = typeof value === 'number' || typeof value === 'bigint'
+			if (isTimeCol || (isRawNum && n >= MIN_TIGHT_EPOCH_MS && n <= MAX_TIGHT_EPOCH_MS)) {
 				return buildDecodedLens('epoch_ms', Math.round(n), nowMs)
 			}
 		}
 		if (n >= MIN_PLAUSIBLE_MS / 1000 && n <= MAX_PLAUSIBLE_MS / 1000) {
 			if (isTimeCol) return buildDecodedLens('epoch_s', Math.round(n * 1000), nowMs)
+		}
+		if (n >= COCOA_MIN_SEC && n <= COCOA_MAX_SEC && (isTimeCol || COREDATA_DATE_COL_HINT.test(columnName))) {
+			const ms = decodeWithFormat(value, 'cocoa_s')
+			if (ms !== null) return buildDecodedLens('cocoa_s', ms, nowMs)
 		}
 	}
 	return null
@@ -367,17 +388,28 @@ export function detectColumnLenses(
 
 		const colType = columnTypes[col] ?? ''
 		const isTimeName = TIME_COL_NAME_HINT.test(col)
+		const isCoreDataDateName = COREDATA_DATE_COL_HINT.test(col)
 		const isIdName = ID_COL_NAME_HINT.test(col)
+		const isNumType = NUMERIC_COL_TYPE_HINT.test(colType)
+		const mostlyNumericJs =
+			values.filter((v) => typeof v === 'number' || typeof v === 'bigint').length / values.length >= 0.85
 
 		// Skip columns already stored as SQL TIMESTAMP / DATE strings
 		if (/\b(timestamp|timestamptz|datetime|date)\b/i.test(colType) && typeof values[0] === 'string') {
 			continue
 		}
 
-		// 1. Check numeric Unix timestamps
-		const numericMatches = (fmt: 'epoch_ns' | 'epoch_us' | 'epoch_ms' | 'epoch_s', tight: boolean): boolean => {
+		// 1. Check numeric Unix timestamps & Apple/Cocoa epochs
+		const numericMatches = (
+			fmt: 'epoch_ns' | 'epoch_us' | 'epoch_ms' | 'epoch_s' | 'cocoa_s',
+			tight: boolean,
+		): boolean => {
 			let hits = 0
 			for (const v of values) {
+				if (fmt === 'cocoa_s') {
+					const num = toNumeric(v)
+					if (num === null || num < COCOA_MIN_SEC || num > COCOA_MAX_SEC) continue
+				}
 				const ms = decodeWithFormat(v, fmt)
 				if (ms === null) continue
 				if (tight && (ms < MIN_TIGHT_EPOCH_MS || ms > MAX_TIGHT_EPOCH_MS)) continue
@@ -386,21 +418,53 @@ export function detectColumnLenses(
 			return hits / values.length >= 0.85
 		}
 
-		if (numericMatches('epoch_ns', false)) {
+		// Unix ns collides numerically with 64-bit Snowflake IDs (1e18..2.2e18): require time column name.
+		if (isTimeName && numericMatches('epoch_ns', false)) {
 			out[col] = { format: 'epoch_ns', mode: 'utc', auto: true }
 			continue
 		}
-		if (numericMatches('epoch_us', false)) {
+		if ((isTimeName || isNumType || mostlyNumericJs) && numericMatches('epoch_us', false)) {
 			out[col] = { format: 'epoch_us', mode: 'utc', auto: true }
 			continue
 		}
-		if (numericMatches('epoch_ms', !isTimeName)) {
+		// Never overwrite 13-digit TEXT codes (EAN-13 barcodes, tracking numbers) as Unix ms unless column name hints time.
+		if ((isTimeName || isNumType || mostlyNumericJs) && numericMatches('epoch_ms', !isTimeName)) {
 			out[col] = { format: 'epoch_ms', mode: 'utc', auto: true }
 			continue
 		}
 		if (isTimeName && numericMatches('epoch_s', false)) {
 			out[col] = { format: 'epoch_s', mode: 'utc', auto: true }
 			continue
+		}
+		if (
+			(isCoreDataDateName || (isTimeName && (isNumType || mostlyNumericJs || /\btimestamp\b/i.test(colType)))) &&
+			numericMatches('cocoa_s', false)
+		) {
+			out[col] = { format: 'cocoa_s', mode: 'utc', auto: true }
+			continue
+		}
+
+		// 1b. 64-bit Twitter / Discord Snowflakes on ID columns (render raw + tooltip/pill, never replace the ID)
+		if (isIdName && !isTimeName) {
+			const snowflakeMatches = (fmt: 'snowflake_twitter' | 'snowflake_discord'): boolean => {
+				let hits = 0
+				for (const v of values) {
+					const bi = toBigInt(v)
+					if (bi === null || bi < 100_000_000_000_000_000n) continue
+					const ms = decodeWithFormat(v, fmt)
+					if (ms === null || ms < MIN_TIGHT_EPOCH_MS || ms > MAX_TIGHT_EPOCH_MS) continue
+					hits++
+				}
+				return hits / values.length >= 0.85
+			}
+			if (snowflakeMatches('snowflake_twitter')) {
+				out[col] = { format: 'snowflake_twitter', mode: 'raw', auto: true }
+				continue
+			}
+			if (snowflakeMatches('snowflake_discord')) {
+				out[col] = { format: 'snowflake_discord', mode: 'raw', auto: true }
+				continue
+			}
 		}
 
 		// 2. Check time-bearing string IDs (default display mode: 'raw' with tooltip + header pill, or toggle to 'inline' / 'utc')

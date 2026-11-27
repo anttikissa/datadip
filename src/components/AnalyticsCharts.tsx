@@ -739,8 +739,13 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 		})
 	})
 
+	const TIME_X_RE = /^(bucket|day|date|week|month|hour|ts|timestamp|time)$|(_at|_ts|_date|_time)$/i
+
 	const defaultX = createMemo(() => {
 		const res = props.result
+		// Prefer time/bucket columns (even numeric epoch_ms `bucket` from Analytics SQL) over arbitrary text labels
+		const timeCol = res.columns.find((c) => TIME_X_RE.test(c))
+		if (timeCol) return timeCol
 		const nums = new Set(numericCols())
 		const nonNum = res.columns.find((c) => !nums.has(c))
 		return nonNum ?? res.columns[0] ?? ''
@@ -776,9 +781,30 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 		const rows = props.result.rows.slice(0, 200)
 		const x = xCol()
 		const ys = yCols()
-		if (!x || ys.length === 0) return { labels: [], series: [] as TrendsSeries[] }
-		const labels = rows.map((r) => String(r[x] ?? '(null)').slice(0, 28))
-		const fullLabels = rows.map((r) => String(r[x] ?? '(null)'))
+		if (!x || ys.length === 0) return { labels: [], fullLabels: [], series: [] as TrendsSeries[] }
+		// Format numeric epoch_ms X columns (e.g. Analytics `bucket`) as readable UTC dates instead of 13-digit numbers
+		const isEpochMsX =
+			TIME_X_RE.test(x) &&
+			rows.length > 0 &&
+			rows.every((r) => {
+				const n = Number(r[x])
+				return Number.isFinite(n) && n >= 946_684_800_000 && n <= 4_102_444_800_000
+			})
+		const hasSubDay =
+			isEpochMsX &&
+			rows.some((r) => {
+				const d = new Date(Number(r[x]))
+				return d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0
+			})
+		const fmtX = (val: unknown, full: boolean) => {
+			if (isEpochMsX) {
+				return formatBucketLabel(Number(val), hasSubDay ? 'hour' : 'day', full)
+			}
+			const s = String(val ?? '(null)')
+			return full ? s : s.slice(0, 28)
+		}
+		const labels = rows.map((r) => fmtX(r[x], false))
+		const fullLabels = rows.map((r) => fmtX(r[x], true))
 		const series: TrendsSeries[] = ys.map((col) => {
 			const values = rows.map((r) => {
 				const n = Number(r[col])
@@ -845,6 +871,12 @@ export function QueryResultChart(props: { result: QueryStatementResult }) {
 				</div>
 
 				<div style="flex:1" />
+
+				<Show when={props.result.rows.length > 200}>
+					<span class="mono" style="font-size:11px;color:var(--ink-muted)">
+						First 200 of {props.result.rows.length.toLocaleString()} rows
+					</span>
+				</Show>
 
 				<div class="tab-group">
 					{(['bar', 'area', 'line', 'stacked_bar'] as const).map((t) => (
