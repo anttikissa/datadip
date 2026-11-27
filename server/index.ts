@@ -93,16 +93,22 @@ async function runServe(opts: CliArgs) {
 	const store = new DataStore(opts.dataDir)
 	const manager = new ConnectionManager(store)
 
-	let server: ReturnType<typeof Bun.serve> | null = null
+	let server: ReturnType<typeof Bun.serve<{ cleanup?: () => void }>> | null = null
 	let boundPort = opts.port
 	for (let attempt = 0; attempt < 20; attempt++) {
 		try {
-			server = Bun.serve({
+			server = Bun.serve<{ cleanup?: () => void }>({
 				hostname: opts.host,
 				port: boundPort,
 				idleTimeout: 0,
-				fetch: async (req) => {
+				fetch: async (req, srv) => {
 					const url = new URL(req.url)
+					if (url.pathname === '/api/ws') {
+						if (srv.upgrade(req, { data: {} })) {
+							return undefined as unknown as Response
+						}
+						return new Response('WebSocket upgrade failed', { status: 400 })
+					}
 					if (url.pathname.startsWith('/api/')) {
 						return handleApiRequest(req, manager)
 					}
@@ -132,6 +138,39 @@ async function runServe(opts: CliArgs) {
 						'DataDip client not built yet. Run `bun run build` or open the Vite dev server on http://127.0.0.1:4748.',
 						{ status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } },
 					)
+				},
+				websocket: {
+					open(ws) {
+						const send = (event: string, data: unknown) => {
+							try {
+								ws.send(stringifyAson({ event, data }, 'short'))
+							} catch {}
+						}
+						send('connections', manager.getConnectionsPayload())
+						send('ssh-prompts', { prompts: manager.sshPrompts.list() })
+						const unsub = manager.subscribe((payload) => send('connections', payload))
+						const unsubPrompts = manager.sshPrompts.subscribe((prompts) => send('ssh-prompts', { prompts }))
+						const unsubDbChanges = manager.subscribeDbChanges((ev) => send('db-changed', ev))
+						const unsubSchemaChanges = manager.subscribeSchemaChanges((ev) => send('schema-changed', ev))
+						ws.data.cleanup = () => {
+							unsub()
+							unsubPrompts()
+							unsubDbChanges()
+							unsubSchemaChanges()
+						}
+					},
+					message(ws, msg) {
+						const text = typeof msg === 'string' ? msg : new TextDecoder().decode(msg)
+						if (text === 'ping') {
+							try {
+								ws.send(stringifyAson({ event: 'pong', data: { now: Date.now() } }, 'short'))
+							} catch {}
+						}
+					},
+					close(ws) {
+						ws.data.cleanup?.()
+						ws.data.cleanup = undefined
+					},
 				},
 			})
 			break

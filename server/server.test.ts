@@ -867,4 +867,42 @@ describe('DataDip server API & safety boundaries', () => {
 
 		await apiCall('DELETE', `/api/connections/${id}`)
 	})
+
+	test('caps legacy /api/events SSE streams at 3 so HTTP/1.1 browser pools cannot deadlock', async () => {
+		const controllers: AbortController[] = []
+		const readers: ReadableStreamDefaultReader<Uint8Array>[] = []
+		try {
+			for (let i = 0; i < 4; i++) {
+				const ctrl = new AbortController()
+				controllers.push(ctrl)
+				const res = await handleApiRequest(
+					new Request('http://127.0.0.1:4747/api/events', { signal: ctrl.signal }),
+					manager,
+				)
+				expect(res.status).toBe(200)
+				const reader = res.body!.getReader()
+				readers.push(reader)
+				// Drain initial connections + ssh-prompts events
+				const first = await reader.read()
+				expect(first.done).toBe(false)
+			}
+			// Opening the 4th stream must have evicted and closed the 1st stream
+			let closedFirst = false
+			for (let tries = 0; tries < 5; tries++) {
+				const chunk = await readers[0]!.read()
+				if (chunk.done) {
+					closedFirst = true
+					break
+				}
+			}
+			expect(closedFirst).toBe(true)
+		} finally {
+			for (const r of readers) {
+				try {
+					await r.cancel()
+				} catch {}
+			}
+			for (const c of controllers) c.abort()
+		}
+	})
 })

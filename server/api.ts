@@ -37,6 +37,11 @@ async function readBody<T = Record<string, unknown>>(req: Request): Promise<T> {
 	return parseAson(text) as T
 }
 
+// Cap concurrent legacy SSE streams well below browsers' 6-connection HTTP/1.1 per-origin limit
+// so stale tabs using /api/events can never starve fetches or page loads (current UI uses /api/ws).
+const MAX_LEGACY_SSE_STREAMS = 3
+const activeSseClosers: (() => void)[] = []
+
 export async function handleApiRequest(req: Request, manager: ConnectionManager): Promise<Response> {
 	const url = new URL(req.url)
 	const path = url.pathname
@@ -48,10 +53,15 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 			return asonResponse({ ok: true, version: APP_VERSION, now: new Date().toISOString() })
 		}
 
-		// Live Server-Sent Events stream for connections.ason hot-reload & orphaned state
+		// Legacy Server-Sent Events stream (current web client uses WebSocket /api/ws to avoid HTTP/1.1 6-socket limits)
 		if (path === '/api/events' && method === 'GET') {
+			while (activeSseClosers.length >= MAX_LEGACY_SSE_STREAMS) {
+				const oldest = activeSseClosers.shift()
+				oldest?.()
+			}
 			const encoder = new TextEncoder()
 			let cleanup: (() => void) | null = null
+			let closeStream: (() => void) | null = null
 			const stream = new ReadableStream<Uint8Array>({
 				start(controller) {
 					const send = (event: string, data: unknown) => {
@@ -78,15 +88,23 @@ export async function handleApiRequest(req: Request, manager: ConnectionManager)
 						unsubDbChanges()
 						unsubSchemaChanges()
 						clearInterval(ping)
+						if (closeStream) {
+							const idx = activeSseClosers.indexOf(closeStream)
+							if (idx !== -1) activeSseClosers.splice(idx, 1)
+						}
 					}
+					closeStream = () => {
+						cleanup?.()
+						cleanup = null
+						try {
+							controller.close()
+						} catch {}
+					}
+					activeSseClosers.push(closeStream)
 					req.signal.addEventListener(
 						'abort',
 						() => {
-							cleanup?.()
-							cleanup = null
-							try {
-								controller.close()
-							} catch {}
+							closeStream?.()
 						},
 						{ once: true },
 					)

@@ -13,7 +13,7 @@ import { RecentModal } from './components/RecentModal.tsx'
 import { ConsoleView } from './components/ConsoleView.tsx'
 import { SshPromptModal } from './components/SshPromptModal.tsx'
 import { TableView } from './components/TableView.tsx'
-import { api } from './lib/api.ts'
+import { api, subscribeServerConnectivity } from './lib/api.ts'
 import { clearConsoleRun, getConsoleRun } from './lib/console-runs.ts'
 import { copyToClipboard, formatCountdown, formatRowCount } from './lib/format.ts'
 import { isEditableTarget, isMac, isNativeApp, isPrimaryMod, modKeyLabel, recentsKeyLabel } from './lib/shortcuts.ts'
@@ -73,6 +73,8 @@ export function App() {
 	const [connections, setConnections] = createSignal<ConnectionWithStatus[]>([])
 	const [configError, setConfigError] = createSignal<string | null>(null)
 	const [serverOnline, setServerOnline] = createSignal(true)
+	const [serverOfflineReason, setServerOfflineReason] = createSignal<string | null>(null)
+	let forceReconnectEvents: (() => void) | null = null
 	const [reconnectTick, setReconnectTick] = createSignal(0)
 	const [dbChangeTick, setDbChangeTick] = createSignal(0)
 	const [recents, setRecents] = createSignal<RecentTable[]>([])
@@ -594,11 +596,14 @@ export function App() {
 		}
 		window.addEventListener('keydown', onModalTab)
 
-		// Live sync & server-liveness monitor via SSE /api/events (auto-reconnects & nudges DataDip.app to restart if stopped)
+		// Live sync & server-liveness monitor via WebSocket /api/ws (zero HTTP/1.1 pool slots, connect + heartbeat watchdogs)
 		let initialEvent = true
 		let disposed = false
-		let es: EventSource | null = null
+		let ws: WebSocket | null = null
 		let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+		let connectWatchdog: ReturnType<typeof setTimeout> | null = null
+		let heartbeatInterval: ReturnType<typeof setInterval> | null = null
+		let pongWatchdog: ReturnType<typeof setTimeout> | null = null
 
 		const nudgeNativeRestart = () => {
 			try {
@@ -609,89 +614,68 @@ export function App() {
 			} catch {}
 		}
 
-		const connectEvents = () => {
+		const clearSocketTimers = () => {
+			if (connectWatchdog) {
+				clearTimeout(connectWatchdog)
+				connectWatchdog = null
+			}
+			if (heartbeatInterval) {
+				clearInterval(heartbeatInterval)
+				heartbeatInterval = null
+			}
+			if (pongWatchdog) {
+				clearTimeout(pongWatchdog)
+				pongWatchdog = null
+			}
+		}
+
+		const markOffline = (reason: string) => {
 			if (disposed) return
-			if (es) {
-				es.close()
-				es = null
+			setServerOnline(false)
+			setServerOfflineReason(reason)
+			nudgeNativeRestart()
+		}
+
+		const markOnline = () => {
+			if (disposed) return
+			const wasOffline = !serverOnline()
+			setServerOnline(true)
+			setServerOfflineReason(null)
+			if (wasOffline) {
+				setReconnectTick((n) => n + 1)
+				void refreshConnections()
+				const id = activeConnId()
+				if (id) void loadConnectionData(id)
+				notify('Reconnected to DataDip server', 'ok')
 			}
-			const source = new EventSource('/api/events')
-			es = source
+		}
 
-			source.onopen = () => {
-				const wasOffline = !serverOnline()
-				setServerOnline(true)
-				if (wasOffline) {
-					setReconnectTick((n) => n + 1)
-					void refreshConnections()
-					const id = activeConnId()
-					if (id) void loadConnectionData(id)
-					notify('Reconnected to DataDip server', 'ok')
-				}
-			}
-
-			source.addEventListener('connections', (ev) => {
-				try {
-					const payload = parseAson((ev as MessageEvent).data) as unknown as ConnectionsPayload
-					const prev = connections()
-					const next = payload.connections ?? []
-					setConnections(next)
-					setConfigError(payload.configError ?? null)
-					if (!initialEvent) {
-						const activeId = activeConnId()
-						const prevActive = prev.find((c) => c.id === activeId)
-						const nextActive = next.find((c) => c.id === activeId)
-						const wasOrphaned = prevActive?.orphaned
-						const nowOrphaned = nextActive?.orphaned
-						if (nowOrphaned && !wasOrphaned) {
-							notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
-						} else if (activeId && !nextActive && prevActive) {
-							navigate({ kind: 'home' })
-						} else if (
-							activeId &&
-							nextActive &&
-							(JSON.stringify(prevActive?.virtualForeignKeys ?? []) !==
-								JSON.stringify(nextActive.virtualForeignKeys ?? []) ||
-								JSON.stringify(prevActive?.ignoredForeignKeys ?? []) !==
-									JSON.stringify(nextActive.ignoredForeignKeys ?? []))
-						) {
-							void api
-								.getSchema(activeId)
-								.then((sRes) => {
-									if (activeConnId() === activeId) setSchema(sRes)
-								})
-								.catch(() => {})
-						}
-						void api
-							.listRecents()
-							.then((r) => setRecents(r.recents))
-							.catch(() => {})
-					}
-					initialEvent = false
-				} catch {}
-			})
-
-			source.addEventListener('ssh-prompts', (ev) => {
-				try {
-					const payload = parseAson((ev as MessageEvent).data) as { prompts?: SshPromptRequest[] }
-					setSshPrompts(payload.prompts ?? [])
-				} catch {}
-			})
-
-			source.addEventListener('db-changed', (ev) => {
-				try {
-					const payload = parseAson((ev as MessageEvent).data) as { connectionId?: string }
-					if (payload.connectionId && payload.connectionId === activeConnId()) {
-						setDbChangeTick((n) => n + 1)
-					}
-				} catch {}
-			})
-
-			source.addEventListener('schema-changed', (ev) => {
-				try {
-					const payload = parseAson((ev as MessageEvent).data) as { connectionId?: string }
+		const handleServerEvent = (event: string, data: unknown) => {
+			if (event === 'pong') return
+			if (event === 'connections') {
+				const payload = data as ConnectionsPayload
+				const prev = connections()
+				const next = payload.connections ?? []
+				setConnections(next)
+				setConfigError(payload.configError ?? null)
+				if (!initialEvent) {
 					const activeId = activeConnId()
-					if (payload.connectionId && payload.connectionId === activeId) {
+					const prevActive = prev.find((c) => c.id === activeId)
+					const nextActive = next.find((c) => c.id === activeId)
+					const wasOrphaned = prevActive?.orphaned
+					const nowOrphaned = nextActive?.orphaned
+					if (nowOrphaned && !wasOrphaned) {
+						notify('Active connection removed from connections.ason (kept open as orphaned)', 'info')
+					} else if (activeId && !nextActive && prevActive) {
+						navigate({ kind: 'home' })
+					} else if (
+						activeId &&
+						nextActive &&
+						(JSON.stringify(prevActive?.virtualForeignKeys ?? []) !==
+							JSON.stringify(nextActive.virtualForeignKeys ?? []) ||
+							JSON.stringify(prevActive?.ignoredForeignKeys ?? []) !==
+								JSON.stringify(nextActive.ignoredForeignKeys ?? []))
+					) {
 						void api
 							.getSchema(activeId)
 							.then((sRes) => {
@@ -699,19 +683,148 @@ export function App() {
 							})
 							.catch(() => {})
 					}
-				} catch {}
-			})
-
-			source.onerror = () => {
-				if (disposed) return
-				setServerOnline(false)
-				nudgeNativeRestart()
-				source.close()
-				if (es === source) es = null
-				if (reconnectTimer) clearTimeout(reconnectTimer)
-				reconnectTimer = setTimeout(connectEvents, 1200)
+					void api
+						.listRecents()
+						.then((r) => setRecents(r.recents))
+						.catch(() => {})
+				}
+				initialEvent = false
+				return
+			}
+			if (event === 'ssh-prompts') {
+				const payload = data as { prompts?: SshPromptRequest[] }
+				setSshPrompts(payload.prompts ?? [])
+				return
+			}
+			if (event === 'db-changed') {
+				const payload = data as { connectionId?: string }
+				if (payload.connectionId && payload.connectionId === activeConnId()) {
+					setDbChangeTick((n) => n + 1)
+				}
+				return
+			}
+			if (event === 'schema-changed') {
+				const payload = data as { connectionId?: string }
+				const activeId = activeConnId()
+				if (payload.connectionId && payload.connectionId === activeId) {
+					void api
+						.getSchema(activeId)
+						.then((sRes) => {
+							if (activeConnId() === activeId) setSchema(sRes)
+						})
+						.catch(() => {})
+				}
 			}
 		}
+
+		const scheduleReconnect = (delayMs = 1200) => {
+			if (disposed) return
+			if (reconnectTimer) clearTimeout(reconnectTimer)
+			reconnectTimer = setTimeout(connectEvents, delayMs)
+		}
+
+		const connectEvents = () => {
+			if (disposed) return
+			clearSocketTimers()
+			if (ws) {
+				try {
+					ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+					ws.close()
+				} catch {}
+				ws = null
+			}
+
+			const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+			const socket = new WebSocket(`${proto}//${window.location.host}/api/ws`)
+			ws = socket
+
+			// Fail fast if handshake stalls (never silently hang on connect)
+			connectWatchdog = setTimeout(() => {
+				if (disposed || ws !== socket || socket.readyState === WebSocket.OPEN) return
+				markOffline('Local DataDip server did not respond to connection handshake within 2.5s')
+				try {
+					socket.close()
+				} catch {}
+				if (ws === socket) ws = null
+				scheduleReconnect(1200)
+			}, 2500)
+
+			socket.onopen = () => {
+				if (disposed || ws !== socket) return
+				clearSocketTimers()
+				markOnline()
+				heartbeatInterval = setInterval(() => {
+					if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return
+					try {
+						socket.send('ping')
+					} catch {
+						return
+					}
+					if (pongWatchdog) clearTimeout(pongWatchdog)
+					pongWatchdog = setTimeout(() => {
+						if (disposed || ws !== socket) return
+						markOffline('Local DataDip server stopped responding to heartbeat')
+						try {
+							socket.close()
+						} catch {}
+					}, 3000)
+				}, 5000)
+			}
+
+			socket.onmessage = (ev) => {
+				if (disposed || ws !== socket) return
+				if (pongWatchdog) {
+					clearTimeout(pongWatchdog)
+					pongWatchdog = null
+				}
+				if (!serverOnline()) markOnline()
+				try {
+					const parsed = parseAson(String(ev.data)) as { event?: string; data?: unknown }
+					if (parsed && typeof parsed.event === 'string') {
+						handleServerEvent(parsed.event, parsed.data)
+					}
+				} catch {}
+			}
+
+			socket.onerror = () => {
+				if (disposed || ws !== socket) return
+				markOffline('Lost connection to local DataDip server')
+			}
+
+			socket.onclose = () => {
+				if (disposed || ws !== socket) return
+				clearSocketTimers()
+				ws = null
+				markOffline('Local DataDip server is offline or unreachable')
+				scheduleReconnect(1200)
+			}
+		}
+
+		forceReconnectEvents = () => {
+			if (reconnectTimer) {
+				clearTimeout(reconnectTimer)
+				reconnectTimer = null
+			}
+			connectEvents()
+		}
+
+		// React immediately if ANY fetch('/api/...') fails or stalls against local server
+		const unsubConnectivity = subscribeServerConnectivity((st) => {
+			if (disposed) return
+			if (!st.online) {
+				markOffline(st.reason || 'Local DataDip server is not responding')
+			} else if (!serverOnline() && ws?.readyState === WebSocket.OPEN) {
+				markOnline()
+			}
+		})
+
+		const onPageHide = () => {
+			clearSocketTimers()
+			try {
+				ws?.close()
+			} catch {}
+		}
+		window.addEventListener('pagehide', onPageHide)
 
 		connectEvents()
 
@@ -719,6 +832,9 @@ export function App() {
 
 		return () => {
 			disposed = true
+			forceReconnectEvents = null
+			unsubConnectivity()
+			window.removeEventListener('pagehide', onPageHide)
 			window.removeEventListener('popstate', onPop)
 			window.removeEventListener('keydown', onKey, true)
 			window.removeEventListener('keydown', onModalTab)
@@ -728,7 +844,10 @@ export function App() {
 			window.removeEventListener('datadip:changelog', onChangelog)
 			window.removeEventListener('datadip:update-available', onUpdateAvailable)
 			if (reconnectTimer) clearTimeout(reconnectTimer)
-			es?.close()
+			clearSocketTimers()
+			try {
+				ws?.close()
+			} catch {}
 			clearInterval(timer)
 		}
 	})
@@ -1138,23 +1257,24 @@ export function App() {
 				</button>
 			</header>
 
-			{/* Local server offline status banner (driven by SSE /api/events) */}
+			{/* Local server offline / unresponsive banner (WebSocket heartbeat + fail-fast API watchdog) */}
 			<Show when={!serverOnline()}>
-				<div class="status-banner offline" role="status" aria-live="polite">
-					<span style="display:inline-flex;align-items:center;gap:8px;flex:1;min-width:0">
-						<span class="status-pulse" />
+				<div class="status-banner offline" role="alert" aria-live="assertive">
+					<span style="display:inline-flex;align-items:baseline;gap:8px;flex:1;min-width:0">
+						<span class="status-pulse" style="align-self:center" />
 						<span>
-							<strong>Local DataDip server is offline</strong> —{' '}
+							<strong>{serverOfflineReason() || 'Local DataDip server is offline'}</strong> —{' '}
 							{(window as unknown as { webkit?: { messageHandlers?: { datadip?: unknown } } }).webkit?.messageHandlers
 								?.datadip
 								? 'restarting server and reconnecting…'
-								: 'run `datadip` or `datadip serve` in your terminal. Reconnecting automatically…'}
+								: 'check `datadip status` or run `datadip` in your terminal. Reconnecting automatically…'}
 						</span>
 					</span>
 					<button
 						type="button"
 						class="btn sm"
 						onClick={() => {
+							forceReconnectEvents?.()
 							void refreshConnections()
 							const id = activeConnId()
 							if (id) void loadConnectionData(id)

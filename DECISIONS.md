@@ -219,11 +219,18 @@ obvious.
   `-shm` writes (250ms debounce) and push SSE `db-changed` events; a
   `Live` toggle in `TableView` auto-reloads silently when no staged edits
   or inline cell editors are active.
-- Server liveness is tracked continuously via `/api/events` (SSE). When
-  the local server stops, the web UI shows a clear offline banner and
-  auto-reconnects/reloads on recovery; inside `DataDip.app`, both SSE
-  disconnect (`ensureServer` message) and connect-error navigations
-  automatically restart `datadip serve` while ignoring `NSURLErrorCancelled`.
+- Server liveness and live push use native WebSocket (`/api/ws`,
+  Bun `Bun.serve` WebSocket + Vite `ws: true` proxy) rather than per-tab
+  HTTP/1.1 `EventSource` SSE, because browsers cap plaintext HTTP/1.1 at
+  6 concurrent connections per origin (6 open DataDip tabs previously
+  deadlocked all `fetch()` calls and new page loads). Legacy
+  `/api/events` SSE is capped at 3 concurrent streams so stale tabs
+  cannot starve HTTP/1.1 slots. The web client enforces a 2.5s WS
+  handshake watchdog, 5s/3s `ping`/`pong` heartbeat, 5s timeout on fast
+  local API calls, and a 2.5s `/api/health` stall probe on slow DB/SSH
+  calls so a stuck or stopped local server fails fast and displays an
+  immediate alert banner (`role="alert"`) while auto-reconnecting (and
+  nudging `DataDip.app` via `ensureServer`).
 
 ## Local Data
 

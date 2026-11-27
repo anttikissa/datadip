@@ -39,9 +39,88 @@ import type {
 
 export class ApiError extends Error {
 	readonly status: number
-	constructor(status: number, message: string) {
+	readonly isNetworkError: boolean
+	constructor(status: number, message: string, isNetworkError = false) {
 		super(message)
 		this.status = status
+		this.isNetworkError = isNetworkError
+	}
+}
+
+type ConnectivityListener = (state: { online: boolean; reason?: string }) => void
+const connectivityListeners = new Set<ConnectivityListener>()
+
+export function subscribeServerConnectivity(fn: ConnectivityListener): () => void {
+	connectivityListeners.add(fn)
+	return () => connectivityListeners.delete(fn)
+}
+
+export function reportServerConnectivity(online: boolean, reason?: string): void {
+	for (const fn of connectivityListeners) {
+		try {
+			fn({ online, reason })
+		} catch {}
+	}
+}
+
+// Fast local-only routes (metadata, preferences, saved state) fail fast if server does not reply in 5s.
+// Remote DB / SSH routes run a 2.5s /api/health liveness probe so a stuck local server is caught immediately
+// without falsely aborting legitimate slow database queries.
+const SLOW_DB_PATH_RE =
+	/^\/api\/(discover|ssh\/install-bun|connections\/(test|open-file)|connections\/[^/]+\/(schema|browse|query|mutate|peek|reverse-fks|search-id|profile|ping|info|maintenance|export|analytics\/(detect|trends|funnel|retention|actors|journey)))/
+
+async function probeLocalHealth(timeoutMs = 2500): Promise<boolean> {
+	const ctrl = new AbortController()
+	const t = setTimeout(() => ctrl.abort(), timeoutMs)
+	try {
+		const res = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store' })
+		return res.ok
+	} catch {
+		return false
+	} finally {
+		clearTimeout(t)
+	}
+}
+
+async function fetchWithWatchdog(path: string, init: RequestInit): Promise<Response> {
+	const ctrl = new AbortController()
+	const isSlowDbRoute = SLOW_DB_PATH_RE.test(path)
+	let abortedReason: string | null = null
+	let watchdog: ReturnType<typeof setTimeout> | null = null
+
+	if (!isSlowDbRoute) {
+		watchdog = setTimeout(() => {
+			abortedReason = 'Local DataDip server did not respond within 5s'
+			reportServerConnectivity(false, abortedReason)
+			ctrl.abort()
+		}, 5000)
+	} else {
+		watchdog = setTimeout(async () => {
+			const alive = await probeLocalHealth(2500)
+			if (!alive && !ctrl.signal.aborted) {
+				abortedReason = 'Local DataDip server is not responding (health check timed out)'
+				reportServerConnectivity(false, abortedReason)
+				ctrl.abort()
+			}
+		}, 2500)
+	}
+
+	try {
+		const res = await fetch(path, { ...init, signal: ctrl.signal })
+		reportServerConnectivity(true)
+		return res
+	} catch (err) {
+		if (abortedReason) {
+			throw new ApiError(0, abortedReason, true)
+		}
+		const msg =
+			err instanceof Error && err.message
+				? `Cannot reach local DataDip server (${err.message})`
+				: 'Cannot reach local DataDip server'
+		reportServerConnectivity(false, msg)
+		throw new ApiError(0, msg, true)
+	} finally {
+		if (watchdog) clearTimeout(watchdog)
 	}
 }
 
@@ -51,7 +130,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 		headers: body !== undefined ? { 'content-type': 'text/plain; charset=utf-8' } : undefined,
 		body: body !== undefined ? stringifyAson(body, 'short') : undefined,
 	}
-	const res = await fetch(path, init)
+	const res = await fetchWithWatchdog(path, init)
 	const text = await res.text()
 	let data: unknown = {}
 	if (text.trim()) {
@@ -253,7 +332,7 @@ export const api = {
 			filename?: string
 		},
 	): Promise<{ filename: string; rowCount: number; truncated: boolean }> => {
-		const res = await fetch(`/api/connections/${encodeURIComponent(connId)}/export`, {
+		const res = await fetchWithWatchdog(`/api/connections/${encodeURIComponent(connId)}/export`, {
 			method: 'POST',
 			headers: { 'content-type': 'text/plain; charset=utf-8' },
 			body: stringifyAson(payload, 'short'),

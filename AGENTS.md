@@ -68,8 +68,17 @@ duplicate-server check in `serve`) must read only `server.ason` via
 `readServerInfo()` and never instantiate `DataStore`, open `state.db`,
 or start file watchers.
 
-The web client must track local server reachability via `/api/events`
-(SSE) and display a clear offline status banner that auto-reconnects.
+Never let the connection to the local DataDip server fail or hang
+silently, and never hold per-tab persistent HTTP/1.1 connections (such
+as `EventSource` SSE) against localhost: browsers cap plaintext HTTP/1.1
+at 6 concurrent connections per origin, so 6 open tabs deadlock every
+`fetch()` and page load. Use WebSocket (`/api/ws`) with a fast connect
+timeout (2.5s) and active `ping`/`pong` heartbeat watchdog (5s/3s), fail
+fast on local API calls (5s timeout on local metadata routes; 2.5s
+`/api/health` liveness probe on slow DB/SSH routes), cap legacy
+`/api/events` SSE streams well below 6, and immediately surface an
+offline/unresponsive alert banner and clear error state whenever the
+local server stops responding.
 
 In the web client, trap and wrap `Tab` / `Shift-Tab` across visible
 focusable descendants of the topmost open `dialog:modal` so focus never
