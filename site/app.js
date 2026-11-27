@@ -30,18 +30,25 @@ for (const tab of stageTabs) {
 
 		const kind = tab.getAttribute('data-kind')
 		const src = tab.getAttribute('data-src') || ''
+		const poster = tab.getAttribute('data-poster') || ''
 		const title = tab.getAttribute('data-title') || 'DataDip'
 		if (stageTitle) stageTitle.textContent = title
 
 		if (kind === 'video') {
 			if (heroImage) heroImage.hidden = true
 			if (heroVideo) {
+				if (heroVideo.getAttribute('src') !== src) {
+					heroVideo.setAttribute('src', src)
+					if (poster) heroVideo.setAttribute('poster', poster)
+					heroVideo.load()
+				}
 				heroVideo.hidden = false
 				heroVideo.play().catch(() => {})
 			}
 			if (videoToggle) {
 				videoToggle.hidden = false
 				videoToggle.textContent = 'Pause'
+				videoToggle.setAttribute('aria-label', 'Pause demo video')
 			}
 			if (zoomBtn) zoomBtn.hidden = true
 		} else {
@@ -135,4 +142,75 @@ for (const btn of document.querySelectorAll('.copy-btn')) {
 			}, 1400)
 		} catch {}
 	})
+}
+
+// Interactive Passive FK Learning 4-step guided tour
+const fkTour = document.getElementById('fk-tour')
+if (fkTour) {
+	const stepBtns = Array.from(fkTour.querySelectorAll('.fk-step-btn'))
+	const stepPanels = Array.from(fkTour.querySelectorAll('.fk-tour-panel'))
+	const prevBtn = document.getElementById('fk-tour-prev')
+	const nextBtn = document.getElementById('fk-tour-next')
+	const autoBtn = document.getElementById('fk-tour-auto')
+	let currentStep = 0
+	let autoTimer = null
+
+	function showStep(index) {
+		const total = stepBtns.length
+		if (total === 0) return
+		currentStep = ((index % total) + total) % total
+		for (let i = 0; i < total; i++) {
+			const active = i === currentStep
+			stepBtns[i].classList.toggle('active', active)
+			stepBtns[i].setAttribute('aria-selected', active ? 'true' : 'false')
+			if (stepPanels[i]) stepPanels[i].hidden = !active
+		}
+	}
+
+	function stopAuto() {
+		if (autoTimer !== null) {
+			clearInterval(autoTimer)
+			autoTimer = null
+		}
+		if (autoBtn) {
+			autoBtn.setAttribute('aria-pressed', 'false')
+			autoBtn.textContent = 'Auto-tour'
+		}
+	}
+
+	function toggleAuto() {
+		if (autoTimer !== null) {
+			stopAuto()
+			return
+		}
+		if (autoBtn) {
+			autoBtn.setAttribute('aria-pressed', 'true')
+			autoBtn.textContent = 'Stop tour'
+		}
+		showStep(currentStep + 1)
+		autoTimer = setInterval(() => showStep(currentStep + 1), 4200)
+	}
+
+	for (const btn of stepBtns) {
+		btn.addEventListener('click', () => {
+			stopAuto()
+			const idx = Number(btn.getAttribute('data-step') || '0')
+			showStep(idx)
+		})
+	}
+	if (prevBtn) {
+		prevBtn.addEventListener('click', () => {
+			stopAuto()
+			showStep(currentStep - 1)
+		})
+	}
+	if (nextBtn) {
+		nextBtn.addEventListener('click', () => {
+			stopAuto()
+			showStep(currentStep + 1)
+		})
+	}
+	if (autoBtn) {
+		autoBtn.addEventListener('click', toggleAuto)
+	}
 }

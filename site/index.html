@@ -45,6 +45,7 @@
 				</div>
 
 				<nav class="nav-links" aria-label="Primary">
+					<a href="#fk-learning">FK Learning</a>
 					<a href="#whats-new">What&apos;s New</a>
 					<a href="#features">Features</a>
 					<a href="#compare">Compare</a>
@@ -121,7 +122,7 @@
 									<span class="tl green"></span>
 								</div>
 								<div class="mac-title mono" id="stage-title">
-									DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)
+									NEW v0.4.0 · Passive FK Learning — Zero declared FKs, 0 upfront scans, ~1ms PK proof
 								</div>
 								<div class="mac-chrome-actions">
 									<button type="button" class="chip-btn" id="video-toggle" aria-label="Pause demo video">Pause</button>
@@ -133,8 +134,8 @@
 								<video
 									id="hero-video"
 									class="stage-media"
-									src="./assets/datadip-demo.mp4"
-									poster="./assets/shot-browser-dark.png"
+									src="./assets/fk-learning-demo.mp4"
+									poster="./assets/shot-fk-learning-dark.png"
 									autoplay
 									loop
 									muted
@@ -143,7 +144,7 @@
 								<img
 									id="hero-image"
 									class="stage-media"
-									src="./assets/shot-browser-dark.png"
+									src="./assets/shot-fk-learning-dark.png"
 									alt="DataDip screenshot"
 									hidden
 								/>
@@ -157,10 +158,56 @@
 								role="tab"
 								aria-selected="true"
 								data-kind="video"
-								data-src="./assets/datadip-demo.mp4"
-								data-title="DataDip — Live Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)"
+								data-src="./assets/fk-learning-demo.mp4"
+								data-poster="./assets/shot-fk-learning-dark.png"
+								data-title="NEW v0.4.0 · Passive FK Learning — Zero declared FKs, 0 upfront scans, ~1ms PK proof"
 							>
-								<span class="live-pip"></span> Live Demo
+								<span class="live-pip"></span> FK Learning Demo
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="video"
+								data-src="./assets/datadip-demo.mp4"
+								data-poster="./assets/shot-browser-dark.png"
+								data-title="DataDip — Core Walkthrough (FK jump, Cmd+K, SQL Console, Prod Safety)"
+							>
+								<span class="live-pip"></span> Core Walkthrough
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-fk-learning-dark.png"
+								data-title="NEW v0.4.0 · Learned Foreign Keys &amp; Hover Peek — ticket, sender, &amp; reply_to discovered automatically"
+							>
+								<span class="new-dot"></span> Learned FKs
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-fk-er-dark.png"
+								data-title="NEW v0.4.0 · Zero-FK ER Diagram — 10 relationships recovered passively while polymorphic &amp; int columns stay unlinked"
+							>
+								<span class="new-dot"></span> Zero-FK ER Graph
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-fk-modal-dark.png"
+								data-title="NEW v0.4.0 · Learned FK Provenance — Exact match evidence (12/12 matched users.id) with Save or Dismiss"
+							>
+								<span class="new-dot"></span> Provenance
 							</button>
 							<button
 								type="button"
@@ -309,6 +356,313 @@
 							Local OpenSSH port forwarding (<code>ssh -N -L</code>) with a built-in <code>~/.ssh/config</code> alias
 							picker &amp; <code>ProxyJump</code>. Zero remote software needed.
 						</p>
+					</div>
+				</div>
+			</section>
+
+			<!-- Interactive Passive FK Learning Tour -->
+			<section id="fk-learning" class="section">
+				<div class="container">
+					<div class="section-head">
+						<span class="badge accent" style="margin-bottom:10px">NEW IN v0.4.0 &middot; PASSIVE FK LEARNING</span>
+						<h2>Zero declared foreign keys?<br />DataDip learns them as you browse.</h2>
+						<p>
+							Most real-world schemas omit <code>FOREIGN KEY</code> constraints and name columns <code>sender</code>,
+							<code>assignee</code>, or <code>reply_to</code>. DataDip fingerprints typed IDs (<code>u&hellip;</code>,
+							<code>usr_&hellip;</code>) and UUIDs passively from rows already on screen, proves candidates in ~1 ms
+							via primary-key index lookups, and never scans your database on connect.
+						</p>
+					</div>
+
+					<div class="fk-tour" id="fk-tour">
+						<div class="fk-tour-bar">
+							<div class="fk-tour-steps" role="tablist" aria-label="How Passive FK Learning works">
+								<button type="button" class="fk-step-btn active" role="tab" aria-selected="true" data-step="0">
+									<span class="fk-step-num mono">01</span>
+									<span class="fk-step-label">Connect <small class="mono">0 scans</small></span>
+								</button>
+								<button type="button" class="fk-step-btn" role="tab" aria-selected="false" data-step="1">
+									<span class="fk-step-num mono">02</span>
+									<span class="fk-step-label">Fingerprint <small class="mono">0 queries</small></span>
+								</button>
+								<button type="button" class="fk-step-btn" role="tab" aria-selected="false" data-step="2">
+									<span class="fk-step-num mono">03</span>
+									<span class="fk-step-label">PK Proof <small class="mono">~1 ms</small></span>
+								</button>
+								<button type="button" class="fk-step-btn" role="tab" aria-selected="false" data-step="3">
+									<span class="fk-step-num mono">04</span>
+									<span class="fk-step-label">Graph &amp; Guards</span>
+								</button>
+							</div>
+							<div class="fk-tour-controls">
+								<button type="button" class="chip-btn" id="fk-tour-prev" aria-label="Previous step">&larr; Prev</button>
+								<button type="button" class="chip-btn" id="fk-tour-next" aria-label="Next step">Next &rarr;</button>
+								<button type="button" class="chip-btn" id="fk-tour-auto" aria-pressed="false">Auto-tour</button>
+							</div>
+						</div>
+
+						<!-- Step 1: Connect (0 upfront scans) -->
+						<div class="fk-tour-panel" data-step-panel="0">
+							<div class="fk-tour-grid">
+								<div class="fk-tour-explain">
+									<div class="fk-kicker mono">STEP 01 &middot; ZERO UPFRONT COST</div>
+									<h3>Connect to a schema with zero <code>FOREIGN KEY</code> clauses</h3>
+									<p>
+										Opening a database never runs background table scans or reads every ID across every table. When
+										you first open <code>acme-support.db</code>, DataDip reads only schema metadata: 5 tables, 0
+										declared constraints, instant startup.
+									</p>
+									<ul class="check-list">
+										<li>Columns like <code>sender</code>, <code>ticket</code>, and <code>reply_to</code> have no <code>_id</code> suffix or DDL constraint</li>
+										<li>Zero extra SQL queries executed on connect</li>
+										<li>Order-independent: browsing <code>messages</code> before <code>users</code> still learns retroactively later</li>
+									</ul>
+								</div>
+								<div class="fk-sim-card">
+									<div class="fk-sim-head mono">
+										<span>schema.sql</span>
+										<span class="fk-pill muted">0 declared FKs &middot; 0 scans</span>
+									</div>
+									<pre class="fk-code"><code><span class="tok-kw">CREATE TABLE</span> users (
+  id <span class="tok-ty">TEXT PRIMARY KEY</span>,   <span class="tok-cm">-- u8k2m9p4x1</span>
+  name <span class="tok-ty">TEXT</span>, email <span class="tok-ty">TEXT</span>, org <span class="tok-ty">TEXT</span>
+);
+
+<span class="tok-kw">CREATE TABLE</span> messages (
+  id <span class="tok-ty">TEXT PRIMARY KEY</span>,   <span class="tok-cm">-- UUIDv4</span>
+  ticket   <span class="tok-ty">TEXT</span>,         <span class="tok-cm">-- no FOREIGN KEY</span>
+  sender   <span class="tok-ty">TEXT</span>,         <span class="tok-cm">-- no _id suffix!</span>
+  reply_to <span class="tok-ty">TEXT</span>          <span class="tok-cm">-- self-ref UUID</span>
+);</code></pre>
+								</div>
+							</div>
+						</div>
+
+						<!-- Step 2: Passive Fingerprinting -->
+						<div class="fk-tour-panel" data-step-panel="1" hidden>
+							<div class="fk-tour-grid">
+								<div class="fk-tour-explain">
+									<div class="fk-kicker mono">STEP 02 &middot; PASSIVE IN-MEMORY LEARNER</div>
+									<h3>Fingerprint ID shapes from rows you already loaded</h3>
+									<p>
+										As you browse <code>users</code> or <code>tickets</code>, DataDip inspects the already-fetched
+										page in memory (0 extra queries) and persists compact column signatures in <code>state.db</code>.
+									</p>
+									<ul class="check-list">
+										<li><strong>Delimiterless typed IDs (<code>u*</code>)</strong>: splits fixed alpha prefix where the next character has high Shannon entropy (<code>H &ge; 2.2 bits</code>)</li>
+										<li><strong>ULID / UUIDv7 trap defeated</strong>: universal UUID/ULID detectors run first so shared timestamp prefixes (<code>01J&hellip;</code>) never create false prefixes</li>
+										<li><strong>Plain integers excluded</strong>: sequential ints, dates, emails, and enums are never guessed</li>
+									</ul>
+								</div>
+								<div class="fk-sim-card">
+									<div class="fk-sim-head mono">
+										<span>In-memory column fingerprints</span>
+										<span class="fk-pill ok">0 extra queries</span>
+									</div>
+									<div class="fk-sig-list mono">
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">users.id</span>
+											<span class="fk-sig-sample"><mark>u</mark>nk5kzc30k</span>
+											<span class="fk-pill accent">typed-nodelim &middot; u* &middot; H=4.6b</span>
+										</div>
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">tickets.id</span>
+											<span class="fk-sig-sample"><mark>tck_</mark>kzx72dgg</span>
+											<span class="fk-pill accent">typed-delim &middot; tck_*</span>
+										</div>
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">messages.id</span>
+											<span class="fk-sig-sample">0b385a9a-b017-4906&hellip;</span>
+											<span class="fk-pill accent">uuid (122-bit)</span>
+										</div>
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">organizations.id</span>
+											<span class="fk-sig-sample"><mark>o</mark>vbh1678a1</span>
+											<span class="fk-pill accent">typed-nodelim &middot; o* &middot; H=4.4b</span>
+										</div>
+										<div class="fk-sig-row muted">
+											<span class="fk-sig-col">audit_log.seq_no</span>
+											<span class="fk-sig-sample">1, 2, 3, 4&hellip;</span>
+											<span class="fk-pill muted">skipped &middot; plain int</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Step 3: ~1ms PK-Index Proof -->
+						<div class="fk-tour-panel" data-step-panel="2" hidden>
+							<div class="fk-tour-grid">
+								<div class="fk-tour-explain">
+									<div class="fk-kicker mono">STEP 03 &middot; O(k log N) B-TREE VERIFICATION</div>
+									<h3>Format is a hypothesis. A ~1 ms PK lookup proves it.</h3>
+									<p>
+										When you open <code>messages</code>, DataDip spots <code>sender</code> matching <code>u*</code>,
+										<code>ticket</code> matching <code>tck_*</code>, and <code>reply_to</code> holding UUIDs. After
+										the page renders, it fires <strong>one</strong> batched PK-index lookup using &le;12 sampled
+										values — ~1 ms even on 100M-row tables.
+									</p>
+									<ul class="check-list">
+										<li>Single <code>READ ONLY</code> batched probe with strict 1.5 s timeout on PostgreSQL</li>
+										<li>Requires &ge;75% inclusion (tolerates soft-deleted orphans) and a unique winning target</li>
+										<li>Streams <code>schema-changed</code> over SSE so clickable FK pills light up live with provenance</li>
+									</ul>
+								</div>
+								<div class="fk-sim-card">
+									<div class="fk-sim-head mono">
+										<span>Background PK probe &rarr; SSE push</span>
+										<span class="fk-pill ok">0.9 ms &middot; 12/12 hit</span>
+									</div>
+									<pre class="fk-code fk-code-sm"><code><span class="tok-kw">SELECT</span> id <span class="tok-kw">FROM</span> users <span class="tok-kw">WHERE</span> id <span class="tok-kw">IN</span> (<span class="tok-st">'unk5kzc30k'</span>, <span class="tok-st">'uk5ha6q5xx'</span>, &hellip;);</code></pre>
+									<div class="fk-learned-rows">
+										<div class="fk-learned-row">
+											<div class="fk-learned-main mono">
+												<span>messages.<strong>sender</strong></span>
+												<span class="fk-arrow">&rarr;</span>
+												<span class="fk-target-pill">users.id</span>
+												<span class="fk-badge-learned">LEARNED</span>
+											</div>
+											<div class="fk-learned-reason">Learned from u* IDs (12/12 matched users.id)</div>
+										</div>
+										<div class="fk-learned-row">
+											<div class="fk-learned-main mono">
+												<span>messages.<strong>ticket</strong></span>
+												<span class="fk-arrow">&rarr;</span>
+												<span class="fk-target-pill">tickets.id</span>
+												<span class="fk-badge-learned">LEARNED</span>
+											</div>
+											<div class="fk-learned-reason">Learned from tck_* IDs (12/12 matched tickets.id)</div>
+										</div>
+										<div class="fk-learned-row">
+											<div class="fk-learned-main mono">
+												<span>messages.<strong>reply_to</strong></span>
+												<span class="fk-arrow">&rarr;</span>
+												<span class="fk-target-pill">messages.id</span>
+												<span class="fk-badge-learned">LEARNED</span>
+											</div>
+											<div class="fk-learned-reason">Learned from UUIDs (12/12 matched messages.id)</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Step 4: Navigation & Guardrails -->
+						<div class="fk-tour-panel" data-step-panel="3" hidden>
+							<div class="fk-tour-grid">
+								<div class="fk-tour-explain">
+									<div class="fk-kicker mono">STEP 04 &middot; FULL NAVIGATION + FALSE-POSITIVE GUARDS</div>
+									<h3>Hover peeks, reverse FKs, ER graph &mdash; with zero guesswork</h3>
+									<p>
+										Learned links behave like first-class foreign keys everywhere: hover to peek target rows, click
+										to jump, press <kbd>Space</kbd> for incoming <strong>Referenced by</strong> counts, inspect the
+										recovered ER Diagram, or Save/Dismiss any link in one click.
+									</p>
+									<ul class="check-list">
+										<li><strong>Polymorphic suppression</strong>: <code>audit_log.entity_ref</code> mixes <code>u*</code>, <code>tck_*</code>, and <code>o*</code> &rarr; detected and never linked to a single table</li>
+										<li><strong>1:1 PK-reversal guard</strong>: never points parent <code>users.id</code> backward at a child extension table</li>
+										<li><strong>Cross-page drift demotion</strong>: if later pages contradict a learned FK, it demotes automatically</li>
+									</ul>
+								</div>
+								<div class="fk-sim-card">
+									<div class="fk-sim-head mono">
+										<span>Guardrail audit on acme-support.db</span>
+										<span class="fk-pill ok">10 learned &middot; 0 FP</span>
+									</div>
+									<div class="fk-sig-list mono">
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">tickets.reporter</span>
+											<span class="fk-sig-sample">u* &rarr; users.id</span>
+											<span class="fk-pill ok">Verified (12/12)</span>
+										</div>
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">tickets.parent</span>
+											<span class="fk-sig-sample">tck_* &rarr; tickets.id</span>
+											<span class="fk-pill ok">Self-ref (12/12)</span>
+										</div>
+										<div class="fk-sig-row">
+											<span class="fk-sig-col">audit_log.actor</span>
+											<span class="fk-sig-sample">u* &rarr; users.id</span>
+											<span class="fk-pill ok">Verified (12/12)</span>
+										</div>
+										<div class="fk-sig-row muted">
+											<span class="fk-sig-col">audit_log.entity_ref</span>
+											<span class="fk-sig-sample">u* + tck_* + o*</span>
+											<span class="fk-pill warn">Polymorphic &middot; blocked</span>
+										</div>
+										<div class="fk-sig-row muted">
+											<span class="fk-sig-col">audit_log.seq_no</span>
+											<span class="fk-sig-sample">1..16 (int)</span>
+											<span class="fk-pill muted">Integer decoy &middot; skipped</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Benchmark Proof Bar -->
+					<div class="fk-bench-grid" aria-label="SchemaPile-Perm benchmark results">
+						<div class="fk-bench-stat">
+							<div class="fk-bench-val mono">22,989</div>
+							<div class="fk-bench-label">Real-world DDLs tested</div>
+							<div class="fk-bench-sub">SchemaPile-Perm corpus (99,520 declared FKs)</div>
+						</div>
+						<div class="fk-bench-stat">
+							<div class="fk-bench-val mono">100.0%</div>
+							<div class="fk-bench-label">Data-learned precision</div>
+							<div class="fk-bench-sub">0 false positives across 300 populated DB runs</div>
+						</div>
+						<div class="fk-bench-stat">
+							<div class="fk-bench-val mono">97.8&ndash;100%</div>
+							<div class="fk-bench-label">Undeclared FK recall</div>
+							<div class="fk-bench-sub"><code>u*</code>, <code>usr_*</code>, UUIDv4, ULID, &amp; orphan traps</div>
+						</div>
+						<div class="fk-bench-stat">
+							<div class="fk-bench-val mono">~1.0 ms</div>
+							<div class="fk-bench-label">Avg learn time / table</div>
+							<div class="fk-bench-sub">0 ms upfront scan on connect (~1 probe/table)</div>
+						</div>
+					</div>
+
+					<!-- Real Captured Screenshots -->
+					<div class="fk-gallery">
+						<figure class="fk-shot-card">
+							<img
+								src="./assets/shot-fk-learning-dark.png"
+								alt="DataDip messages table with passively learned ticket, sender, and reply_to FK pills and live hover peek"
+								loading="lazy"
+								class="zoomable"
+							/>
+							<figcaption>
+								<strong>Live learned pills &amp; hover peek</strong>
+								<span><code>ticket</code>, <code>sender</code>, and UUID <code>reply_to</code> link automatically &mdash; hover any cell to inspect the target row.</span>
+							</figcaption>
+						</figure>
+						<figure class="fk-shot-card">
+							<img
+								src="./assets/shot-fk-modal-dark.png"
+								alt="DataDip Foreign Key Link modal showing LEARNED badge, exact match count provenance, and Save/Dismiss actions"
+								loading="lazy"
+								class="zoomable"
+							/>
+							<figcaption>
+								<strong>Transparent provenance &amp; control</strong>
+								<span>Every learned link shows its exact evidence (<code>12/12 matched users.id</code>) with one-click <strong>Save</strong> or permanent <strong>Dismiss</strong>.</span>
+							</figcaption>
+						</figure>
+						<figure class="fk-shot-card">
+							<img
+								src="./assets/shot-fk-er-dark.png"
+								alt="DataDip ER Diagram showing 10 relationships recovered passively from a database with zero declared foreign keys"
+								loading="lazy"
+								class="zoomable"
+							/>
+							<figcaption>
+								<strong>Zero-FK ER Diagram recovered</strong>
+								<span>All 10 relationships materialize in the SVG graph while polymorphic <code>entity_ref</code> and integer <code>seq_no</code> stay unlinked.</span>
+							</figcaption>
+						</figure>
 					</div>
 				</div>
 			</section>
@@ -713,6 +1067,14 @@
 									<td>Color tag</td>
 									<td>Color tag</td>
 									<td>Color tag</td>
+								</tr>
+								<tr>
+									<th>Passive FK Learning (Zero Declared FKs)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> ID signatures + ~1 ms PK proof</td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
 								</tr>
 								<tr>
 									<th>Browser-Style FK Jump + Back/Forward</th>
