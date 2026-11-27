@@ -3,18 +3,18 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>DataDip v0.4.0 — Browse &amp; edit SQLite &amp; PostgreSQL like the web</title>
+		<title>DataDip v0.5.0 — Browse, edit, &amp; analyze SQLite &amp; PostgreSQL like the web</title>
 		<meta
 			name="description"
-			content="DataDip v0.4.0: fast, keyboard-first SQLite (local, SSH Bun/Python/sqlite3, Turso, Cloudflare D1) and PostgreSQL browser, staged inline editor, passive FK learner, ER diagram, and SQL console. Read-only by default. Self-updating native macOS app, no Electron, MIT open source."
+			content="DataDip v0.5.0: fast, keyboard-first SQLite (local, SSH Bun/Python/sqlite3, Turso, Cloudflare D1) and PostgreSQL browser, built-in Product Analytics (Trends, Funnels, Retention, People), Smart Value Lenses, staged inline editor, passive FK learner, ER diagram, and SQL console with Charts. Read-only by default, native macOS app, no Electron, MIT open source."
 		/>
-		<meta property="og:title" content="DataDip v0.4.0 — Browse &amp; edit SQLite &amp; PostgreSQL like the web" />
+		<meta property="og:title" content="DataDip v0.5.0 — Browse, edit, &amp; analyze SQLite &amp; PostgreSQL like the web" />
 		<meta
 			property="og:description"
-			content="New in v0.4.0: Multi-Runtime SSH SQLite (Bun / Python 3 / sqlite3 CLI), Serverless SQLite (Turso / libSQL &amp; Cloudflare D1), and Passive ID-Signature FK Learning. Signed macOS app, MIT open source."
+			content="New in v0.5.0: Product Analytics workspace (Trends, Funnels, Cohort Retention, People), Smart Value Lenses for epochs &amp; time-bearing IDs, SQL Console Charts with SVG export, and WebSocket live push. Signed macOS app, MIT open source."
 		/>
 		<meta property="og:type" content="website" />
-		<meta property="og:image" content="./assets/shot-er-diagram-dark.png" />
+		<meta property="og:image" content="./assets/shot-analytics-trends-dark.png" />
 		<link rel="icon" type="image/png" sizes="32x32" href="./assets/icon-32.png" />
 		<link rel="apple-touch-icon" href="./assets/icon-192.png" />
 		<link rel="stylesheet" href="./styles.css" />
@@ -41,12 +41,12 @@
 						<img src="./assets/icon-192.png" alt="" width="24" height="24" class="brand-icon" />
 						<span class="brand-name">DataDip</span>
 					</a>
-					<a class="version-pill" href="#changelog" title="View v0.4.0 changelog">v0.4.0</a>
+					<a class="version-pill" href="#changelog" title="View v0.5.0 changelog">v0.5.0</a>
 				</div>
 
 				<nav class="nav-links" aria-label="Primary">
+					<a href="#analytics">Analytics</a>
 					<a href="#fk-learning">FK Learning</a>
-					<a href="#whats-new">What&apos;s New</a>
 					<a href="#features">Features</a>
 					<a href="#compare">Compare</a>
 					<a href="#security">Security</a>
@@ -66,7 +66,7 @@
 						<span class="theme-icon-sun" aria-hidden="true">&#9788;</span>
 						<span class="theme-icon-moon" aria-hidden="true">&#9790;</span>
 					</button>
-					<a class="btn primary sm" href="./downloads/DataDip-0.4.0-arm64.dmg" download>Download DMG</a>
+					<a class="btn primary sm" href="./downloads/DataDip-0.5.0-arm64.dmg" download>Download DMG</a>
 				</div>
 			</div>
 		</header>
@@ -77,30 +77,31 @@
 				<div class="container">
 					<div class="hero-copy">
 						<a class="release-banner" href="#changelog">
-							<span class="release-pill mono">v0.4.0</span>
+							<span class="release-pill mono">v0.5.0</span>
 							<span class="release-text">
-								Multi-Runtime SSH SQLite (Bun / Python / sqlite3), Turso &amp; Cloudflare D1, &amp; Passive FK Learning
+								Product Analytics (Trends, Funnels, Retention, People), Smart Value Lenses, SQL Charts, &amp; WebSocket Live Push
 							</span>
 							<span class="release-arrow" aria-hidden="true">&rarr;</span>
 						</a>
 
-						<h1>Browse &amp; edit databases<br />like the web.</h1>
+						<h1>Browse, edit, &amp; analyze<br />databases like the web.</h1>
 						<p class="lead">
-							A fast, keyboard-first <strong>SQLite &amp; PostgreSQL</strong> browser, staged inline table editor,
-							foreign-key navigator, visual ER diagram, and parallel SQL console for local files, SSH servers, Turso,
-							and Cloudflare D1. Read-only by default, with exact SQL preview before every commit.
+							A fast, keyboard-first <strong>SQLite &amp; PostgreSQL</strong> browser, built-in
+							<strong>Product Analytics</strong> workspace, Smart Value Lenses, staged inline table editor, passive
+							foreign-key learner, visual ER diagram, and parallel SQL console with Charts &mdash; for local files, SSH
+							servers, Turso, and Cloudflare D1. Read-only by default.
 						</p>
 
 						<div class="hero-ctas">
-							<a class="btn primary lg" href="./downloads/DataDip-0.4.0-arm64.dmg" download>
+							<a class="btn primary lg" href="./downloads/DataDip-0.5.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download v0.4.0 for macOS (Apple Silicon)
+								Download v0.5.0 for macOS (Apple Silicon)
 							</a>
 							<a class="btn secondary lg" href="#install">Build from Source / Linux</a>
 						</div>
 
 						<div class="trust-row">
-							<span>Apple Signed &amp; Notarized DMG (42 MB)</span>
+							<span>Apple Signed &amp; Notarized DMG (43 MB)</span>
 							<span class="sep">&middot;</span>
 							<span>Native WKWebView (No Electron)</span>
 							<span class="sep">&middot;</span>
@@ -122,11 +123,11 @@
 									<span class="tl green"></span>
 								</div>
 								<div class="mac-title mono" id="stage-title">
-									NEW v0.4.0 · Passive FK Learning — Zero declared FKs, 0 upfront scans, ~1ms PK proof
+									NEW v0.5.0 · Product Analytics — Multi-series Trends, route normalization, admin/test exclusions, &amp; SVG export
 								</div>
 								<div class="mac-chrome-actions">
-									<button type="button" class="chip-btn" id="video-toggle" aria-label="Pause demo video">Pause</button>
-									<button type="button" class="chip-btn" id="zoom-btn" hidden>Zoom</button>
+									<button type="button" class="chip-btn" id="video-toggle" aria-label="Pause demo video" hidden>Pause</button>
+									<button type="button" class="chip-btn" id="zoom-btn">Zoom</button>
 								</div>
 							</div>
 
@@ -136,17 +137,16 @@
 									class="stage-media"
 									src="./assets/fk-learning-demo.mp4"
 									poster="./assets/shot-fk-learning-dark.png"
-									autoplay
 									loop
 									muted
 									playsinline
+									hidden
 								></video>
 								<img
 									id="hero-image"
 									class="stage-media"
-									src="./assets/shot-fk-learning-dark.png"
-									alt="DataDip screenshot"
-									hidden
+									src="./assets/shot-analytics-trends-dark.png"
+									alt="DataDip v0.5.0 Product Analytics Trends workspace with multi-series chart, KPI cards, normalized routes, and SVG export"
 								/>
 							</div>
 						</div>
@@ -157,10 +157,54 @@
 								class="stage-tab active"
 								role="tab"
 								aria-selected="true"
+								data-kind="image"
+								data-src="./assets/shot-analytics-trends-dark.png"
+								data-title="NEW v0.5.0 · Product Analytics — Multi-series Trends, route normalization, admin/test exclusions, &amp; SVG export"
+							>
+								<span class="new-dot"></span> Analytics Trends
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-analytics-funnel-dark.png"
+								data-title="NEW v0.5.0 · Conversion Funnels — Visitor-to-user identity stitching, usernames, median step times, &amp; drop-off inspect"
+							>
+								<span class="new-dot"></span> Funnels
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-analytics-retention-dark.png"
+								data-title="NEW v0.5.0 · Cohort Retention — Weighted average curve + daily/weekly cohort heatmap straight from SQL"
+							>
+								<span class="new-dot"></span> Retention
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
+								data-kind="image"
+								data-src="./assets/shot-lenses-dark.png"
+								data-title="NEW v0.5.0 · Smart Value Lenses — Auto-decode Unix epochs, Apple CoreData, UUIDv7, Crockford tid, &amp; Snowflakes"
+							>
+								<span class="new-dot"></span> Smart Lenses
+							</button>
+							<button
+								type="button"
+								class="stage-tab"
+								role="tab"
+								aria-selected="false"
 								data-kind="video"
 								data-src="./assets/fk-learning-demo.mp4"
 								data-poster="./assets/shot-fk-learning-dark.png"
-								data-title="NEW v0.4.0 · Passive FK Learning — Zero declared FKs, 0 upfront scans, ~1ms PK proof"
+								data-title="v0.4.0 · Passive FK Learning — Zero declared FKs, 0 upfront scans, ~1ms PK proof"
 							>
 								<span class="live-pip"></span> FK Learning Demo
 							</button>
@@ -183,9 +227,9 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-fk-learning-dark.png"
-								data-title="NEW v0.4.0 · Learned Foreign Keys &amp; Hover Peek — ticket, sender, &amp; reply_to discovered automatically"
+								data-title="v0.4.0 · Learned Foreign Keys &amp; Hover Peek — ticket, sender, &amp; reply_to discovered automatically"
 							>
-								<span class="new-dot"></span> Learned FKs
+								Learned FKs
 							</button>
 							<button
 								type="button"
@@ -194,20 +238,9 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-fk-er-dark.png"
-								data-title="NEW v0.4.0 · Zero-FK ER Diagram — 10 relationships recovered passively while polymorphic &amp; int columns stay unlinked"
+								data-title="v0.4.0 · Zero-FK ER Diagram — 10 relationships recovered passively while polymorphic &amp; int columns stay unlinked"
 							>
-								<span class="new-dot"></span> Zero-FK ER Graph
-							</button>
-							<button
-								type="button"
-								class="stage-tab"
-								role="tab"
-								aria-selected="false"
-								data-kind="image"
-								data-src="./assets/shot-fk-modal-dark.png"
-								data-title="NEW v0.4.0 · Learned FK Provenance — Exact match evidence (12/12 matched users.id) with Save or Dismiss"
-							>
-								<span class="new-dot"></span> Provenance
+								Zero-FK ER Graph
 							</button>
 							<button
 								type="button"
@@ -216,9 +249,9 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-er-diagram-dark.png"
-								data-title="NEW v0.2.0 · Interactive Schema / ER Diagram — Pure SVG, pan/zoom, draggable cards, click to browse"
+								data-title="Interactive Schema / ER Diagram — Pure SVG, pan/zoom, draggable cards, click to browse"
 							>
-								<span class="new-dot"></span> ER Diagram
+								ER Diagram
 							</button>
 							<button
 								type="button"
@@ -227,9 +260,9 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-profile-dark.png"
-								data-title="NEW v0.2.0 · One-Key Column Profiling (p) — Null %, distinct, min/max, clickable top-value filters"
+								data-title="One-Key Column Profiling (p) — Null %, distinct, min/max, clickable top-value filters"
 							>
-								<span class="new-dot"></span> Column Profile
+								Column Profile
 							</button>
 							<button
 								type="button"
@@ -238,42 +271,9 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-workspaces-dark.png"
-								data-title="NEW v0.2.0 · Client Workspaces — Grouped folders, color accents, #tags, and Locked RO badges"
+								data-title="Client Workspaces — Grouped folders, color accents, #tags, and Locked RO badges"
 							>
-								<span class="new-dot"></span> Workspaces
-							</button>
-							<button
-								type="button"
-								class="stage-tab"
-								role="tab"
-								aria-selected="false"
-								data-kind="image"
-								data-src="./assets/shot-db-info-light.png"
-								data-title="NEW v0.2.0 · Database Info &amp; PRAGMA/WAL Inspector — File/WAL sizes, user_version, Checkpoint &amp; VACUUM"
-							>
-								<span class="new-dot"></span> PRAGMA / WAL
-							</button>
-							<button
-								type="button"
-								class="stage-tab"
-								role="tab"
-								aria-selected="false"
-								data-kind="image"
-								data-src="./assets/shot-browser-dark.png"
-								data-title="Table Browser — Clickable foreign keys, keyset paging, live .db auto-refresh"
-							>
-								Table Browser
-							</button>
-							<button
-								type="button"
-								class="stage-tab"
-								role="tab"
-								aria-selected="false"
-								data-kind="image"
-								data-src="./assets/shot-inspector-light.png"
-								data-title="Row Inspector — Incoming 'Referenced by' reverse foreign-key counts &amp; fields"
-							>
-								Reverse FKs
+								Workspaces
 							</button>
 							<button
 								type="button"
@@ -282,7 +282,7 @@
 								aria-selected="false"
 								data-kind="image"
 								data-src="./assets/shot-console-dark.png"
-								data-title="SQL Console — Parallel worker execution, clickable FK pills, cross-DB searchable history"
+								data-title="SQL Console — Parallel worker execution, clickable FK pills, Result Charts, &amp; cross-DB history"
 							>
 								SQL Console
 							</button>
@@ -360,11 +360,136 @@
 				</div>
 			</section>
 
-			<!-- Interactive Passive FK Learning Tour -->
-			<section id="fk-learning" class="section">
+			<!-- NEW IN v0.5.0: Product Analytics & Smart Value Lenses -->
+			<section id="analytics" class="section">
 				<div class="container">
 					<div class="section-head">
-						<span class="badge accent" style="margin-bottom:10px">NEW IN v0.4.0 &middot; PASSIVE FK LEARNING</span>
+						<span class="badge accent" style="margin-bottom:10px">NEW IN v0.5.0 &middot; PRODUCT ANALYTICS &amp; SMART LENSES</span>
+						<h2>Amplitude-grade analytics straight<br />from your SQLite &amp; Postgres tables.</h2>
+						<p>
+							No ETL pipelines, no SaaS tracking SDK, no separate dashboard server. Point DataDip at any event, order,
+							or audit table to chart Trends, Conversion Funnels, Cohort Retention, and People timelines in real time —
+							with human-readable Smart Value Lenses across every grid.
+						</p>
+					</div>
+
+					<div class="release-grid">
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-analytics-trends-dark.png"
+									alt="DataDip v0.5.0 Product Analytics Trends with multi-series chart, KPI cards, route normalization, and SVG export"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge accent">TRENDS</span>
+									<h3>Auto-detected Trends, Routes, &amp; Drill-Down</h3>
+								</div>
+								<p>
+									Detects timestamp (<code>ms</code>, <code>s</code>, <code>&mu;s</code>, Apple CoreData
+									<code>cocoa_s</code>, ISO/<code>timestamptz</code>), event, actor, and status columns automatically.
+									Normalizes dynamic URLs (<code>/api/projects/:id</code>), excludes admins &amp; test accounts by
+									default, clicks any bucket straight to matching rows, and exports standalone <code>.svg</code>.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-analytics-funnel-dark.png"
+									alt="DataDip v0.5.0 Conversion Funnel with visitor-to-user identity stitching, usernames, and drop-off inspection"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge accent">FUNNELS</span>
+									<h3>Identity-Stitched Conversion Funnels</h3>
+								</div>
+								<p>
+									Stitches anonymous <code>visitor_id</code> sessions to signed-in <code>user_id</code> accounts,
+									resolves real usernames via linked user FKs, computes median step duration and conversion rates,
+									pushes SQL pre-filters even when URL normalization is on, and inspects any drop-off person in one click.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-analytics-retention-dark.png"
+									alt="DataDip v0.5.0 Cohort Retention matrix and weighted average retention curve"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge accent">RETENTION + PEOPLE</span>
+									<h3>Cohort Heatmaps &amp; Session Timelines</h3>
+								</div>
+								<p>
+									Daily (<code>D0&ndash;D14</code>) and weekly (<code>W0&ndash;W8</code>) retention heatmaps with a
+									weighted average curve, searchable <strong>People</strong> session timelines, <strong>Saved Charts</strong>,
+									and honest 120k-row truncation warnings whenever a large table window is capped.
+								</p>
+							</div>
+						</article>
+
+						<article class="release-card">
+							<figure class="release-media">
+								<img
+									src="./assets/shot-lenses-dark.png"
+									alt="DataDip v0.5.0 Smart Value Lenses decoding Unix epochs, UUIDv7, and Crockford tid with per-column lens popover"
+									loading="lazy"
+									class="zoomable"
+								/>
+							</figure>
+							<div class="release-card-body">
+								<div class="release-card-head">
+									<span class="badge ok">SMART LENSES</span>
+									<h3>Decode Epochs, CoreData, &amp; Time-Bearing IDs</h3>
+								</div>
+								<p>
+									Auto-detects Unix <code>s</code>/<code>ms</code>/<code>&mu;s</code>/<code>ns</code>, Apple CoreData
+									<code>cocoa_s</code>, Crockford <code>tid</code>, UUIDv7/v1, ULID, KSUID, ObjectId, and Twitter/Discord
+									Snowflakes in Table grids, SQL results, and Row Inspector — with persisted per-column
+									<code>UTC</code> / <code>Local</code> / <code>Relative</code> / <code>Raw</code> controls.
+								</p>
+							</div>
+						</article>
+					</div>
+
+					<div class="more-v02">
+						<div class="more-v02-title mono">ALSO SHIPPED IN v0.5.0</div>
+						<div class="more-v02-grid">
+							<div class="mini-feat">
+								<strong>SQL Console Result Charts &amp; Auto-Pivot</strong>
+								<span>Toggle any SQL result between <strong>Table</strong> and <strong>Chart</strong> — auto-pivots grouped long-format queries (including Analytics&apos; <strong>SQL</strong> export) into multi-series SVG charts.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>Shareable Analytics URLs &amp; UTC/Local Toggle</strong>
+								<span>Encodes range, interval, metric, breakdown, chart type, and selected actor in the URL for reloads and teammate links, with a persisted <strong>UTC / Local</strong> toggle.</span>
+							</div>
+							<div class="mini-feat">
+								<strong>WebSocket Live Push (<code>/api/ws</code>)</strong>
+								<span>Replaces per-tab persistent SSE streams to eliminate the HTTP/1.1 6-tab localhost browser deadlock, with active ping/pong watchdogs and instant offline alerts.</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- Interactive Passive FK Learning Tour -->
+			<section id="fk-learning" class="section alt-bg">
+				<div class="container">
+					<div class="section-head">
+						<span class="badge accent" style="margin-bottom:10px">PASSIVE FK LEARNING &middot; v0.4.0</span>
 						<h2>Zero declared foreign keys?<br />DataDip learns them as you browse.</h2>
 						<p>
 							Most real-world schemas omit <code>FOREIGN KEY</code> constraints and name columns <code>sender</code>,
@@ -1069,6 +1194,22 @@
 									<td>Color tag</td>
 								</tr>
 								<tr>
+									<th>Built-in Product Analytics (Trends, Funnels, Retention)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Zero-setup charts + SVG export</td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
+									<th>Smart Value Lenses (Epochs, CoreData, UUIDv7, Snowflakes)</th>
+									<td class="col-datadip"><span class="cmp yes">Yes</span> Auto-decode + per-column modes</td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+									<td><span class="cmp no">No</span></td>
+								</tr>
+								<tr>
 									<th>Passive FK Learning (Zero Declared FKs)</th>
 									<td class="col-datadip"><span class="cmp yes">Yes</span> ID signatures + ~1 ms PK proof</td>
 									<td><span class="cmp no">No</span></td>
@@ -1186,7 +1327,7 @@
 					<div class="section-head">
 						<h2>Changelog</h2>
 						<p>
-							Every release is also browsable right inside DataDip via the <code>v0.4.0</code> pill in the top bar or
+							Every release is also browsable right inside DataDip via the <code>v0.5.0</code> pill in the top bar or
 							<kbd>&#8984;K</kbd> &rarr; <em>Changelog</em>.
 						</p>
 					</div>
@@ -1212,12 +1353,85 @@
 					</div>
 
 					<div class="cl-timeline">
-						<!-- v0.4.0 -->
+						<!-- v0.5.0 -->
 						<article class="cl-release latest">
 							<div class="cl-release-head">
 								<div class="cl-ver-group">
-									<span class="cl-ver mono">v0.4.0</span>
+									<span class="cl-ver mono">v0.5.0</span>
 									<span class="badge ok">LATEST</span>
+									<span class="cl-date mono">2026-11-27</span>
+								</div>
+								<div class="cl-links">
+									<a href="./downloads/DataDip-0.5.0-arm64.dmg" download>Download DMG</a>
+									<span class="sep">&middot;</span>
+									<a href="https://github.com/anttikissa/datadip/releases/tag/v0.5.0" target="_blank" rel="noreferrer">
+										GitHub Release &nearr;
+									</a>
+								</div>
+							</div>
+							<h3 class="cl-headline">Product Analytics Workspace, Smart Value Lenses, SQL Charts, &amp; WebSocket Live Push</h3>
+							<p class="cl-summary">
+								Explore event trends, conversion funnels, cohort retention, and per-person timelines straight from SQLite
+								and PostgreSQL without a separate analytics stack, decode epochs and time-bearing IDs inline, plot
+								grouped SQL query results, and stream live updates over WebSocket.
+							</p>
+							<ul class="cl-list">
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Product Analytics workspace (<code>/c/:id/analytics</code>)</strong> — Zero-setup Trends
+										(Area, Line, Stacked Bar, Bar with top-N breakdown, URL route normalization, &amp; click-to-browse
+										drill-down), Conversion Funnels (visitor&rarr;user identity stitching, median step time, drop-off
+										inspection, &amp; SQL pre-filtering), Cohort Retention heatmaps, People session timelines, and Saved
+										Charts across SQLite &amp; PostgreSQL (including Apple CoreData <code>cocoa_s</code> &amp;
+										<code>epoch_us</code>).
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>FK-aware user directory, exclusions, shareable URLs, &amp; UTC/Local toggle</strong> — Resolves
+										real usernames from linked user tables, defaults to signed-in users while excluding admins/test accounts
+										(with per-connection Exclude People popover), encodes full chart/actor state in shareable URLs, adds a
+										persisted <strong>UTC / Local</strong> toggle, batches Trends SQL into one round-trip, and flags
+										120k-row Funnel/Retention caps explicitly.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="new">
+									<span class="cl-tag tag-new mono">NEW</span>
+									<div>
+										<strong>Smart Value Lenses across Table, SQL Console, &amp; Row Inspector</strong> — Auto-detects Unix
+										<code>s</code>/<code>ms</code>/<code>&mu;s</code>/<code>ns</code>, Apple/CoreData <code>cocoa_s</code>,
+										Crockford <code>tid</code>, UUIDv7/v1, ULID, KSUID, ObjectId, and Twitter/Discord Snowflakes (preserving
+										raw IDs by default) with per-column <code>UTC</code> / <code>Local</code> / <code>Relative</code> /
+										<code>Inline</code> / <code>Raw</code> controls persisted per table.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="sql">
+									<span class="cl-tag tag-sql mono">SQL</span>
+									<div>
+										<strong>SQL Console Result Charts with auto-pivot &amp; Export SVG</strong> — Toggle any query result
+										between <strong>Table</strong> and <strong>Chart</strong>, auto-pivoting long-format grouped SQL queries
+										into multi-series charts with a manual Series selector and one-click standalone <strong>Export
+										SVG</strong>.
+									</div>
+								</li>
+								<li class="cl-item" data-tag="fix">
+									<span class="cl-tag tag-fix mono">FIX</span>
+									<div>
+										<strong>WebSocket live push (<code>/api/ws</code>) &amp; fail-fast watchdogs</strong> — Replaces per-tab
+										persistent HTTP/1.1 SSE streams (preventing the 6-tab localhost browser deadlock) with a single
+										WebSocket per tab, active ping/pong heartbeats, and immediate offline/unresponsive banners.
+									</div>
+								</li>
+							</ul>
+						</article>
+
+						<!-- v0.4.0 -->
+						<article class="cl-release">
+							<div class="cl-release-head">
+								<div class="cl-ver-group">
+									<span class="cl-ver mono">v0.4.0</span>
 									<span class="cl-date mono">2026-11-27</span>
 								</div>
 								<div class="cl-links">
@@ -1621,7 +1835,7 @@
 			<section id="install" class="section">
 				<div class="container">
 					<div class="section-head">
-						<h2>Get DataDip v0.4.0</h2>
+						<h2>Get DataDip v0.5.0</h2>
 						<p>Self-contained macOS app with zero dependencies, or run from source on macOS and Linux.</p>
 					</div>
 
@@ -1637,9 +1851,9 @@
 								with Developer ID and notarized by Apple.
 							</p>
 
-							<a class="btn primary lg full" href="./downloads/DataDip-0.4.0-arm64.dmg" download>
+							<a class="btn primary lg full" href="./downloads/DataDip-0.5.0-arm64.dmg" download>
 								<span class="dl-arrow" aria-hidden="true">&#8595;</span>
-								Download DataDip-0.4.0-arm64.dmg (42 MB)
+								Download DataDip-0.5.0-arm64.dmg (43 MB)
 							</a>
 
 							<div class="checksum-box">
@@ -1649,12 +1863,12 @@
 										type="button"
 										class="copy-btn"
 										id="dmg-sha-btn"
-										data-copy="7c14e703b5d3ce6bc0ede4d2aeea22791ed6ba82e0e4411defd03aad815da8b1"
+										data-copy="ee0dae341fb6081aa1ff3347fb34a250ea04dc6797ff4b0f3d86469b80d7f079"
 									>
 										Copy
 									</button>
 								</div>
-								<code class="mono checksum-val" id="dmg-sha-val">7c14e703b5d3ce6bc0ede4d2aeea22791ed6ba82e0e4411defd03aad815da8b1</code>
+								<code class="mono checksum-val" id="dmg-sha-val">ee0dae341fb6081aa1ff3347fb34a250ea04dc6797ff4b0f3d86469b80d7f079</code>
 							</div>
 
 							<p class="install-foot">
@@ -1718,7 +1932,7 @@ datadip stop         # stop background server</code></pre>
 					<img src="./assets/icon-32.png" alt="" width="18" height="18" />
 					<strong>DataDip</strong>
 					<span class="sep">&middot;</span>
-					<span>v0.4.0</span>
+					<span>v0.5.0</span>
 					<span class="sep">&middot;</span>
 					<span>MIT License</span>
 					<span class="sep">&middot;</span>

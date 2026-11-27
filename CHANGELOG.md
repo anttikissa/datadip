@@ -2,6 +2,20 @@
 
 All notable changes to DataDip are documented here.
 
+## [0.5.0] - 2026-11-27
+
+**Product Analytics Workspace, Smart Value Lenses, SQL Charts, & WebSocket Live Push**
+
+### Added
+- **Product Analytics workspace (`/c/:id/analytics`)**: zero-setup Amplitude/PostHog-style **Trends** (Area, Line, Stacked Bar, Bar with top-N breakdown, URL route normalization, and click-to-browse bucket drill-down), **Conversion Funnels** (sequential matching, identity stitching, median step time, drop-off inspection, and SQL pre-filtering), **Cohort Retention** (daily/weekly heatmap + weighted average curve), **People** (searchable actor list + session-grouped event timelines), and **Saved Charts** across SQLite and PostgreSQL.
+- **FK-aware user directory, exclusions, shareable URLs, & timezone toggle**: resolves human labels from linked user tables, defaults to signed-in users while excluding admins/test accounts (with per-connection Exclude People popover), encodes range/interval/metric/breakdown/chart/actor in shareable URLs, adds a persisted **UTC / Local** timezone toggle, supports Apple CoreData (`cocoa_s`) and microsecond (`epoch_us`) timestamps, batches Trends SQL into one round-trip, and displays explicit truncation warnings when Funnel/Retention scans hit the 120k-row cap.
+- **Smart Value Lenses (`src/shared/lenses.ts`)**: automatically detects and decodes Unix `s`/`ms`/`µs`/`ns`, Apple/CoreData `cocoa_s`, Crockford `tid`, UUIDv7/v1, ULID, KSUID, ObjectId, and Twitter/Discord Snowflakes across Table grids, SQL Console results, and Row Inspector — with per-column mode switchers (`Local`, `UTC`, `Relative`, `Inline`, `Raw`) persisted per table.
+- **SQL Console Result Charts & SVG export**: toggle any SQL query result between **Table** and **Chart** (`QueryResultChart`), auto-pivoting long-format grouped SQL queries into multi-series charts, plus one-click standalone **Export SVG** on charts.
+
+### Fixed
+- **WebSocket live push (`/api/ws`) & fail-fast server watchdogs**: replaced per-tab persistent HTTP/1.1 SSE streams (preventing the 6-tab localhost browser connection deadlock) with WebSocket `/api/ws`, active ping/pong heartbeats, fast API timeouts, and immediate offline/unresponsive banners.
+- **PostgreSQL & large-table analytics safety**: regex/GLOB-guarded numeric casts on status columns, `< (endMs + 1ms)` sub-millisecond `timestamptz` upper bounds, exact SQL `CASE` distinct-actor counting across collapsed routes and `Other`, and bounded index-friendly detection on large tables.
+
 ## [0.4.0] - 2026-11-27
 
 **Multi-Runtime SSH SQLite, Serverless SQLite (Turso & D1), & Passive FK Learning**

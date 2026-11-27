@@ -36,7 +36,15 @@ function niceMax(maxVal: number): number {
 	const mag = 10 ** Math.floor(Math.log10(rawStep))
 	const norm = rawStep / mag
 	const niceStep =
-		norm <= 1 ? 1 * mag : norm <= 2 ? 2 * mag : norm <= 2.5 && rawStep < 1 ? 2.5 * mag : norm <= 5 ? 5 * mag : 10 * mag
+		norm <= 1
+			? 1 * mag
+			: norm <= 2
+				? 2 * mag
+				: norm <= 2.5 && (rawStep < 1 || mag >= 10)
+					? 2.5 * mag
+					: norm <= 5
+						? 5 * mag
+						: 10 * mag
 	return niceStep * 4
 }
 

@@ -1,13 +1,21 @@
 # DataDip
 
-A fast, keyboard-first **SQLite & PostgreSQL** browser, foreign-key navigator, and SQL console for local databases and remote servers over SSH.
+A fast, keyboard-first **SQLite & PostgreSQL** browser, built-in **Product Analytics** workspace, Smart Value Lenses, foreign-key navigator, and SQL console for local databases, SSH servers, Turso, and Cloudflare D1.
 
-Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[` / `Cmd+]`, trackpad swipe) to return without losing your filters, and paste any ID into `Cmd+K` to find matching rows across tables. Read-only by default. No Electron.
+Click foreign keys (declared, passively learned, or virtual) to jump between related rows, chart Trends / Funnels / Cohort Retention / People straight from your database tables, decode timestamps and time-bearing IDs inline, and paste any ID into `Cmd+K` to find matching rows across tables. Read-only by default. No Electron.
 
 ![DataDip walkthrough: foreign-key navigation, Row Inspector, Cmd+K ID search, SQL Console, and Production Safety](site/assets/datadip-demo.gif)
 
 <details>
-<summary>More screenshots (ER Diagram, Column Profiling, Workspaces, Row Inspector, SQL Console, Production Safety, Omnibar)</summary>
+<summary>More screenshots (Product Analytics, Smart Value Lenses, Passive FK Learning, ER Diagram, Column Profiling, Workspaces, SQL Console, Production Safety)</summary>
+
+| Product Analytics Trends & Route Normalization | Identity-Stitched Conversion Funnels |
+|---|---|
+| ![Product Analytics Trends with KPIs, normalized routes, and SVG export](site/assets/shot-analytics-trends-dark.png) | ![Conversion Funnels with identity stitching and drop-off inspection](site/assets/shot-analytics-funnel-dark.png) |
+
+| Cohort Retention Heatmap & Curve | Smart Value Lenses (Epochs, UUIDv7, tid, CoreData) |
+|---|---|
+| ![Cohort Retention heatmap and average curve](site/assets/shot-analytics-retention-dark.png) | ![Smart Value Lenses decoding timestamps and IDs with per-column menu](site/assets/shot-lenses-dark.png) |
 
 | Interactive Schema / ER Diagram | One-Keystroke Column Profiling (`p`) |
 |---|---|
@@ -40,6 +48,8 @@ Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[
 
 ## Features
 
+- **Built-in Product Analytics (`/c/:id/analytics`)**: Zero-setup **Trends** (Area / Line / Stacked / Bar with URL route normalization, FK-aware user directory, default signed-in + admin/test exclusions, UTC/Local toggle, shareable URLs, click-to-browse bucket drill-down, and standalone **Export SVG**), **Conversion Funnels** (visitor-to-user identity stitching, median step times, drop-off inspection), **Cohort Retention** heatmaps, **People** session timelines, and **Saved Charts** across SQLite (including Apple CoreData `cocoa_s` & `epoch_us`) and PostgreSQL.
+- **Smart Value Lenses & SQL Result Charts**: Auto-detect and decode Unix `s`/`ms`/`µs`/`ns`, Apple/CoreData `cocoa_s`, Crockford `tid`, UUIDv7/v1, ULID, KSUID, ObjectId, and Twitter/Discord Snowflakes across Table grids, SQL Console results, and Row Inspector (persisted per table). Toggle any SQL Console result between **Table** and **Chart** with automatic multi-series pivoting and **Export SVG**.
 - **Navigate relationships like the web**: Click foreign-key cells (DB-declared, passively learned from ID signatures, or user-configured Virtual FKs) to jump across tables, hover any FK cell to preview the target row, press `Space` to inspect a row's formatted JSON, outgoing FKs, and incoming ("Referenced by") counts, visualize the full schema in the interactive **ER Diagram**, and hit Back/Forward to return to your exact filtered view.
 - **Staged inline editing & production guardrails**: Every connection starts Read-Only (enforced at the SQLite handle / PostgreSQL `READ ONLY` transaction / Turso `PRAGMA query_only` layer and in server validation), and connections can be locked **permanently Read-Only** (`alwaysReadOnly`). Production connections show a persistent crimson bar, require typing the exact database name to arm writes, and auto-relock after 10 minutes idle or when switching databases. Inline cell edits, row duplicates, inserts, deletes, and CSV/JSON imports stage in amber with an exact SQL preview and commit atomically in a single transaction.
 - **Parallel, cancellable SQL Console (`Cmd+E` / `Cmd+Shift+L`)**: Tabbed and side-by-side split consoles with live schema autocomplete, SQL linting, formatting (`Cmd+Shift+F`), active-statement execution (`Cmd+Enter`), `EXPLAIN`, clickable foreign keys inside query results, searchable cross-connection query history, and real cancellation (`Cmd+.` / Stop) on worker threads / Python `conn.interrupt()` / PostgreSQL `CancelRequest`.
@@ -49,7 +59,7 @@ Click foreign keys to jump between related rows, use normal Back/Forward (`Cmd+[
 
 ## Download (macOS Apple Silicon)
 
-Download the signed and Apple-notarized **`DataDip-0.4.0-arm64.dmg`** from [GitHub Releases](https://github.com/anttikissa/datadip/releases/latest) (macOS 13.3+, self-contained, no Bun or Xcode required).
+Download the signed and Apple-notarized **`DataDip-0.5.0-arm64.dmg`** from [GitHub Releases](https://github.com/anttikissa/datadip/releases/latest) (macOS 13.3+, self-contained, no Bun or Xcode required).
 
 1. Open the `.dmg` and drag **DataDip.app** into `/Applications`.
 2. Double-click `.db` / `.sqlite` files in Finder, drop them on the Dock icon, or press `Cmd+O`.
@@ -57,8 +67,8 @@ Download the signed and Apple-notarized **`DataDip-0.4.0-arm64.dmg`** from [GitH
 4. Future updates install in-place via **DataDip -> Check for Updates...** (verified against Apple Developer ID).
 
 ```text
-SHA-256 (DataDip-0.4.0-arm64.dmg):
-7c14e703b5d3ce6bc0ede4d2aeea22791ed6ba82e0e4411defd03aad815da8b1
+SHA-256 (DataDip-0.5.0-arm64.dmg):
+ee0dae341fb6081aa1ff3347fb34a250ea04dc6797ff4b0f3d86469b80d7f079
 ```
 
 ## Install & Run (from source)

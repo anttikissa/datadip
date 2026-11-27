@@ -1,6 +1,6 @@
 // Structured release changelog shared by the in-app What's New modal and version badge.
 
-export const APP_VERSION = '0.4.0'
+export const APP_VERSION = '0.5.0'
 
 export type ChangelogTag = 'new' | 'fix' | 'safety' | 'sql' | 'sqlite' | 'macos'
 
@@ -20,6 +20,45 @@ export interface ChangelogRelease {
 }
 
 export const CHANGELOG: ChangelogRelease[] = [
+	{
+		version: '0.5.0',
+		date: '2026-11-27',
+		headline: 'Product Analytics Workspace, Smart Value Lenses, SQL Charts, & WebSocket Live Push',
+		summary:
+			'Explore event trends, conversion funnels, cohort retention, and per-person timelines straight from SQLite and PostgreSQL without a separate analytics stack, decode timestamps and time-bearing IDs inline, chart grouped SQL results, and stream live updates over WebSocket.',
+		items: [
+			{
+				tag: 'new',
+				title: 'Product Analytics workspace (Trends, Funnels, Retention, People, & Saved Charts)',
+				detail:
+					'Auto-detects timestamp, event, actor, and status columns across SQLite and PostgreSQL (including Apple CoreData cocoa_s and microsecond epochs) for multi-series Trends with URL route normalization, Conversion Funnels with identity stitching & drop-off inspection, Cohort Retention heatmaps, People session timelines, click-to-browse bucket drill-down, and Saved Charts.',
+			},
+			{
+				tag: 'new',
+				title: 'FK-aware user directory, admin/test exclusions, shareable URLs, & UTC/Local toggle',
+				detail:
+					'Resolves usernames from linked user tables, filters out admins/test accounts and anonymous bots by default (with a per-connection Exclude People popover), syncs chart state to shareable URLs, toggles chart/timeline timestamps between UTC and Local, batches Trends SQL into one round-trip, and flags truncated Funnel/Retention scans honestly.',
+			},
+			{
+				tag: 'new',
+				title: 'Smart Value Lenses for epochs, CoreData dates, & time-bearing IDs',
+				detail:
+					'Detects and decodes Unix s/ms/µs/ns, Apple/CoreData cocoa_s, Crockford tid, UUIDv7/v1, ULID, KSUID, ObjectId, and Twitter/Discord Snowflakes across Table grids, SQL Console results, and Row Inspector — with per-column Local/UTC/Relative/Inline/Raw menus persisted per table and zero Snowflake/barcode false positives.',
+			},
+			{
+				tag: 'sql',
+				title: 'SQL Console Result Charts with auto-pivot & standalone SVG export',
+				detail:
+					'Toggle any SQL query result between Table and Chart, auto-pivoting long-format grouped queries (including Analytics SQL exports) into multi-series charts with a manual Series selector and one-click standalone Export SVG.',
+			},
+			{
+				tag: 'fix',
+				title: 'WebSocket live push (/api/ws) & fail-fast server watchdogs',
+				detail:
+					'Replaces per-tab persistent HTTP/1.1 SSE streams (eliminating the 6-tab localhost browser deadlock) with a single WebSocket per tab, active ping/pong liveness heartbeat, and immediate offline/unresponsive banners.',
+			},
+		],
+	},
 	{
 		version: '0.4.0',
 		date: '2026-11-27',
